@@ -10,6 +10,21 @@
 			<string>com.apple.springboard</string>
 			<string>com.apple.AppStore</string>
 			<string>com.apple.PassbookUIService</string>
+			<string>com.apple.PassbookSecureUIService</string>
+			<string>com.apple.AuthKitUIService</string>
+			<string>com.apple.ios.StoreKitUIService</string>
+			<string>com.apple.AppleIDSetupUIService</string>
+		</array>
+		<key>Executables</key>
+		<array>
+			<string>AppStore</string>
+			<string>PassbookUIService</string>
+			<string>PassbookSecureUIService</string>
+			<string>SpringBoard</string>
+			<string>TestFlight</string>
+			<string>AuthKitUIService</string>
+			<string>StoreKitUIService</string>
+			<string>AppleIDSetupUIService</string>
 		</array>
 	</dict>
 </dict>
