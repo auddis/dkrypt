@@ -78,31 +78,31 @@
     {:else if artifacts.length === 0 && !loading}
       <EmptyState message="No artifacts match this search." />
     {:else}
-      <div class="divide-border max-h-[34rem] divide-y overflow-y-auto pr-4">
+      <div class="divide-border max-h-[34rem] divide-y overflow-y-auto pr-2">
         {#each artifacts as artifact (artifact.id)}
-          <div class="grid gap-4 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(14rem,1fr)_auto] sm:items-center xl:grid-cols-[minmax(15rem,1.2fr)_minmax(22rem,2fr)_auto]">
+          <div class="grid gap-3 py-3 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start 2xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1.75fr)_auto] 2xl:items-center">
             <div class="flex min-w-0 items-start gap-3">
               <AppIcon bundleId={artifact.bundleId} src={appIconUrl(artifact.bundleId)} label={appDisplayName(artifact.bundleId)} class="h-10 w-10" />
               <div class="min-w-0 flex-1">
-                <div class="break-words text-[13px] font-semibold" title={appDisplayName(artifact.bundleId)}>{appDisplayName(artifact.bundleId)}</div>
+                <div class="break-words whitespace-normal text-[13px] font-semibold" title={appDisplayName(artifact.bundleId)}>{appDisplayName(artifact.bundleId)}</div>
                 <div class="text-muted mt-0.5 break-all text-xs" title={artifact.bundleId}>{artifact.bundleId}</div>
               </div>
             </div>
-            <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:col-span-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] xl:col-span-1">
-              <div class="min-w-0 text-center">
+            <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:col-span-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] 2xl:col-span-1">
+              <div class="min-w-0 text-left">
                 <div class="text-muted text-[10px] font-semibold tracking-[0.08em] uppercase">Version</div>
                 <div class="mt-0.5 truncate text-[13px] font-semibold" title={artifact.buildNumber ? `${artifact.versionLabel ?? ''} (${artifact.buildNumber})` : artifact.versionLabel}>{artifactVersion(artifact)}</div>
               </div>
-              <div class="text-center">
+              <div class="text-left">
                 <div class="text-muted text-[10px] font-semibold tracking-[0.08em] uppercase">Source</div>
                 <div class="mt-0.5"><Badge variant={artifact.channel === 'testflight' ? 'secondary' : 'default'}>{artifact.channel === 'testflight' ? 'TestFlight' : 'App Store'}</Badge></div>
               </div>
-              <div class="text-center">
+              <div class="text-left">
                 <div class="text-muted text-[10px] font-semibold tracking-[0.08em] uppercase">Size</div>
                 <div class="mt-0.5 text-[13px]">{fmtSize(artifact.fileSizeBytes)}</div>
               </div>
             </div>
-            <a href={artifact.fileUrl} download class="{buttonVariants('secondary', 'sm')} sm:justify-self-end">
+            <a href={artifact.fileUrl} download class="{buttonVariants('secondary', 'sm')} sm:col-start-2 sm:row-start-1 sm:justify-self-end 2xl:col-start-3 2xl:row-start-1">
               <Download class="h-3.5 w-3.5" />Download
             </a>
           </div>

@@ -1,6 +1,11 @@
 export const GENERATED_CHANGELOG = [
   {
     "date": "2026-09-10",
+    "title": "fix(web): tighten IPA library columns",
+    "description": "Released in 48fbe14."
+  },
+  {
+    "date": "2026-09-10",
     "title": "fix(web): simplify IPA library metadata",
     "description": "Released in 29112b0."
   },
@@ -33,10 +38,5 @@ export const GENERATED_CHANGELOG = [
     "date": "2026-09-10",
     "title": "feat(autoinstall): support out-of-process auth sheets and headless password entry (#21)",
     "description": "Released in 13d97ac."
-  },
-  {
-    "date": "2026-09-01",
-    "title": "fix(appstore): separate bridge and operation ids",
-    "description": "Released in ac24666."
   }
 ] as const;
