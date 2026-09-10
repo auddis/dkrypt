@@ -1,6 +1,11 @@
 export const GENERATED_CHANGELOG = [
   {
     "date": "2026-09-10",
+    "title": "fix(web): simplify IPA library metadata",
+    "description": "Released in 29112b0."
+  },
+  {
+    "date": "2026-09-10",
     "title": "fix(jobs,web): preserve extension warnings and improve IPA library layout",
     "description": "Released in 176236d."
   },
@@ -33,10 +38,5 @@ export const GENERATED_CHANGELOG = [
     "date": "2026-09-01",
     "title": "fix(appstore): separate bridge and operation ids",
     "description": "Released in ac24666."
-  },
-  {
-    "date": "2026-09-01",
-    "title": "fix(appstore): allow responsive headless bridge",
-    "description": "Released in 4195c28."
   }
 ] as const;
