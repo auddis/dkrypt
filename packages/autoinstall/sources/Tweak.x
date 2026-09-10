@@ -3,6 +3,15 @@
 #import <CommonCrypto/CommonHMAC.h>
 #import <dlfcn.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
+#import <spawn.h>
+
+extern char **environ;
+
+static void runSpawnAsync(const char *path, char *const argv[]) {
+    pid_t pid = 0;
+    posix_spawn(&pid, path, NULL, NULL, argv, environ);
+}
 
 @protocol TFNetworkManagerProtocol <NSObject>
 + (instancetype)shared;
@@ -77,19 +86,32 @@
 @end
 
 static void autoinstallLog(NSString *line) {
-    NSString *path = @"/tmp/autoinstall.log";
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    formatter.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
-    NSString *entry = [NSString stringWithFormat:@"[%@] %@\n", [formatter stringFromDate:[NSDate date]], line];
+    NSString *proc = [[NSProcessInfo processInfo] processName] ?: @"unknown";
+    pid_t pid = [[NSProcessInfo processInfo] processIdentifier];
+    NSLog(@"[autoinstall][%@:%d] %@", proc, pid, line);
+    @try {
+        NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+        formatter.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
+        NSString *entry = [NSString stringWithFormat:@"[%@][%@:%d] %@\n", [formatter stringFromDate:[NSDate date]], proc, pid, line];
+        NSData *entryData = [entry dataUsingEncoding:NSUTF8StringEncoding];
 
-    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
-        [[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil];
-    }
-
-    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
-    [handle seekToEndOfFile];
-    [handle writeData:[entry dataUsingEncoding:NSUTF8StringEncoding]];
-    [handle closeFile];
+        NSArray *paths = @[
+            @"/tmp/autoinstall.log",
+            @"/private/var/mobile/Library/Caches/com.apple.PassbookUIService/autoinstall.log",
+            @"/private/var/mobile/Library/Caches/com.apple.AuthKitUIService/autoinstall.log"
+        ];
+        for (NSString *path in paths) {
+            @try {
+                if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+                    [[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil];
+                }
+                NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+                [handle seekToEndOfFile];
+                [handle writeData:entryData];
+                [handle closeFile];
+            } @catch (NSException *e) {}
+        }
+    } @catch (NSException *e) {}
 }
 
 static NSString * const kBridgeRootPath = @"/tmp/autoinstall/v1";
@@ -289,6 +311,9 @@ static void rejectLegacyBridgeRequest(NSDictionary *request, NSString *responseP
 
 @end
 
+static BOOL autoinstallHandlePasswordIfPresent(void);
+static NSArray *autoinstallConfirmMatching(NSString *match);
+
 static BOOL isSpringBoard(void) {
     return [[[NSBundle mainBundle] bundleIdentifier] isEqualToString:@"com.apple.springboard"];
 }
@@ -302,11 +327,14 @@ static NSString * const kSBResponsePath = @"/tmp/autoinstall-sb-response.json";
 typedef int (*SBSLaunchFn)(CFStringRef, unsigned char);
 
 static int sbsLaunchApplication(NSString *bundleId) {
+    char *const args[] = {(char *)"/var/jb/usr/bin/uiopen", (char *)"--bundleid", (char *)bundleId.UTF8String, NULL};
+    runSpawnAsync("/var/jb/usr/bin/uiopen", args);
     void *sbs = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_NOW);
-    if (!sbs) return -1;
-    SBSLaunchFn fn = (SBSLaunchFn)dlsym(sbs, "SBSLaunchApplicationWithIdentifier");
-    if (!fn) return -1;
-    return fn((__bridge CFStringRef)bundleId, 0);
+    if (sbs) {
+        SBSLaunchFn fn = (SBSLaunchFn)dlsym(sbs, "SBSLaunchApplicationWithIdentifier");
+        if (fn) fn((__bridge CFStringRef)bundleId, 0);
+    }
+    return 0;
 }
 
 static id getIvarObject(id instance, const char *ivarName) {
@@ -425,6 +453,24 @@ static NSDictionary *springBoardBridgeStatus(void) {
     return status;
 }
 
+static void unlockDeviceIfLocked(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            Class lsmCls = objc_getClass("SBLockScreenManager");
+            if (lsmCls && [lsmCls respondsToSelector:sel_registerName("sharedInstance")]) {
+                id lsm = ((id (*)(id, SEL))objc_msgSend)(lsmCls, sel_registerName("sharedInstance"));
+                SEL unlockSel = sel_registerName("unlockUIFromSource:withOptions:");
+                if (lsm && [lsm respondsToSelector:unlockSel]) {
+                    ((void (*)(id, SEL, int, id))objc_msgSend)(lsm, unlockSel, 0, nil);
+                    autoinstallLog(@"unlocked UI via SBLockScreenManager");
+                }
+            }
+        } @catch (NSException *e) {
+            autoinstallLog([NSString stringWithFormat:@"unlockDeviceIfLocked exception: %@", e]);
+        }
+    });
+}
+
 static void handleSpringBoardRequest(NSDictionary *req, NSString *responsePath, NSString *requestId) {
     NSString *action = req[@"action"];
     autoinstallLog([NSString stringWithFormat:@"sb-bridge: handling action=%@ req=%@", action, req]);
@@ -456,6 +502,7 @@ static void handleSpringBoardRequest(NSDictionary *req, NSString *responsePath, 
                 writeBridgeResponse(responsePath, requestId, @{@"ok": @NO, @"error": @"missing bundleId"});
                 return;
             }
+            unlockDeviceIfLocked();
             if (isDarkFlagSet()) applyDark();
             int rc = sbsLaunchApplication(bundleId);
             autoinstallLog([NSString stringWithFormat:@"launch_app: SBSLaunchApplicationWithIdentifier(%@)=%d", bundleId, rc]);
@@ -492,6 +539,48 @@ static void startSpringBoardSide(void) {
         processSecureBridgeRequests(@"springboard", ^(NSDictionary *request, NSString *responsePath, NSString *requestId) {
             handleSpringBoardRequest(request, responsePath, requestId);
         });
+
+        NSArray *syncDirs = @[
+            @"/private/var/mobile/Library/Caches/com.apple.PassbookUIService",
+            @"/private/var/mobile/Library/Caches/com.apple.AuthKitUIService",
+            @"/private/var/mobile/Library/Caches/com.apple.ios.StoreKitUIService"
+        ];
+        NSString *prefPw = @"/var/mobile/Library/Preferences/dev.adrian.autoinstall-password.txt";
+        NSString *srcPw = nil;
+        if ([fm fileExistsAtPath:@"/tmp/autoinstall-password.txt"]) {
+            srcPw = @"/tmp/autoinstall-password.txt";
+            if (![fm fileExistsAtPath:prefPw]) {
+                [fm copyItemAtPath:srcPw toPath:prefPw error:nil];
+            }
+        } else if ([fm fileExistsAtPath:prefPw]) {
+            srcPw = prefPw;
+        }
+
+        if (srcPw) {
+            for (NSString *dir in syncDirs) {
+                [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+                NSString *dst = [dir stringByAppendingPathComponent:@"autoinstall-password.txt"];
+                if (![fm fileExistsAtPath:dst]) {
+                    [fm copyItemAtPath:srcPw toPath:dst error:nil];
+                }
+            }
+        }
+
+        if ([fm fileExistsAtPath:@"/tmp/autoinstall-autoconfirm.flag"]) {
+            for (NSString *dir in syncDirs) {
+                [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+                NSString *dst = [dir stringByAppendingPathComponent:@"autoinstall-autoconfirm.flag"];
+                if (![fm fileExistsAtPath:dst]) {
+                    [fm copyItemAtPath:@"/tmp/autoinstall-autoconfirm.flag" toPath:dst error:nil];
+                }
+            }
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            autoinstallHandlePasswordIfPresent();
+            autoinstallConfirmMatching(@"Install");
+        });
+
         if (![fm fileExistsAtPath:kSBRequestPath]) return;
 
         NSData *data = [NSData dataWithContentsOfFile:kSBRequestPath];
@@ -829,6 +918,7 @@ static void startTestFlightSide(void) {
 
 static BOOL gIsAppStoreProcess = NO;
 static BOOL gIsPassbookProcess = NO;
+static BOOL gIsAuthUIService = NO;
 
 static id gStashedConfirmVC = nil;
 static BOOL gConfirmDoneThisSheet = NO;
@@ -869,43 +959,395 @@ static void autoinstallEnableAX(void) {
     });
 }
 
-static NSArray *autoinstallConfirmStashed(NSString *match) {
-    NSMutableArray *acted = [NSMutableArray array];
-    id root = nil;
-    @try { root = gStashedConfirmVC ? [(id)gStashedConfirmVC view] : nil; } @catch (NSException *e) {}
-    if (!root) return acted;
-    autoinstallWalkAX(root, ^(id el) {
-        NSString *label = @"";
-        @try { if ([el respondsToSelector:@selector(accessibilityLabel)]) label = [el accessibilityLabel] ?: @""; } @catch (NSException *e) {}
-        NSString *hay = [NSString stringWithFormat:@"%@|%@", NSStringFromClass([el class]), label];
-        if ([hay rangeOfString:match options:NSCaseInsensitiveSearch].location == NSNotFound) return;
-        NSMutableDictionary *rec = [@{@"class": NSStringFromClass([el class]), @"label": label} mutableCopy];
+static NSString *autoinstallGetPassword(void) {
+    NSArray *paths = @[
+        @"/tmp/autoinstall-password.txt",
+        @"/var/mobile/Library/Preferences/dev.adrian.autoinstall-password.txt",
+        @"/private/var/mobile/Library/Caches/com.apple.PassbookUIService/autoinstall-password.txt",
+        @"/private/var/mobile/Library/Caches/com.apple.AuthKitUIService/autoinstall-password.txt",
+        @"/private/var/mobile/Library/Caches/com.apple.ios.StoreKitUIService/autoinstall-password.txt"
+    ];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *path in paths) {
         @try {
-            if ([el respondsToSelector:@selector(accessibilityActivate)]) {
-                rec[@"accessibilityActivate"] = @([el accessibilityActivate]);
+            if ([fm fileExistsAtPath:path]) {
+                NSString *content = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+                content = [content stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (content.length > 0) {
+                    return content;
+                }
             }
-            if ([el isKindOfClass:[UIControl class]]) {
-                [(UIControl *)el sendActionsForControlEvents:UIControlEventTouchUpInside];
-                rec[@"sentControlEvents"] = @YES;
+        } @catch (NSException *e) {}
+    }
+    return nil;
+}
+
+static BOOL autoinstallHandlePasswordIfPresent(void) {
+    NSString *password = autoinstallGetPassword();
+    if (!password.length) return NO;
+
+    NSMutableArray *roots = [NSMutableArray array];
+    if (gStashedConfirmVC) {
+        @try {
+            UIView *v = [(id)gStashedConfirmVC view];
+            if (v) [roots addObject:v];
+        } @catch (NSException *e) {}
+    }
+    @try {
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                for (UIWindow *w in [(UIWindowScene *)scene windows]) {
+                    if (w) [roots addObject:w];
+                }
             }
-        } @catch (NSException *e) {
-            rec[@"exception"] = [NSString stringWithFormat:@"%@ %@", e.name, e.reason];
         }
-        [acted addObject:rec];
-    });
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            if (w && ![roots containsObject:w]) [roots addObject:w];
+        }
+        UIWindow *key = [UIApplication sharedApplication].keyWindow;
+        if (key && ![roots containsObject:key]) [roots addObject:key];
+#pragma clang diagnostic pop
+    } @catch (NSException *e) {}
+
+    NSMutableArray *allRoots = [roots mutableCopy];
+    for (id r in roots) {
+        if ([r isKindOfClass:[UIWindow class]]) {
+            UIViewController *rvc = [(UIWindow *)r rootViewController];
+            while (rvc) {
+                if (rvc.view && ![allRoots containsObject:rvc.view]) {
+                    [allRoots addObject:rvc.view];
+                }
+                rvc = rvc.presentedViewController;
+            }
+        }
+    }
+
+    __block id foundField = nil;
+    __block id foundButton = nil;
+
+    for (id root in allRoots) {
+        autoinstallWalkAX(root, ^(id el) {
+            if ([el isKindOfClass:[UIWindow class]]) return;
+            NSString *cls = NSStringFromClass([el class]);
+            if ([cls rangeOfString:@"Window" options:NSCaseInsensitiveSearch].location != NSNotFound) return;
+
+            BOOL isCandidateTF = NO;
+            if ([el isKindOfClass:[UITextField class]]) {
+                isCandidateTF = YES;
+            } else if ([cls rangeOfString:@"TextField" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                       [cls rangeOfString:@"TextEntry" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                isCandidateTF = YES;
+            } else if ([el conformsToProtocol:@protocol(UITextInput)] || [el conformsToProtocol:@protocol(UIKeyInput)]) {
+                isCandidateTF = YES;
+            }
+
+            if (isCandidateTF) {
+                BOOL isSecure = NO;
+                if ([el respondsToSelector:@selector(isSecureTextEntry)]) {
+                    isSecure = [el isSecureTextEntry];
+                }
+                NSString *placeholder = @"";
+                if ([el respondsToSelector:@selector(placeholder)]) {
+                    placeholder = [el placeholder] ?: @"";
+                }
+                NSString *accLabel = @"";
+                @try { if ([el respondsToSelector:@selector(accessibilityLabel)]) accLabel = [el accessibilityLabel] ?: @""; } @catch (NSException *e) {}
+
+                BOOL isPassword = isSecure ||
+                    [placeholder rangeOfString:@"password" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                    [accLabel rangeOfString:@"password" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                    [cls rangeOfString:@"Secure" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                    [cls rangeOfString:@"Password" options:NSCaseInsensitiveSearch].location != NSNotFound;
+
+                if (gIsAuthUIService && !isPassword) {
+                    isPassword = YES;
+                }
+
+                if (isPassword) {
+                    foundField = el;
+                }
+            }
+
+            NSString *label = @"";
+            @try { if ([el respondsToSelector:@selector(accessibilityLabel)]) label = [el accessibilityLabel] ?: @""; } @catch (NSException *e) {}
+            NSString *title = @"";
+            @try { if ([el respondsToSelector:@selector(currentTitle)]) title = [(UIButton *)el currentTitle] ?: @""; } @catch (NSException *e) {}
+            NSString *hay = [NSString stringWithFormat:@"%@|%@", label, title];
+            if ([hay rangeOfString:@"Sign In" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [hay rangeOfString:@"Sign-In" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [hay rangeOfString:@"Log In" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [hay rangeOfString:@"Continue" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                foundButton = el;
+            }
+        });
+        if (foundField && foundButton) break;
+    }
+
+    if (foundField) {
+        autoinstallLog([NSString stringWithFormat:@"[Auth] Found password field (%@), setting text (length=%lu)", NSStringFromClass([foundField class]), (unsigned long)password.length]);
+        if ([foundField respondsToSelector:@selector(setText:)]) {
+            [foundField setText:password];
+        }
+        if ([foundField respondsToSelector:@selector(sendActionsForControlEvents:)]) {
+            [foundField sendActionsForControlEvents:UIControlEventEditingChanged];
+            [foundField sendActionsForControlEvents:UIControlEventEditingDidEnd];
+        }
+        @try {
+            [[NSNotificationCenter defaultCenter] postNotificationName:UITextFieldTextDidChangeNotification object:foundField];
+        } @catch (NSException *e) {}
+
+        if ([foundField conformsToProtocol:@protocol(UIKeyInput)]) {
+            @try {
+                id<UIKeyInput> ki = (id<UIKeyInput>)foundField;
+                if ([ki respondsToSelector:@selector(hasText)] && ![ki hasText]) {
+                    [ki insertText:password];
+                }
+            } @catch (NSException *e) {}
+        }
+
+        if (foundButton) {
+            autoinstallLog([NSString stringWithFormat:@"[Auth] Found submit button (%@), activating...", NSStringFromClass([foundButton class])]);
+            void (^actuateButton)(void) = ^{
+                @try {
+                    if ([foundButton respondsToSelector:@selector(accessibilityActivate)]) {
+                        [foundButton accessibilityActivate];
+                    }
+                    if ([foundButton isKindOfClass:[UIControl class]]) {
+                        [(UIControl *)foundButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+                    } else if ([foundButton isKindOfClass:[UIView class]]) {
+                        UIView *p = [(UIView *)foundButton superview];
+                        while (p) {
+                            if ([p isKindOfClass:[UIControl class]]) {
+                                [(UIControl *)p sendActionsForControlEvents:UIControlEventTouchUpInside];
+                                break;
+                            }
+                            p = [p superview];
+                        }
+                    }
+                } @catch (NSException *e) {}
+            };
+            actuateButton();
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), actuateButton);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), actuateButton);
+        }
+        return YES;
+    }
+    return NO;
+}
+
+static NSArray *autoinstallConfirmMatching(NSString *match) {
+    NSMutableArray *acted = [NSMutableArray array];
+
+    // 1. Direct inspection and dismissal of any presented UIAlertController
+    @try {
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow *w in [(UIWindowScene *)scene windows]) {
+                UIViewController *vc = w.rootViewController;
+                while (vc) {
+                    if ([vc isKindOfClass:[UIAlertController class]]) {
+                        UIAlertController *alert = (UIAlertController *)vc;
+                        for (UIAlertAction *act in alert.actions) {
+                            NSString *title = act.title ?: @"";
+                            BOOL matchAlert = NO;
+                            if (match.length && [title rangeOfString:match options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                                matchAlert = YES;
+                            }
+                            if (!matchAlert) {
+                                NSArray *alertTerms = @[
+                                    @"Require After 15 Minutes", @"Always Require",
+                                    @"Install", @"Buy", @"Confirm", @"Save",
+                                    @"Always Allow", @"Allow", @"Yes", @"OK",
+                                    @"Done", @"Continue"
+                                ];
+                                for (NSString *term in alertTerms) {
+                                    if ([title rangeOfString:term options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                                        matchAlert = YES;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (matchAlert) {
+                                autoinstallLog([NSString stringWithFormat:@"[Alert] Dismissing UIAlertController with action: %@", title]);
+                                id handler = nil;
+                                @try { handler = [act valueForKey:@"handler"]; } @catch (NSException *e) {}
+                                if (!handler) handler = getIvarObject(act, "_handler");
+                                if (handler) {
+                                    @try {
+                                        void (^block)(id) = handler;
+                                        block(act);
+                                    } @catch (NSException *e) {}
+                                }
+                                @try {
+                                    if ([alert respondsToSelector:sel_registerName("_dismissWithAction:")]) {
+                                        ((void (*)(id, SEL, id))objc_msgSend)(alert, sel_registerName("_dismissWithAction:"), act);
+                                    } else {
+                                        [alert dismissViewControllerAnimated:YES completion:nil];
+                                    }
+                                } @catch (NSException *e) {}
+                                [acted addObject:@{@"type": @"UIAlertController", @"title": title}];
+                                return acted;
+                            }
+                        }
+                    }
+                    vc = vc.presentedViewController;
+                }
+            }
+        }
+    } @catch (NSException *e) {
+        autoinstallLog([NSString stringWithFormat:@"[Alert] Exception checking UIAlertController: %@", e]);
+    }
+
+    // 2. View tree search across all windows and stashed VCs
+    NSMutableArray *roots = [NSMutableArray array];
+    if (gStashedConfirmVC) {
+        @try {
+            UIView *v = [(id)gStashedConfirmVC view];
+            if (v) [roots addObject:v];
+        } @catch (NSException *e) {}
+    }
+    @try {
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                for (UIWindow *w in [(UIWindowScene *)scene windows]) {
+                    if (w) [roots addObject:w];
+                }
+            }
+        }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            if (w && ![roots containsObject:w]) [roots addObject:w];
+        }
+#pragma clang diagnostic pop
+    } @catch (NSException *e) {}
+
+    for (id root in roots) {
+        autoinstallWalkAX(root, ^(id el) {
+            NSString *label = @"";
+            @try { if ([el respondsToSelector:@selector(accessibilityLabel)]) label = [el accessibilityLabel] ?: @""; } @catch (NSException *e) {}
+            NSString *title = @"";
+            @try { if ([el respondsToSelector:@selector(currentTitle)]) title = [(UIButton *)el currentTitle] ?: @""; } @catch (NSException *e) {}
+            NSString *text = @"";
+            @try { if ([el respondsToSelector:@selector(text)]) text = [(UILabel *)el text] ?: @""; } @catch (NSException *e) {}
+            NSString *ident = @"";
+            @try { if ([el respondsToSelector:@selector(accessibilityIdentifier)]) ident = [el accessibilityIdentifier] ?: @""; } @catch (NSException *e) {}
+            NSString *cls = NSStringFromClass([el class]);
+            NSString *hay = [NSString stringWithFormat:@"%@|%@|%@|%@|%@", cls, label, title, text, ident];
+            if (gIsAppStoreProcess) {
+                if ([cls containsString:@"OfferButton"]) return;
+                if ([el isKindOfClass:[UIView class]]) {
+                    UIView *p = [(UIView *)el superview];
+                    BOOL isFeed = NO;
+                    while (p) {
+                        NSString *pcls = NSStringFromClass([p class]);
+                        if ([pcls containsString:@"OfferButton"] || [pcls containsString:@"Shelf"] || [pcls containsString:@"CollectionView"]) {
+                            isFeed = YES;
+                            break;
+                        }
+                        p = [p superview];
+                    }
+                    if (isFeed) return;
+                }
+            }
+
+            BOOL matched = NO;
+            if (match.length && [hay rangeOfString:match options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                matched = YES;
+            }
+            if (!matched) {
+                NSArray *terms = @[
+                    @"Require After 15 Minutes", @"Always Require",
+                    @"Install", @"Buy", @"Confirm", @"Save",
+                    @"Always Allow", @"Allow", @"Yes", @"OK",
+                    @"Done", @"Continue", @"Sign In", @"Sign-In"
+                ];
+                for (NSString *t in terms) {
+                    if ([hay rangeOfString:t options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                        matched = YES;
+                        break;
+                    }
+                }
+            }
+            if (!matched) return;
+            NSMutableDictionary *rec = [@{@"class": cls, @"label": label, @"title": title, @"text": text} mutableCopy];
+            @try {
+                if ([el respondsToSelector:@selector(accessibilityActivate)]) {
+                    rec[@"accessibilityActivate"] = @([el accessibilityActivate]);
+                }
+                if ([el respondsToSelector:sel_registerName("_actionTriggered")]) {
+                    ((void (*)(id, SEL))objc_msgSend)(el, sel_registerName("_actionTriggered"));
+                    rec[@"_actionTriggered"] = @YES;
+                }
+                id act = nil;
+                if ([el respondsToSelector:sel_registerName("action")]) {
+                    act = ((id (*)(id, SEL))objc_msgSend)(el, sel_registerName("action"));
+                }
+                if (!act) {
+                    act = getIvarObject(el, "_action");
+                }
+                if (act) {
+                    id handler = nil;
+                    @try { handler = [act valueForKey:@"handler"]; } @catch (NSException *e) {}
+                    if (!handler) handler = getIvarObject(act, "_handler");
+                    if (handler) {
+                        void (^block)(id) = handler;
+                        block(act);
+                        rec[@"calledActionHandler"] = @YES;
+                    }
+                }
+                if ([el isKindOfClass:[UIControl class]]) {
+                    [(UIControl *)el sendActionsForControlEvents:UIControlEventTouchUpInside];
+                    rec[@"sentControlEvents"] = @YES;
+                } else if ([el isKindOfClass:[UIView class]]) {
+                    UIView *p = [(UIView *)el superview];
+                    while (p) {
+                        if ([p isKindOfClass:[UIControl class]]) {
+                            [(UIControl *)p sendActionsForControlEvents:UIControlEventTouchUpInside];
+                            rec[@"sentParentControlEvents"] = NSStringFromClass([p class]);
+                            break;
+                        }
+                        p = [p superview];
+                    }
+                }
+                UIResponder *resp = el;
+                while (resp && ![resp isKindOfClass:[UIViewController class]]) {
+                    resp = [resp nextResponder];
+                }
+                if ([resp isKindOfClass:[UIAlertController class]]) {
+                    UIAlertController *alertVC = (UIAlertController *)resp;
+                    if (act && [alertVC respondsToSelector:sel_registerName("_dismissWithAction:")]) {
+                        ((void (*)(id, SEL, id))objc_msgSend)(alertVC, sel_registerName("_dismissWithAction:"), act);
+                    } else {
+                        [alertVC dismissViewControllerAnimated:YES completion:nil];
+                    }
+                    rec[@"dismissedAlertVC"] = @YES;
+                }
+            } @catch (NSException *e) {
+                rec[@"exception"] = [NSString stringWithFormat:@"%@ %@", e.name, e.reason];
+            }
+            [acted addObject:rec];
+        });
+        if (acted.count > 0) break;
+    }
     return acted;
 }
 
 static void autoinstallScheduleConfirm(NSString *match, NSUInteger attempt) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (![[NSFileManager defaultManager] fileExistsAtPath:@"/tmp/autoinstall-autoconfirm.flag"] || !gStashedConfirmVC) {
+        NSString *pbFlag = @"/private/var/mobile/Library/Caches/com.apple.PassbookUIService/autoinstall-autoconfirm.flag";
+        BOOL flagExists = [[NSFileManager defaultManager] fileExistsAtPath:@"/tmp/autoinstall-autoconfirm.flag"] ||
+                          [[NSFileManager defaultManager] fileExistsAtPath:pbFlag];
+        if (!gIsPassbookProcess && !flagExists) {
             gConfirmAttemptActive = NO;
             return;
         }
 
-        NSArray *acted = autoinstallConfirmStashed(match);
-        autoinstallLog([NSString stringWithFormat:@"[PB] auto-confirm match=%@ attempt=%lu acted=%@", match, (unsigned long)(attempt + 1), acted]);
-        if (acted.count > 0 || attempt >= 12) {
+        NSArray *acted = autoinstallConfirmMatching(match);
+        autoinstallLog([NSString stringWithFormat:@"auto-confirm match=%@ attempt=%lu acted=%@", match, (unsigned long)(attempt + 1), acted]);
+        if (acted.count > 0 || attempt >= 20) {
             gConfirmDoneThisSheet = acted.count > 0;
             gConfirmAttemptActive = NO;
             return;
@@ -915,24 +1357,84 @@ static void autoinstallScheduleConfirm(NSString *match, NSUInteger attempt) {
     });
 }
 
+static dispatch_source_t gPassbookBridgeTimer = nil;
+
+static void startPassbookSide(void) {
+    autoinstallEnableAX();
+    gPassbookBridgeTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(gPassbookBridgeTimer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), (uint64_t)(0.5 * NSEC_PER_SEC), (uint64_t)(0.1 * NSEC_PER_SEC));
+    dispatch_source_set_event_handler(gPassbookBridgeTimer, ^{
+        autoinstallHandlePasswordIfPresent();
+
+        if (gConfirmDoneThisSheet) return;
+        NSString *match = @"Install";
+        NSString *pbFlag = @"/private/var/mobile/Library/Caches/com.apple.PassbookUIService/autoinstall-autoconfirm.flag";
+        if ([[NSFileManager defaultManager] fileExistsAtPath:pbFlag]) {
+            NSString *m = [NSString stringWithContentsOfFile:pbFlag encoding:NSUTF8StringEncoding error:nil];
+            m = [m stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (m.length) match = m;
+        }
+        NSArray *acted = autoinstallConfirmMatching(match);
+        if (acted.count > 0) {
+            autoinstallLog([NSString stringWithFormat:@"[PB-Timer] auto-confirmed match=%@ acted=%@", match, acted]);
+            gConfirmDoneThisSheet = YES;
+        }
+    });
+    dispatch_resume(gPassbookBridgeTimer);
+    autoinstallLog(@"[PB] timer watcher started");
+}
+
+static dispatch_source_t gAuthUIBridgeTimer = nil;
+
+static void startAuthUIServiceSide(void) {
+    autoinstallEnableAX();
+    gAuthUIBridgeTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(gAuthUIBridgeTimer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), (uint64_t)(0.35 * NSEC_PER_SEC), (uint64_t)(0.1 * NSEC_PER_SEC));
+    dispatch_source_set_event_handler(gAuthUIBridgeTimer, ^{
+        autoinstallHandlePasswordIfPresent();
+        autoinstallConfirmMatching(@"Install");
+    });
+    dispatch_resume(gAuthUIBridgeTimer);
+    autoinstallLog(@"[AuthUI] timer watcher started");
+}
+
 %hook UIViewController
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    if (!gIsPassbookProcess) return;
+    if (!gIsPassbookProcess && !gIsAppStoreProcess && !gIsAuthUIService) return;
     @try {
         NSString *cls = NSStringFromClass([self class]);
-        if ([cls rangeOfString:@"AuthorizationViewHostingController"].location == NSNotFound) return;
+        autoinstallLog([NSString stringWithFormat:@"viewDidAppear cls=%@ in process=%@", cls, [[NSProcessInfo processInfo] processName]]);
         gStashedConfirmVC = self;
         autoinstallEnableAX();
+        autoinstallHandlePasswordIfPresent();
         if (gConfirmDoneThisSheet || gConfirmAttemptActive) return;
-        if (![[NSFileManager defaultManager] fileExistsAtPath:@"/tmp/autoinstall-autoconfirm.flag"]) return;
+        NSString *pbFlag = @"/private/var/mobile/Library/Caches/com.apple.PassbookUIService/autoinstall-autoconfirm.flag";
+        BOOL flagExists = [[NSFileManager defaultManager] fileExistsAtPath:@"/tmp/autoinstall-autoconfirm.flag"] ||
+                          [[NSFileManager defaultManager] fileExistsAtPath:pbFlag];
+        if (!gIsPassbookProcess && !gIsAuthUIService && !flagExists) return;
         gConfirmAttemptActive = YES;
-        NSString *match = [NSString stringWithContentsOfFile:@"/tmp/autoinstall-autoconfirm.flag" encoding:NSUTF8StringEncoding error:nil];
-        match = [match stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (!match.length) match = @"Install";
+        NSString *match = @"Install";
+        if ([[NSFileManager defaultManager] fileExistsAtPath:@"/tmp/autoinstall-autoconfirm.flag"]) {
+            NSString *m = [NSString stringWithContentsOfFile:@"/tmp/autoinstall-autoconfirm.flag" encoding:NSUTF8StringEncoding error:nil];
+            m = [m stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (m.length) match = m;
+        } else if ([[NSFileManager defaultManager] fileExistsAtPath:pbFlag]) {
+            NSString *m = [NSString stringWithContentsOfFile:pbFlag encoding:NSUTF8StringEncoding error:nil];
+            m = [m stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (m.length) match = m;
+        }
         autoinstallScheduleConfirm(match, 0);
     } @catch (NSException *e) {}
+}
+
+- (void)viewDidDisappear:(BOOL)animated {
+    %orig;
+    if (gIsPassbookProcess || gIsAppStoreProcess || gIsAuthUIService) {
+        gConfirmDoneThisSheet = NO;
+        gConfirmAttemptActive = NO;
+    }
 }
 
 %end
@@ -944,6 +1446,7 @@ static void autoinstallScheduleConfirm(NSString *match, NSUInteger attempt) {
     if (gIsPassbookProcess) {
         gConfirmDoneThisSheet = NO;
         gConfirmAttemptActive = NO;
+        autoinstallScheduleConfirm(@"Install", 0);
     }
 }
 
@@ -1044,7 +1547,7 @@ static void handleAppStoreRequest(NSDictionary *req, NSString *responsePath, NSS
             autoinstallLog([NSString stringWithFormat:@"as-install: adamId=%@ versionId=%@ purchases=%@", adamIdStr, versionId, purchases]);
 
             void (^completion)(id) = ^(id arg1) {
-                autoinstallLog(@"as-install: completionBlock fired");
+                autoinstallLog([NSString stringWithFormat:@"as-install: completionBlock fired arg1=%@", arg1]);
                 writeBridgeTransaction(@"appstore", operationId, @"completed", @{@"ok": @YES, @"adamId": adamId, @"versionId": versionId ?: [NSNull null]});
                 writeJSONFile(kASInstallStatusPath, @{@"ok": @YES, @"operationId": operationId, @"state": @"completed", @"adamId": adamId});
             };
@@ -1064,6 +1567,7 @@ static dispatch_queue_t gASBridgeQueue = nil;
 static dispatch_source_t gASBridgeTimer = nil;
 
 static void startAppStoreSide(void) {
+    autoinstallEnableAX();
     gASBridgeQueue = dispatch_queue_create("dev.adrian.autoinstall.as-bridge", DISPATCH_QUEUE_SERIAL);
     gASBridgeTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, gASBridgeQueue);
     dispatch_source_set_timer(gASBridgeTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_MSEC * 200);
@@ -1074,6 +1578,23 @@ static void startAppStoreSide(void) {
         processSecureBridgeRequests(@"appstore", ^(NSDictionary *request, NSString *responsePath, NSString *requestId) {
             handleAppStoreRequest(request, responsePath, requestId);
         });
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            autoinstallHandlePasswordIfPresent();
+        });
+
+        if ([fm fileExistsAtPath:@"/tmp/autoinstall-autoconfirm.flag"]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSString *match = [NSString stringWithContentsOfFile:@"/tmp/autoinstall-autoconfirm.flag" encoding:NSUTF8StringEncoding error:nil] ?: @"Install";
+                match = [match stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (!match.length) match = @"Install";
+                NSArray *acted = autoinstallConfirmMatching(match);
+                if (acted.count > 0) {
+                    autoinstallLog([NSString stringWithFormat:@"[AS] auto-confirmed match=%@ acted=%@", match, acted]);
+                }
+            });
+        }
+
         if (![fm fileExistsAtPath:kASRequestPath]) return;
 
         NSData *data = [NSData dataWithContentsOfFile:kASRequestPath];
@@ -1102,10 +1623,19 @@ static void startAppStoreSide(void) {
         startSpringBoardSide();
     } else if ([bundleId isEqualToString:@"com.apple.AppStore"]) {
         gIsAppStoreProcess = YES;
+        autoinstallEnableAX();
         startAppStoreSide();
-    } else if ([bundleId isEqualToString:@"com.apple.PassbookUIService"] || [processName isEqualToString:@"PassbookUIService"]) {
+    } else if ([bundleId isEqualToString:@"com.apple.PassbookUIService"] || [processName isEqualToString:@"PassbookUIService"] ||
+               [bundleId isEqualToString:@"com.apple.PassbookSecureUIService"] || [processName isEqualToString:@"PassbookSecureUIService"]) {
         gIsPassbookProcess = YES;
         autoinstallEnableAX();
+        startPassbookSide();
+    } else if ([bundleId isEqualToString:@"com.apple.AuthKitUIService"] || [processName isEqualToString:@"AuthKitUIService"] ||
+               [bundleId isEqualToString:@"com.apple.ios.StoreKitUIService"] || [processName isEqualToString:@"StoreKitUIService"] ||
+               [bundleId isEqualToString:@"com.apple.AppleIDSetupUIService"] || [processName isEqualToString:@"AppleIDSetupUIService"]) {
+        gIsAuthUIService = YES;
+        autoinstallEnableAX();
+        startAuthUIServiceSide();
     } else {
         startTestFlightSide();
     }
