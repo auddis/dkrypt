@@ -1,42 +1,42 @@
 export const GENERATED_CHANGELOG = [
   {
-    "date": "2026-08-23",
-    "title": "fix: harden stripe verification and billing retries",
-    "description": "Released in a80f39d."
+    "date": "2026-09-10",
+    "title": "feat(web): reimplement dashboard UI with shadcn primitives",
+    "description": "Released in 6496dd0."
   },
   {
-    "date": "2026-08-23",
-    "title": "feat: add stripe verification doctor",
-    "description": "Released in 3d30c27."
+    "date": "2026-09-10",
+    "title": "refactor(autoinstall): use generic iDevice deployment variables",
+    "description": "Released in da290cd."
   },
   {
-    "date": "2026-08-23",
-    "title": "feat: clarify stripe billing readiness",
-    "description": "Released in 430e5b0."
+    "date": "2026-09-10",
+    "title": "chore(deps-dev): bump svelte (#19)",
+    "description": "Released in cfc83a9."
   },
   {
-    "date": "2026-08-23",
-    "title": "fix: close stripe billing state gaps",
-    "description": "Released in 667d81a."
+    "date": "2026-09-10",
+    "title": "chore(deps): bump the api-dependencies group (#20)",
+    "description": "Released in 51da69d."
   },
   {
-    "date": "2026-08-23",
-    "title": "fix: harden stripe cutover flow",
-    "description": "Released in 0acc48e."
+    "date": "2026-09-10",
+    "title": "feat(autoinstall): support out-of-process auth sheets and headless password entry (#21)",
+    "description": "Released in 13d97ac."
   },
   {
-    "date": "2026-08-23",
-    "title": "refactor: tighten stripe billing helpers",
-    "description": "Released in 5f9304d."
+    "date": "2026-09-01",
+    "title": "fix(appstore): separate bridge and operation ids",
+    "description": "Released in ac24666."
   },
   {
-    "date": "2026-08-23",
-    "title": "feat: replace paddle billing with stripe",
-    "description": "Released in 487c53f."
+    "date": "2026-09-01",
+    "title": "fix(appstore): allow responsive headless bridge",
+    "description": "Released in 4195c28."
   },
   {
-    "date": "2026-08-17",
-    "title": "fix(scheduler): prevent duplicate release dispatches",
-    "description": "Released in df8f103."
+    "date": "2026-08-31",
+    "title": "fix(autoinstall): report dark mode failures",
+    "description": "Released in ad494ed."
   }
 ] as const;
