@@ -69,7 +69,7 @@ ssh -i "$HOME/.ssh/id_ed25519_ipad" mobile@<device-ip> 'uname -a'
 Install the autoinstall bridge from the repository root. Override the target and key when they differ from the defaults:
 
 ~~~sh
-AUTOINSTALL_IPAD_TARGET=mobile@<device-ip> AUTOINSTALL_IPAD_KEY="$HOME/.ssh/id_ed25519_ipad" make autoinstall-deploy
+AUTOINSTALL_IDEVICE_TARGET=mobile@<device-ip> AUTOINSTALL_IDEVICE_KEY="$HOME/.ssh/id_ed25519_ipad" make autoinstall-deploy
 ~~~
 
 The release script builds the tweak, installs it, restarts the affected processes, checks the bridge heartbeat, and rolls back when verification fails.
@@ -195,7 +195,7 @@ moon run dkrypt:check
 moon run autoinstall:package
 ```
 
-`autoinstall-deploy` uses the configured device target. Override the target or SSH key with `AUTOINSTALL_IPAD_TARGET` and `AUTOINSTALL_IPAD_KEY`.
+`autoinstall-deploy` uses the configured device target. Override the target or SSH key with `AUTOINSTALL_IDEVICE_TARGET` and `AUTOINSTALL_IDEVICE_KEY`.
 
 ## Development
 
