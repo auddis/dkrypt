@@ -8,7 +8,7 @@
   import Input from '#lib/components/ui/Input.svelte';
   import { fetchArtifacts, type ArtifactRecord } from '#lib/api';
   import { appDisplayName, appIconUrl, ensureAppCatalog } from '#lib/appCatalog.svelte';
-  import { fmtBytesGB, fmtRelative, fmtSize } from '#lib/format';
+  import { fmtBytesGB, fmtSize } from '#lib/format';
   import { PermissionFlag } from '#lib/permissions';
   import { sessionHasPermission } from '#lib/session.svelte';
   import { buttonVariants } from '#lib/components/ui/variants';
@@ -88,7 +88,7 @@
                 <div class="text-muted mt-0.5 break-all text-xs" title={artifact.bundleId}>{artifact.bundleId}</div>
               </div>
             </div>
-            <div class="grid grid-cols-2 gap-x-5 gap-y-2 text-xs sm:col-span-2 sm:grid-cols-4 xl:col-span-1">
+            <div class="grid grid-cols-2 gap-x-5 gap-y-2 text-xs sm:col-span-2 sm:grid-cols-3 xl:col-span-1">
               <div class="min-w-0 text-center">
                 <div class="text-muted text-[10px] font-semibold tracking-[0.08em] uppercase">Version</div>
                 <div class="mt-0.5 truncate text-[13px] font-semibold" title={artifact.buildNumber ? `${artifact.versionLabel ?? ''} (${artifact.buildNumber})` : artifact.versionLabel}>{artifactVersion(artifact)}</div>
@@ -100,10 +100,6 @@
               <div class="text-center">
                 <div class="text-muted text-[10px] font-semibold tracking-[0.08em] uppercase">Size</div>
                 <div class="mt-0.5 text-[13px]">{fmtSize(artifact.fileSizeBytes)}</div>
-              </div>
-              <div class="min-w-0 text-center">
-                <div class="text-muted text-[10px] font-semibold tracking-[0.08em] uppercase">Last accessed</div>
-                <div class="text-muted mt-0.5 truncate" title={new Date(artifact.lastAccessedAt).toLocaleString()}>{fmtRelative(new Date(artifact.lastAccessedAt).getTime())}</div>
               </div>
             </div>
             <a href={artifact.fileUrl} download class="{buttonVariants('secondary', 'sm')} sm:justify-self-end">
