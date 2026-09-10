@@ -9,6 +9,7 @@
 	} from "#lib/api";
 	import Badge from "#lib/components/ui/Badge.svelte";
 	import Button from "#lib/components/ui/Button.svelte";
+	import Checkbox from "#lib/components/ui/Checkbox.svelte";
 	import Dialog from "#lib/components/ui/Dialog.svelte";
 	import {
 		appDisplayName,
@@ -207,15 +208,15 @@
 				<RateLimitHint bucket="jobDiff" />
 				<div class="flex max-h-40 flex-col gap-1 overflow-y-auto">
 					{#each versions as v (v.id)}
-						<label
+						<div
 							class="hover:bg-panel-muted/80 hover:ring-accent/60 flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1 text-xs hover:ring-1"
 						>
-							<input
-								type="checkbox"
+							<Checkbox
 								checked={selected.has(v.id)}
 								disabled={!selected.has(v.id) &&
 									selected.size >= 2}
-								onchange={() => toggleSelect(v.id)}
+								onCheckedChange={() => toggleSelect(v.id)}
+								aria-label="Select {v.versionLabel ?? 'version'}"
 							/>
 							<span
 								class="min-w-0 flex-1 truncate"
@@ -225,7 +226,7 @@
 							<span class="text-muted"
 								><RelativeTime ms={v.finishedAt} /></span
 							>
-						</label>
+						</div>
 					{/each}
 				</div>
 				{#if versionsHasMore}

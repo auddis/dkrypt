@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Check, Copy } from 'lucide-svelte';
+  import Button from '#lib/components/ui/Button.svelte';
   import { showToast } from '#lib/ui.svelte';
   import { cn } from '#lib/utils';
 
@@ -19,10 +20,12 @@
   }
 </script>
 
-<button
+<Button
+  variant="outline"
+  size={label ? 'sm' : 'icon'}
   onclick={copy}
   class={cn(
-    'border-border text-muted hover:text-text hover:border-accent inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md border',
+    'shrink-0 text-muted hover:text-foreground',
     label ? 'h-7 px-2.5 text-xs' : 'h-6 w-6',
   )}
   aria-label={title ?? label ?? 'Copy'}
@@ -34,4 +37,4 @@
     <Copy class="h-3.5 w-3.5" />
   {/if}
   {#if label}{copied ? 'Copied!' : label}{/if}
-</button>
+</Button>

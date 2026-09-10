@@ -29,6 +29,7 @@
   import Badge from '#lib/components/ui/Badge.svelte';
   import Button from '#lib/components/ui/Button.svelte';
   import Card from '#lib/components/ui/Card.svelte';
+  import Checkbox from '#lib/components/ui/Checkbox.svelte';
   import Input from '#lib/components/ui/Input.svelte';
   import Select from '#lib/components/ui/Select.svelte';
   import Switch from '#lib/components/ui/Switch.svelte';
@@ -424,13 +425,15 @@
           </div>
           <div class="mt-1.5 flex flex-wrap gap-1.5">
             {#each expiringSoonKeys as k (k.id)}
-              <button
-                class="border-warn text-warn hover:bg-warn/10 inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs"
+              <Button
+                variant="outline"
+                size="sm"
+                class="border-warn text-warn hover:bg-warn/10"
                 onclick={() => openUsage(k)}
                 title="View usage for {k.name}"
               >
                 {k.name} · {fmtUntil(k.expiresAt as number)}
-              </button>
+              </Button>
             {/each}
           </div>
         </div>
@@ -557,7 +560,9 @@
             {:else}
               {#each pending as k (k.id)}
                 <tr>
-                  <td data-label="Select"><input type="checkbox" checked={selectedPending.has(k.id)} onchange={() => toggleSelectPending(k.id)} /></td>
+                  <td data-label="Select">
+                    <Checkbox checked={selectedPending.has(k.id)} onCheckedChange={() => toggleSelectPending(k.id)} aria-label="Select pending key {k.name}" />
+                  </td>
                   <td data-label="Name">
                     {k.name}
                     {#if k.expiresAt}
@@ -639,7 +644,9 @@
               {#each filteredAll as k (k.id)}
                 <tr>
                   {#if canRevokeAny}
-                    <td data-label="Select"><input type="checkbox" checked={selected.has(k.id)} onchange={() => toggleSelect(k.id)} /></td>
+                    <td data-label="Select">
+                      <Checkbox checked={selected.has(k.id)} onCheckedChange={() => toggleSelect(k.id)} aria-label="Select key {k.name}" />
+                    </td>
                   {/if}
                   <td data-label="ID">
                     <div class="flex items-center gap-1.5">
@@ -681,28 +688,28 @@
                   </td>
                   {#if canManagePriority}
                     <td data-label="Priority">
-                      <input
+                      <Input
                         type="number"
                         min="-5"
                         max="5"
                         value={k.priority ?? 0}
                         disabled={isBusy('priority', k.id)}
                         onchange={(e) => savePriority(k.id, Number((e.target as HTMLInputElement).value))}
-                        class="border-border bg-panel-muted w-14 rounded-md border px-1.5 py-1 text-xs disabled:opacity-60"
+                        class="h-8 w-14 px-1.5 py-1 text-xs"
                         title="Higher goes first among queued manual decrypts"
                       />
                     </td>
                   {/if}
                   {#if canManageConcurrency}
                     <td data-label="Max concurrent">
-                      <input
+                      <Input
                         type="number"
                         min="1"
                         placeholder="∞"
                         value={k.maxConcurrent ?? ''}
                         disabled={isBusy('maxConcurrent', k.id)}
                         onchange={(e) => saveMaxConcurrent(k.id, (e.target as HTMLInputElement).value)}
-                        class="border-border bg-panel-muted w-14 rounded-md border px-1.5 py-1 text-xs disabled:opacity-60"
+                        class="h-8 w-14 px-1.5 py-1 text-xs"
                         title="Max jobs from this key running at once - blank means unlimited"
                       />
                     </td>

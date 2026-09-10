@@ -1,23 +1,24 @@
-export type ButtonVariant = 'default' | 'secondary' | 'outline' | 'ghost' | 'destructive' | 'link' | 'github';
+export type ButtonVariant = 'default' | 'secondary' | 'outline' | 'ghost' | 'destructive' | 'link' | 'github' | 'discord';
 export type ButtonSize = 'default' | 'sm' | 'icon';
 
 export const buttonBase =
-  'inline-flex items-center justify-center gap-1.5 rounded-xl border border-transparent text-sm font-medium transition-[transform,background-color,border-color,box-shadow] duration-200 disabled:pointer-events-none disabled:opacity-50 whitespace-nowrap cursor-pointer active:scale-[0.98]';
+  'inline-flex items-center justify-center gap-2 rounded-md border border-transparent text-sm font-medium whitespace-nowrap no-underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 cursor-pointer';
 
 export const buttonVariantClasses: Record<ButtonVariant, string> = {
-  default: 'bg-accent text-accent-contrast shadow-[0_8px_22px_color-mix(in_srgb,var(--color-accent)_30%,transparent)] hover:-translate-y-px hover:brightness-105',
-  secondary: 'border-border/70 bg-panel/45 text-text shadow-sm backdrop-blur hover:-translate-y-px hover:border-accent/45 hover:bg-panel-muted/75',
-  outline: 'border-border/70 bg-transparent text-text hover:-translate-y-px hover:border-accent/45 hover:bg-panel-muted/60',
-  ghost: 'text-text hover:bg-panel-muted/70',
-  destructive: 'bg-err text-white shadow-[0_8px_22px_color-mix(in_srgb,var(--color-err)_26%,transparent)] hover:-translate-y-px hover:brightness-105',
-  link: 'text-accent underline-offset-4 hover:underline',
+  default: 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90',
+  secondary: 'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
+  outline: 'border-input bg-background shadow-sm hover:bg-secondary hover:text-secondary-foreground',
+  ghost: 'hover:bg-secondary hover:text-secondary-foreground',
+  destructive: 'bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90',
+  link: 'text-primary underline-offset-4 hover:underline',
   github: 'bg-[#24292f] text-white hover:opacity-90',
+  discord: 'bg-[#5865f2] text-white hover:opacity-90',
 };
 
 export const buttonSizeClasses: Record<ButtonSize, string> = {
   default: 'h-9 px-4 py-2',
-  sm: 'h-7 px-2.5 text-xs',
-  icon: 'h-8 w-8 p-0',
+  sm: 'h-8 rounded-md px-3 text-xs',
+  icon: 'h-9 w-9 p-0',
 };
 
 export function buttonVariants(variant: ButtonVariant = 'default', size: ButtonSize = 'default'): string {
@@ -27,12 +28,12 @@ export function buttonVariants(variant: ButtonVariant = 'default', size: ButtonS
 export type BadgeVariant = 'default' | 'success' | 'warning' | 'destructive' | 'secondary' | 'outline';
 
 export const badgeVariantClasses: Record<BadgeVariant, string> = {
-  default: 'bg-accent/15 text-accent',
-  success: 'bg-ok/15 text-ok',
-  warning: 'bg-warn/15 text-warn',
-  destructive: 'bg-err/15 text-err',
-  secondary: 'bg-muted/15 text-muted',
-  outline: 'border border-border text-text',
+  default: 'border-transparent bg-primary/15 text-primary',
+  success: 'border-transparent bg-ok/15 text-ok',
+  warning: 'border-transparent bg-warn/15 text-warn',
+  destructive: 'border-transparent bg-destructive/15 text-destructive',
+  secondary: 'border-transparent bg-secondary text-secondary-foreground',
+  outline: 'border-border text-foreground',
 };
 
 export function statusToBadgeVariant(status: string): BadgeVariant {

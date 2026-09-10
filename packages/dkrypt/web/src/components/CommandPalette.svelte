@@ -34,6 +34,7 @@
 		themePrefState,
 	} from "#lib/ui.svelte";
 	import Dialog from "#lib/components/ui/Dialog.svelte";
+	import Button from "#lib/components/ui/Button.svelte";
 	import Input from "#lib/components/ui/Input.svelte";
 	import { liveState } from "#lib/live.svelte";
 	import { cn } from "#lib/utils";
@@ -470,9 +471,10 @@
 	/>
 	<div class="mt-1.5 flex max-h-80 flex-col overflow-y-auto">
 		{#each filtered as cmd, i (cmd.id)}
-			<button
+			<Button
+				variant="ghost"
 				class={cn(
-					"cursor-pointer rounded-md px-3 py-2.5 text-left text-sm text-text",
+					"h-auto w-full justify-start rounded-md px-3 py-2.5 text-left font-normal text-foreground",
 					i === selected && "bg-panel-muted/80 ring-border ring-1",
 				)}
 				onclick={() => run(cmd)}
@@ -481,7 +483,7 @@
 				{#if cmd.category}
 					<div class="text-[11px] text-muted">{cmd.category}</div>
 				{/if}
-			</button>
+			</Button>
 		{/each}
 		{#if filtered.length === 0}
 			<div class="px-3 py-2.5 text-sm text-muted">

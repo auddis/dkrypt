@@ -2,6 +2,7 @@
 	import { tick } from "svelte";
 	import { Popover } from "bits-ui";
 	import { Sparkles } from "lucide-svelte";
+	import Button from "#lib/components/ui/Button.svelte";
 	import { CHANGELOG, type ChangelogEntry } from "#lib/changelog";
 	import { buttonVariants } from "#lib/components/ui/variants";
 	import {
@@ -66,7 +67,7 @@
 	</Popover.Trigger>
 	<Popover.Portal>
 		<Popover.Content
-			class="border-border bg-panel z-50 w-80 rounded-xl border p-3 shadow-2xl"
+			class="border-border bg-popover text-popover-foreground z-50 w-80 rounded-md border p-3 shadow-md"
 			sideOffset={8}
 			align="end"
 		>
@@ -81,13 +82,15 @@
 							class="mb-0.5 flex items-center justify-between gap-2"
 						>
 							{#if entry.link}
-								<button
-									class="text-text cursor-pointer font-medium hover:text-accent hover:underline"
+								<Button
+									variant="link"
+									size="sm"
+									class="h-auto justify-start p-0 text-left font-medium text-foreground"
 									onclick={() => followLink(entry)}
 									title="Go to this feature"
 								>
 									{entry.title}
-								</button>
+								</Button>
 							{:else}
 								<span class="text-text font-medium"
 									>{entry.title}</span

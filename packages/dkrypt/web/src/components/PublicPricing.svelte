@@ -2,6 +2,7 @@
   import { Check, Gauge, KeyRound, ShieldCheck, X, Zap } from 'lucide-svelte';
   import Badge from '#lib/components/ui/Badge.svelte';
   import Card from '#lib/components/ui/Card.svelte';
+  import { buttonVariants } from '#lib/components/ui/variants';
   import PublicPageFooter from '#components/PublicPageFooter.svelte';
   import PublicPageHeader from '#components/PublicPageHeader.svelte';
 
@@ -91,7 +92,7 @@
 
             <a
               href="/#sign-in"
-              class="bg-accent rounded-md px-4 py-2.5 text-center text-sm font-medium text-white no-underline hover:opacity-90"
+              class={buttonVariants('default')}
             >
               Sign in to subscribe
             </a>

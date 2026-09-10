@@ -35,8 +35,9 @@
 <SelectPrimitive.Root type="single" bind:value {onValueChange} {disabled}>
 	<SelectPrimitive.Trigger
 		{id}
+		data-slot="select-trigger"
 		class={cn(
-			"glass-input flex h-9 items-center justify-between gap-2 rounded-xl px-3 text-sm text-text focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+			"border-input bg-background ring-offset-background flex h-9 items-center justify-between gap-2 rounded-md border px-3 text-sm text-foreground shadow-sm focus:ring-ring focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
 			className,
 		)}
 	>
@@ -51,7 +52,8 @@
 	</SelectPrimitive.Trigger>
 	<SelectPrimitive.Portal>
 		<SelectPrimitive.Content
-			class="glass-popover z-50 overflow-hidden rounded-xl p-1"
+			data-slot="select-content"
+			class="border-border bg-popover text-popover-foreground z-50 overflow-hidden rounded-md border p-1 shadow-md"
 			style="width: var(--bits-floating-anchor-width); min-width: max(var(--bits-floating-anchor-width), 10rem);"
 			sideOffset={4}
 		>
@@ -60,7 +62,7 @@
 					<SelectPrimitive.Item
 						value={item.value}
 						label={item.label}
-						class="data-highlighted:bg-panel-muted/80 data-highlighted:ring-accent/60 flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-sm text-text data-highlighted:ring-1"
+						class="data-highlighted:bg-secondary data-highlighted:ring-ring flex cursor-pointer items-center justify-between rounded-md px-2.5 py-2 text-sm text-foreground data-highlighted:ring-1"
 					>
 						{#snippet children({ selected })}
 							<span class="flex min-w-0 items-center gap-2">
@@ -71,7 +73,7 @@
 								<span class="truncate">{item.label}</span>
 							</span>
 							{#if selected}<Check
-									class="text-accent h-4 w-4"
+									class="text-primary h-4 w-4"
 								/>{/if}
 						{/snippet}
 					</SelectPrimitive.Item>

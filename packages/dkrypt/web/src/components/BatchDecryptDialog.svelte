@@ -8,6 +8,7 @@
 	} from "#lib/appCatalog.svelte";
 	import Button from "#lib/components/ui/Button.svelte";
 	import Dialog from "#lib/components/ui/Dialog.svelte";
+	import Textarea from "#lib/components/ui/Textarea.svelte";
 	import {
 		addDecrypt,
 		myDecryptsState,
@@ -223,13 +224,13 @@
 	</div>
 
 	{#if results.length === 0}
-		<textarea
+		<Textarea
 			bind:value={text}
 			disabled={submitting}
 			placeholder={"com.example.app\ncom.example.app2@abc123\ncom.example.app3"}
-			rows="6"
+			rows={6}
 			class="border-border bg-panel-muted focus:border-accent w-full rounded-md border px-3 py-2 font-mono text-xs text-text focus:outline-none disabled:opacity-60"
-		></textarea>
+		></Textarea>
 		<div class="mt-1.5 text-xs text-muted">
 			{parsed.length} bundle ID{parsed.length === 1 ? "" : "s"} recognized
 		</div>

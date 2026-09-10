@@ -7,6 +7,7 @@
   import Dialog from '#lib/components/ui/Dialog.svelte';
   import Input from '#lib/components/ui/Input.svelte';
   import { fmtTime } from '#lib/format';
+  import { buttonVariants } from '#lib/components/ui/variants';
 
   interface Props {
     open: boolean;
@@ -76,16 +77,17 @@
   <div class="mb-3 flex items-center justify-between gap-2">
     <div class="text-sm font-medium">{trackName} - version history</div>
     {#if versions !== null}
-      <button
-        type="button"
-        class="text-muted hover:text-text cursor-pointer disabled:opacity-50"
+      <Button
+        variant="ghost"
+        size="icon"
+        class="text-muted hover:text-foreground h-7 w-7 p-0"
         disabled={refreshing}
         onclick={refresh}
         aria-label="Refresh version list"
         title="Refresh version list"
       >
         <RefreshCw class="h-3.5 w-3.5 {refreshing ? 'animate-spin' : ''}" />
-      </button>
+      </Button>
     {/if}
   </div>
 
@@ -124,8 +126,8 @@
             {/if}
           </div>
           {#if v.artifactId}
-            <a href={dashboardArtifactDownloadUrl(v.artifactId)} download>
-              <Button size="sm" variant="secondary"><Download class="h-3.5 w-3.5" />Download</Button>
+            <a href={dashboardArtifactDownloadUrl(v.artifactId)} download class={buttonVariants('secondary', 'sm')}>
+              <Download class="h-3.5 w-3.5" />Download
             </a>
           {:else}
             <Button size="sm" onclick={() => onDecrypt(bundleId, v.externalVersionId, label(v))}>Decrypt</Button>

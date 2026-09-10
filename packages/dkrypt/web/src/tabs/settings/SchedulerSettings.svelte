@@ -1080,15 +1080,16 @@
 								>
 									<span>Preview activity</span>
 									{#if previewByWatch[w.id]}
-										<button
-											type="button"
-											class="text-muted hover:text-text ml-auto cursor-pointer"
+										<Button
+											variant="ghost"
+											size="icon"
+											class="text-muted hover:text-foreground ml-auto h-7 w-7 p-0"
 											onclick={() => dismissPreview(w.id)}
 											aria-label="Dismiss preview"
 											title="Dismiss"
 										>
 											<X class="h-3.5 w-3.5" />
-										</button>
+										</Button>
 									{/if}
 								</div>
 								<div
@@ -1274,9 +1275,9 @@
 					class="border-border mt-1.5 max-h-52 overflow-y-auto rounded-md border"
 				>
 					{#each watchSearchResults as result (result.bundleId)}
-						<button
-							type="button"
-							class="border-border hover:bg-panel-muted/80 hover:ring-accent/60 flex w-full cursor-pointer items-center gap-2 rounded-lg border-b px-2.5 py-2 text-left last:border-0 hover:ring-1"
+						<Button
+							variant="ghost"
+							class="border-border hover:bg-panel-muted/80 hover:ring-accent/60 h-auto w-full justify-start rounded-lg border-b px-2.5 py-2 text-left font-normal last:border-0 hover:ring-1"
 							onclick={() => pickWatchApp(result)}
 						>
 							{#if result.artworkUrl}
@@ -1294,7 +1295,7 @@
 									v{result.version} · {result.sellerName}{result.category ? ` · ${result.category}` : ""}
 								</div>
 							</div>
-						</button>
+						</Button>
 					{/each}
 				</div>
 			{:else if watchSearchSearched && watchSearchTerm.trim()}
@@ -1339,7 +1340,7 @@
 						<div class="mb-1.5 flex items-center justify-between gap-2 text-xs text-muted">
 							<span>Destination {index + 1}</span>
 							{#if dispatchTargets.length > 1}
-								<button type="button" class="hover:text-err cursor-pointer" onclick={() => removeDispatchTarget(index)}>Remove</button>
+								<Button variant="link" size="sm" class="h-auto p-0 text-xs text-muted hover:text-destructive" onclick={() => removeDispatchTarget(index)}>Remove</Button>
 							{/if}
 						</div>
 						<label for={`w-repo-${index}`} class="mb-1 block text-[11px] text-muted">Repository</label>
@@ -1406,13 +1407,14 @@
 			{/if}
 			<div class="mt-1.5 flex flex-wrap gap-1.5">
 				{#each CRON_PRESETS as p (p.expr)}
-					<button
-						type="button"
-						class="border-border text-muted hover:text-text hover:border-accent cursor-pointer rounded-full border px-2.5 py-1 text-[12px]"
-						onclick={() => applyCronPreset(p.expr)}
-					>
-						{p.label}
-					</button>
+					<Button
+						variant="outline"
+						size="sm"
+										class="border-border rounded-full px-2.5 py-1 text-[12px] text-muted hover:border-primary hover:text-foreground"
+										onclick={() => applyCronPreset(p.expr)}
+									>
+										{p.label}
+									</Button>
 				{/each}
 			</div>
 
@@ -1589,9 +1591,9 @@
 		<div class="mt-3 flex items-center justify-between gap-2">
 			<div class="text-xs text-muted">Notification events</div>
 			<div class="flex gap-1">
-				<button type="button" class="border-border hover:text-text cursor-pointer rounded-full border px-2 py-1 text-[11px] text-muted" onclick={() => applyNotificationPreset("essential")}>Essential</button>
-				<button type="button" class="border-border hover:text-text cursor-pointer rounded-full border px-2 py-1 text-[11px] text-muted" onclick={() => applyNotificationPreset("all")}>All</button>
-				<button type="button" class="border-border hover:text-text cursor-pointer rounded-full border px-2 py-1 text-[11px] text-muted" onclick={() => applyNotificationPreset("quiet")}>Quiet</button>
+				<Button variant="outline" size="sm" class="h-7 rounded-full px-2 py-1 text-[11px] text-muted" onclick={() => applyNotificationPreset("essential")}>Essential</Button>
+				<Button variant="outline" size="sm" class="h-7 rounded-full px-2 py-1 text-[11px] text-muted" onclick={() => applyNotificationPreset("all")}>All</Button>
+				<Button variant="outline" size="sm" class="h-7 rounded-full px-2 py-1 text-[11px] text-muted" onclick={() => applyNotificationPreset("quiet")}>Quiet</Button>
 			</div>
 		</div>
 		<div class="mt-1.5 flex flex-col gap-2">

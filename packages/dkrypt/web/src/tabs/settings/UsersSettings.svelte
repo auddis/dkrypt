@@ -18,6 +18,7 @@
   import Badge from '#lib/components/ui/Badge.svelte';
   import Button from '#lib/components/ui/Button.svelte';
   import Card from '#lib/components/ui/Card.svelte';
+  import Checkbox from '#lib/components/ui/Checkbox.svelte';
   import Dialog from '#lib/components/ui/Dialog.svelte';
   import Input from '#lib/components/ui/Input.svelte';
   import Select from '#lib/components/ui/Select.svelte';
@@ -271,7 +272,9 @@
         <thead>
           <tr>
             {#if canManage}
-              <th><input type="checkbox" checked={selectableUsers.length > 0 && selectedUsers.size === selectableUsers.length} onchange={toggleSelectAllUsers} /></th>
+              <th>
+                <Checkbox checked={selectableUsers.length > 0 && selectedUsers.size === selectableUsers.length} onCheckedChange={toggleSelectAllUsers} aria-label="Select all users" />
+              </th>
             {/if}
             <th>User</th>
             <th>Roles</th>
@@ -292,7 +295,7 @@
                 {#if canManage}
                   <td data-label="Select">
                     {#if !isSelf}
-                      <input type="checkbox" checked={selectedUsers.has(u.username)} onchange={() => toggleSelectUser(u.username)} />
+                      <Checkbox checked={selectedUsers.has(u.username)} onCheckedChange={() => toggleSelectUser(u.username)} aria-label="Select {u.displayName ?? u.username}" />
                     {/if}
                   </td>
                 {/if}
@@ -372,11 +375,11 @@
         <Select items={AUDIT_ACTION_OPTIONS} bind:value={auditActionFilter} class="w-44" />
         <label class="flex items-center gap-1.5 text-xs text-muted">
           From
-          <input type="date" bind:value={auditFromDate} class="border-border bg-panel-muted rounded-md border px-2 py-1 text-xs" />
+          <Input type="date" bind:value={auditFromDate} class="h-8 w-auto px-2 py-1 text-xs" />
         </label>
         <label class="flex items-center gap-1.5 text-xs text-muted">
           To
-          <input type="date" bind:value={auditToDate} class="border-border bg-panel-muted rounded-md border px-2 py-1 text-xs" />
+          <Input type="date" bind:value={auditToDate} class="h-8 w-auto px-2 py-1 text-xs" />
         </label>
       </div>
     {/if}
@@ -428,11 +431,11 @@
       {:else}
         <div class="border-border flex flex-col divide-y rounded-lg border">
           {#each assignableRoles as role (role.id)}
-            <label class="flex cursor-pointer items-center gap-2.5 px-3 py-2">
-              <input type="checkbox" checked={newRoleIds.includes(role.id)} onchange={() => toggleNewRole(role.id)} />
+            <div class="flex items-center gap-2.5 px-3 py-2">
+              <Checkbox checked={newRoleIds.includes(role.id)} onCheckedChange={() => toggleNewRole(role.id)} aria-label="Assign {role.name}" />
               <span class="h-2 w-2 shrink-0 rounded-full" style="background-color: {role.color}"></span>
               <span class="text-[13px]">{role.name}</span>
-            </label>
+            </div>
           {/each}
         </div>
       {/if}
@@ -450,11 +453,11 @@
         {:else}
           <div class="border-border flex flex-col divide-y rounded-lg border">
             {#each assignableRoles as role (role.id)}
-              <label class="flex cursor-pointer items-center gap-2.5 px-3 py-2">
-                <input type="checkbox" checked={manageRoleIds.includes(role.id)} onchange={() => toggleManageRole(role.id)} />
+              <div class="flex items-center gap-2.5 px-3 py-2">
+                <Checkbox checked={manageRoleIds.includes(role.id)} onCheckedChange={() => toggleManageRole(role.id)} aria-label="Assign {role.name}" />
                 <span class="h-2 w-2 shrink-0 rounded-full" style="background-color: {role.color}"></span>
                 <span class="text-[13px]">{role.name}</span>
-              </label>
+              </div>
             {/each}
           </div>
         {/if}

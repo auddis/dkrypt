@@ -14,13 +14,14 @@
 </script>
 
 <PopoverPrimitive.Root>
-  <PopoverPrimitive.Trigger class={cn('cursor-pointer border-none bg-transparent p-0', triggerClass)}>
+  <PopoverPrimitive.Trigger data-slot="popover-trigger" class={cn('cursor-pointer border-none bg-transparent p-0', triggerClass)}>
     {@render trigger?.()}
   </PopoverPrimitive.Trigger>
   <PopoverPrimitive.Portal>
-    <PopoverPrimitive.Content
-      sideOffset={6}
-      class={cn('border-border bg-panel z-50 rounded-lg border p-3 text-xs shadow-2xl', className)}
+	<PopoverPrimitive.Content
+		sideOffset={6}
+		data-slot="popover-content"
+		class={cn('border-border bg-popover text-popover-foreground z-50 rounded-md border p-3 text-xs shadow-md', className)}
     >
       {@render children?.()}
     </PopoverPrimitive.Content>

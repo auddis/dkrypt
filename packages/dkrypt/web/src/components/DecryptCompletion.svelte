@@ -3,6 +3,7 @@
   import { dashboardArtifactDownloadUrl, fetchJobStatus } from '#lib/api';
   import { appDisplayName } from '#lib/appCatalog.svelte';
   import Button from '#lib/components/ui/Button.svelte';
+  import { buttonVariants } from '#lib/components/ui/variants';
   import Dialog from '#lib/components/ui/Dialog.svelte';
   import { myDecryptsState, updateDecrypt, type TrackedDecrypt } from '#lib/decrypts.svelte';
   import { notifyJobFinished } from '#lib/notifications';
@@ -114,7 +115,7 @@
     </div>
     <div class="mb-4 text-xs text-muted">The download remains available while the artifact is stored.</div>
     <div class="flex gap-2">
-      <a href={current.url} class="bg-accent text-accent-contrast hover:opacity-90 inline-flex h-8 flex-1 items-center justify-center rounded-md px-3 text-xs font-medium">Download</a>
+      <a href={current.url} class={buttonVariants('default', 'sm') + ' flex-1'}>Download</a>
       <Button variant="secondary" class="flex-1" onclick={() => onOpenChange(false)}>Close</Button>
     </div>
   {/if}

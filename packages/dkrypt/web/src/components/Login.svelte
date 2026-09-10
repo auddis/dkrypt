@@ -3,6 +3,9 @@
   import Button from '#lib/components/ui/Button.svelte';
   import Card from '#lib/components/ui/Card.svelte';
   import Input from '#lib/components/ui/Input.svelte';
+  import Label from '#lib/components/ui/Label.svelte';
+  import Separator from '#lib/components/ui/Separator.svelte';
+  import { buttonVariants } from '#lib/components/ui/variants';
   import { loginRoot, sessionState } from '#lib/session.svelte';
   import { cn } from '#lib/utils';
   import LegalLinks from '#components/LegalLinks.svelte';
@@ -73,7 +76,7 @@
     {#if sessionState.githubOauthEnabled}
       <a
         href="/v1/auth/github/login"
-        class="flex w-full items-center justify-center gap-2.5 rounded-md bg-[#24292f] px-4 py-2.5 text-sm font-medium text-white no-underline hover:opacity-90"
+        class={cn(buttonVariants('github'), 'w-full')}
       >
         <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
           <path
@@ -86,7 +89,7 @@
     {#if sessionState.discordOauthEnabled}
       <a
         href="/v1/auth/discord/login"
-        class="mt-3 flex w-full items-center justify-center gap-2.5 rounded-md bg-[#5865f2] px-4 py-2.5 text-sm font-medium text-white no-underline hover:opacity-90"
+        class={cn(buttonVariants('discord'), 'mt-3 w-full')}
       >
         <svg width="20" height="15" viewBox="0 0 64 48" fill="none" aria-hidden="true">
           <path
@@ -101,6 +104,10 @@
       <div class="mt-3.5 text-[12.5px] text-err">{oauthError}</div>
     {/if}
 
+    {#if sessionState.githubOauthEnabled || sessionState.discordOauthEnabled}
+      <Separator class="my-4" />
+    {/if}
+
     <details bind:open={detailsOpen} class="group mt-4.5 text-left">
       <summary
         class={cn(
@@ -112,7 +119,7 @@
         <ChevronDown class="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
       </summary>
       <div class="pt-1.5" class:mt-1.5={detailsOpen}>
-        <label for="password" class="mb-1 block text-xs text-muted">Root password</label>
+        <Label for="password" class="mb-1 block text-xs text-muted">Root password</Label>
         <div class="relative">
           <Input
             bind:ref={passwordEl}
@@ -123,19 +130,21 @@
             onkeydown={onKeydown}
             class="pr-9"
           />
-          <button
-            type="button"
-            class="text-muted hover:text-text absolute top-1/2 right-2.5 -translate-y-1/2 cursor-pointer"
+          <Button
+            variant="ghost"
+            size="icon"
+            class="text-muted hover:text-foreground absolute top-1/2 right-1.5 h-7 w-7 -translate-y-1/2"
             onclick={() => (showPassword = !showPassword)}
             aria-label={showPassword ? 'Hide password' : 'Show password'}
             title={showPassword ? 'Hide password' : 'Show password'}
+            aria-pressed={showPassword}
           >
             {#if showPassword}
               <EyeOff class="h-3.5 w-3.5" />
             {:else}
               <Eye class="h-3.5 w-3.5" />
             {/if}
-          </button>
+          </Button>
         </div>
         <Button variant="secondary" class="mt-3.5 w-full" loading={submitting} onclick={submit}>Sign in</Button>
         {#if loginError}

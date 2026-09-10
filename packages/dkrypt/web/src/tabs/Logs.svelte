@@ -7,6 +7,7 @@
   import Badge from '#lib/components/ui/Badge.svelte';
   import Button from '#lib/components/ui/Button.svelte';
   import Card from '#lib/components/ui/Card.svelte';
+  import Checkbox from '#lib/components/ui/Checkbox.svelte';
   import Input from '#lib/components/ui/Input.svelte';
   import Select from '#lib/components/ui/Select.svelte';
   import type { BadgeVariant } from '#lib/components/ui/variants';
@@ -275,36 +276,37 @@
           class={cn(searchText ? 'pr-8' : '', regexError ? 'border-err!' : '')}
         />
         {#if searchText}
-          <button
-            class="text-muted hover:text-text absolute top-1/2 right-2.5 -translate-y-1/2 cursor-pointer"
+          <Button
+            variant="ghost"
+            size="icon"
+            class="text-muted hover:text-foreground absolute top-1/2 right-1.5 h-7 w-7 -translate-y-1/2"
             onclick={() => (searchText = '')}
             aria-label="Clear search"
             title="Clear search"
           >
             <X class="h-3.5 w-3.5" />
-          </button>
+          </Button>
         {/if}
       </div>
       {#if regexError}
         <div class="mt-1 text-xs text-err">{regexError}</div>
       {/if}
     </div>
-    <button
-      class={cn(
-        'h-9 shrink-0 cursor-pointer rounded-md border px-2.5 font-mono text-xs',
-        regexMode ? 'border-accent bg-accent/15 text-accent' : 'border-border text-muted hover:text-text',
-      )}
+    <Button
+      variant={regexMode ? 'default' : 'outline'}
+      size="sm"
+      class={cn('shrink-0 font-mono', !regexMode && 'text-muted')}
       onclick={() => (regexMode = !regexMode)}
       aria-pressed={regexMode}
       title={regexMode ? 'Regex search on - click for plain substring search' : 'Plain substring search - click for regex'}
     >
       .*
-    </button>
+    </Button>
     <div class="ml-auto flex items-center gap-2.5">
       <Button variant="secondary" onclick={exportCsv}>Export CSV</Button>
       <Button variant="secondary" onclick={exportJson}>Export JSON</Button>
       <label class="flex items-center gap-1.5 text-xs text-muted">
-        <input type="checkbox" bind:checked={autoScroll} />
+        <Checkbox bind:checked={autoScroll} aria-label="Auto-scroll to newest" />
         Auto-scroll to newest
       </label>
     </div>
@@ -313,15 +315,17 @@
   <div class="mb-3.5 flex flex-wrap items-center gap-1.5">
     {#each savedViews.presets as p (p.name)}
       <span class="border-border text-muted hover:text-text hover:border-accent inline-flex items-center gap-1 rounded-full border pr-1 pl-2.5 py-1 text-[12px]">
-        <button class="cursor-pointer" onclick={() => applyPreset(p)}>{p.name}</button>
-        <button
-          class="text-muted hover:text-err cursor-pointer rounded-full p-0.5"
+        <Button variant="link" size="sm" class="h-auto p-0 text-xs text-muted" onclick={() => applyPreset(p)}>{p.name}</Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="text-muted hover:text-destructive h-6 w-6 rounded-full p-0"
           onclick={() => removePreset(p.name)}
           aria-label="Delete preset {p.name}"
           title="Delete preset"
         >
           <X class="h-3 w-3" />
-        </button>
+        </Button>
       </span>
     {/each}
     <div class="flex items-center gap-1.5">
@@ -339,12 +343,12 @@
   {:else}
     <div class="relative">
       {#if hasNewer}
-        <button
-          class="border-accent bg-accent text-accent-contrast absolute top-2 left-1/2 z-10 -translate-x-1/2 cursor-pointer rounded-full border px-3 py-1 text-xs font-medium shadow-lg"
+        <Button
+          class="absolute top-2 left-1/2 z-10 -translate-x-1/2 rounded-full px-3 py-1 text-xs font-medium shadow-lg"
           onclick={jumpToLatest}
         >
           New log lines - jump to latest
-        </button>
+        </Button>
       {/if}
       <div class="log-stream flex max-h-[min(74dvh,860px)] flex-col overflow-y-auto rounded-xl" bind:this={listEl} onscroll={onListScroll}>
         {#each filtered as l (entryKey(l))}
@@ -353,8 +357,9 @@
             <span class="log-row-time shrink-0 font-mono text-[12px] whitespace-nowrap text-muted"><RelativeTime ms={l.ts} /></span>
             <Badge variant={LEVEL_BADGE[l.level]} class="log-row-level shrink-0">{l.level}</Badge>
             <Badge variant="secondary" class="log-row-scope shrink-0">{l.scope}</Badge>
-            <button
-              class={cn('log-row-message min-w-0 flex-1 cursor-pointer text-left', expandedLogKeys.has(key) ? 'break-words leading-5' : 'truncate')}
+            <Button
+              variant="ghost"
+              class={cn('log-row-message min-w-0 flex-1 justify-start p-0 text-left font-normal', expandedLogKeys.has(key) ? 'h-auto break-words leading-5' : 'truncate')}
               onclick={() => toggleExpanded(key)}
               title={expandedLogKeys.has(key) ? 'Collapse log entry' : 'Expand log entry'}
             >
@@ -362,7 +367,7 @@
               {#if l.meta}
                 <span class={cn('font-mono text-[11px] text-muted', expandedLogKeys.has(key) ? 'mt-1 block break-words' : '')}>{fmtLogMeta(l.meta)}</span>
               {/if}
-            </button>
+            </Button>
             <div class="log-row-copy"><CopyButton text={JSON.stringify(l, null, 2)} label="JSON" /></div>
           </div>
         {/each}

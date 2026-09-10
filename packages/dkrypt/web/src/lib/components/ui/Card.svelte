@@ -12,16 +12,18 @@
   let { title, class: className, children, headerExtra, ...rest }: Props = $props();
 </script>
 
-<div class={cn('glass-card glass-card-content min-w-0 rounded-[1.35rem] p-[clamp(1rem,0.78rem+0.7vw,1.35rem)]', className)} {...rest}>
+<div data-slot="card" class={cn('bg-card text-card-foreground min-w-0 rounded-xl border border-border/80 shadow-sm', className)} {...rest}>
   {#if title || headerExtra}
-    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-5 py-4">
       {#if title}
-        <h2 class="text-[13px] font-semibold tracking-wide text-muted uppercase">{title}</h2>
+        <h2 class="text-sm font-semibold tracking-tight text-foreground">{title}</h2>
       {/if}
       {#if headerExtra}
         {@render headerExtra()}
       {/if}
     </div>
   {/if}
-  {@render children?.()}
+  <div class={cn('p-5', title || headerExtra ? '' : 'pt-5')}>
+    {@render children?.()}
+  </div>
 </div>

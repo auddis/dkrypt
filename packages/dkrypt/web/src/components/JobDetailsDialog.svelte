@@ -5,7 +5,7 @@
   import Button from '#lib/components/ui/Button.svelte';
   import Dialog from '#lib/components/ui/Dialog.svelte';
   import { fmtSize, fmtTime } from '#lib/format';
-  import { statusToBadgeVariant } from '#lib/components/ui/variants';
+  import { buttonVariants, statusToBadgeVariant } from '#lib/components/ui/variants';
   import { showToast } from '#lib/ui.svelte';
 
   let { open = $bindable(), jobId, title }: { open: boolean; jobId: string; title: string } = $props();
@@ -51,7 +51,7 @@
     </div>
     <div class="flex shrink-0 gap-1.5">
       <Button size="sm" variant="secondary" onclick={() => void copyDeepLink()}><Copy class="h-3.5 w-3.5" />Link</Button>
-      <a href={jobDiagnosticUrl(jobId)} download><Button size="sm" variant="secondary"><Download class="h-3.5 w-3.5" />Diagnostic</Button></a>
+      <a href={jobDiagnosticUrl(jobId)} download class={buttonVariants('secondary', 'sm')}><Download class="h-3.5 w-3.5" />Diagnostic</a>
     </div>
   </div>
 

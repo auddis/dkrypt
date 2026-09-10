@@ -19,6 +19,7 @@
 	import Badge from "#lib/components/ui/Badge.svelte";
 	import Button from "#lib/components/ui/Button.svelte";
 	import Card from "#lib/components/ui/Card.svelte";
+	import Checkbox from "#lib/components/ui/Checkbox.svelte";
 	import { statusToBadgeVariant } from "#lib/components/ui/variants";
 	import { fmtDurationApprox } from "#lib/format";
 	import { liveState } from "#lib/live.svelte";
@@ -253,15 +254,13 @@
 				<tr>
 					{#if canCancel}
 						<th></th>
-						<th
-							><input
-								type="checkbox"
-								checked={jobs.length > 0 &&
-									selected.size === jobs.length}
-								onchange={toggleSelectAll}
+						<th>
+							<Checkbox
+								checked={jobs.length > 0 && selected.size === jobs.length}
+								onCheckedChange={toggleSelectAll}
 								aria-label="Select all active jobs"
-							/></th
-						>
+							/>
+						</th>
 					{/if}
 					<th>App</th>
 					<th>Version</th>
@@ -298,13 +297,13 @@
 										/>
 									{/if}
 								</td>
-								<td data-label="Select"
-									><input
-										type="checkbox"
+								<td data-label="Select">
+									<Checkbox
 										checked={selected.has(j.id)}
-										onchange={() => toggleSelect(j.id)}
-									/></td
-								>
+										onCheckedChange={() => toggleSelect(j.id)}
+										aria-label="Select {j.bundleId}"
+									/>
+								</td>
 							{/if}
 							<td data-label="App" class="max-w-48">
 								<div

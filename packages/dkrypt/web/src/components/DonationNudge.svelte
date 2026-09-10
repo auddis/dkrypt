@@ -4,6 +4,8 @@
   import { myDecryptsState } from '#lib/decrypts.svelte';
   import { liveState } from '#lib/live.svelte';
   import { sessionState } from '#lib/session.svelte';
+  import Alert from '#lib/components/ui/Alert.svelte';
+  import Button from '#lib/components/ui/Button.svelte';
 
   let dismissed = $state(localStorage.getItem('donationNudgeDismissed') === 'true');
 
@@ -20,7 +22,7 @@
 </script>
 
 {#if show}
-  <div class="border-accent/30 bg-accent/10 mb-4 flex items-center gap-2.5 rounded-lg border px-3.5 py-2.5 text-[13px]">
+  <Alert class="mb-4 flex items-center gap-2.5 border-primary/30 bg-primary/10 px-3.5 py-2.5 text-[13px]">
     <Coffee class="text-accent h-4 w-4 shrink-0" />
     <div class="min-w-0 flex-1">
       dkrypt is free and ad-free - consider
@@ -28,8 +30,8 @@
         supporting the maintainer
       </a>.
     </div>
-    <button class="text-muted hover:text-text cursor-pointer" onclick={dismiss} aria-label="Dismiss" title="Dismiss">
+    <Button variant="ghost" size="icon" class="h-7 w-7 shrink-0 text-muted hover:text-foreground" onclick={dismiss} aria-label="Dismiss" title="Dismiss">
       <X class="h-3.5 w-3.5" />
-    </button>
-  </div>
+    </Button>
+  </Alert>
 {/if}

@@ -13,7 +13,8 @@
 </script>
 
 <span
-  class={cn('glass-badge inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap', badgeVariantClasses[variant], className)}
+  data-slot="badge"
+  class={cn('inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap transition-colors', badgeVariantClasses[variant], className)}
   {...rest}
 >
   {@render children?.()}

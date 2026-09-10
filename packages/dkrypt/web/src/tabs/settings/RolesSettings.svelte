@@ -360,15 +360,16 @@
                 <span class="bg-accent/15 text-accent flex h-5 w-5 items-center justify-center rounded-full font-semibold">{guild.name.slice(0, 1)}</span>
               {/if}
               <span class="font-medium">{guild.name}</span>
-              <button
-                type="button"
-                class="text-muted hover:text-text rounded p-0.5"
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-muted hover:text-foreground h-7 w-7 rounded p-0"
                 aria-label="Remove {guild.name}"
                 disabled={savingGuild || !canManageDiscordPerks}
                 onclick={() => void removeGuild(guild.id)}
               >
                 <X class="h-3.5 w-3.5" />
-              </button>
+              </Button>
             </div>
           {/each}
         </div>
@@ -461,13 +462,14 @@
       <div class="mt-3 mb-1 text-xs text-muted">Color</div>
       <div class="flex flex-wrap gap-1.5">
         {#each COLOR_PRESETS as c (c)}
-          <button
-            type="button"
-            class="h-6 w-6 cursor-pointer rounded-full border-2"
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-6 w-6 rounded-full border-2 p-0"
             style="background-color: {c}; border-color: {formColor === c ? 'var(--color-text)' : 'transparent'};"
             onclick={() => (formColor = c)}
             aria-label="Color {c}"
-          ></button>
+          ></Button>
         {/each}
       </div>
 

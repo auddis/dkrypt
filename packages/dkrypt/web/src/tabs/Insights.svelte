@@ -224,18 +224,22 @@
 				<span
 					class="border-border text-muted hover:text-text hover:border-accent inline-flex items-center gap-1 rounded-full border pr-1 pl-2.5 py-1 text-[12px]"
 				>
-					<button
-						class="cursor-pointer"
-						onclick={() => applyPreset(p)}>{p.name}</button
+					<Button
+						variant="link"
+						size="sm"
+						class="h-auto p-0 text-xs text-muted"
+						onclick={() => applyPreset(p)}>{p.name}</Button
 					>
-					<button
-						class="text-muted hover:text-err cursor-pointer rounded-full p-0.5"
+					<Button
+						variant="ghost"
+						size="icon"
+						class="text-muted hover:text-destructive h-6 w-6 rounded-full p-0"
 						onclick={() => savedViews.remove(p.name)}
 						aria-label="Delete preset {p.name}"
 						title="Delete preset"
 					>
 						<X class="h-3 w-3" />
-					</button>
+					</Button>
 				</span>
 			{/each}
 			<div class="flex items-center gap-1.5">
@@ -335,8 +339,9 @@
 				<div class="mb-2 text-xs text-muted">Failure reasons</div>
 				<div class="flex flex-col gap-1.5">
 					{#each insights.failureBreakdown as f (f.category)}
-						<button
-							class="flex w-full cursor-pointer items-center gap-2.5 text-left"
+						<Button
+							variant="ghost"
+							class="h-auto w-full justify-start gap-2.5 p-0 text-left font-normal"
 							onclick={() =>
 								jumpToHistoryFailureCategory(f.category)}
 							title="View {f.category} failures in Job History"
@@ -358,7 +363,7 @@
 								class="w-6 shrink-0 text-right text-xs text-muted"
 								>{f.count}</span
 							>
-						</button>
+						</Button>
 					{/each}
 				</div>
 			</div>
@@ -414,8 +419,9 @@
 					{#each insights.topApps as app (app.bundleId)}
 						<tr>
 							<td data-label="App" class="max-w-56">
-								<button
-									class="block max-w-full cursor-pointer text-left hover:text-accent hover:underline"
+								<Button
+									variant="link"
+									class="h-auto max-w-full justify-start p-0 text-left font-normal"
 									title="View stats for {app.bundleId}"
 									onclick={() => openStats(app.bundleId)}
 								>
@@ -433,7 +439,7 @@
 											)}</span
 										>
 									</span>
-								</button>
+								</Button>
 							</td>
 							<td data-label="Runs">{app.totalRuns}</td>
 							<td data-label="Success rate">

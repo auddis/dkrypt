@@ -5,6 +5,8 @@
   import { PermissionFlag } from '#lib/permissions';
   import { sessionHasPermission } from '#lib/session.svelte';
   import { setActiveTab, setSettingsSubtab } from '#lib/ui.svelte';
+  import Alert from '#lib/components/ui/Alert.svelte';
+  import Button from '#lib/components/ui/Button.svelte';
 
   const DISMISSED_KEY = 'onboardingDismissed';
   let dismissed = $state(localStorage.getItem(DISMISSED_KEY) === 'true');
@@ -36,7 +38,7 @@
 </script>
 
 {#if show}
-  <div class="border-accent/30 bg-accent/10 mb-4 rounded-lg border px-4 py-3.5 text-[13px]">
+  <Alert class="mb-4 border-primary/30 bg-primary/10 px-4 py-3.5 text-[13px]">
     <div class="flex items-start gap-2.5">
       <Rocket class="text-accent mt-0.5 h-4 w-4 shrink-0" />
       <div class="min-w-0 flex-1">
@@ -44,19 +46,19 @@
         <ol class="mt-1.5 list-decimal space-y-1 pl-4 text-muted">
           <li>
             Make sure <code class="text-[12px]">autoinstall</code> is installed on your jailbroken device, then check its connection in
-            <button type="button" class="text-accent underline underline-offset-2" onclick={goToDevices}>Settings → Devices</button>.
+            <Button variant="link" size="sm" class="h-auto p-0 text-primary" onclick={goToDevices}>Settings → Devices</Button>.
           </li>
           <li>Once a device is reachable, try a decrypt from the search box on this page.</li>
           <li>
-            Optionally, <button type="button" class="text-accent underline underline-offset-2" onclick={goToWatches}>add a watch</button> to auto-decrypt
-            new releases, and check <button type="button" class="text-accent underline underline-offset-2" onclick={goToDevices}>Settings → Devices</button> if
+            Optionally, <Button variant="link" size="sm" class="h-auto p-0 text-primary" onclick={goToWatches}>add a watch</Button> to auto-decrypt
+            new releases, and check <Button variant="link" size="sm" class="h-auto p-0 text-primary" onclick={goToDevices}>Settings → Devices</Button> if
             you're pooling more than one.
           </li>
         </ol>
       </div>
-      <button class="text-muted hover:text-text cursor-pointer" onclick={dismiss} aria-label="Dismiss" title="Dismiss">
+      <Button variant="ghost" size="icon" class="h-7 w-7 shrink-0 text-muted hover:text-foreground" onclick={dismiss} aria-label="Dismiss" title="Dismiss">
         <X class="h-3.5 w-3.5" />
-      </button>
+      </Button>
     </div>
-  </div>
+  </Alert>
 {/if}

@@ -360,14 +360,16 @@
 			class={term ? "pr-8" : ""}
 		/>
 		{#if term}
-			<button
-				class="text-muted hover:text-text absolute top-1/2 right-2.5 -translate-y-1/2 cursor-pointer"
+			<Button
+				variant="ghost"
+				size="icon"
+				class="text-muted hover:text-foreground absolute top-1/2 right-1.5 h-7 w-7 -translate-y-1/2"
 				onclick={clearSearch}
 				aria-label="Clear search"
 				title="Clear search"
 			>
 				<X class="h-3.5 w-3.5" />
-			</button>
+			</Button>
 		{/if}
 	</div>
 
@@ -398,20 +400,24 @@
 							class="h-4 w-4 shrink-0 rounded"
 						/>
 					{/if}
-					<button
-						class="cursor-pointer"
+					<Button
+						variant="link"
+						size="sm"
+						class="h-auto max-w-42 justify-start truncate p-0 text-xs text-muted"
 						onclick={() => showStarredApp(app)}
 						title={app.bundleId}
-						>{appDisplayName(app.bundleId, app.trackName)}</button
+						>{appDisplayName(app.bundleId, app.trackName)}</Button
 					>
-					<button
-						class="text-warn hover:text-err cursor-pointer rounded-full p-0.5"
+					<Button
+						variant="ghost"
+						size="icon"
+						class="text-warn hover:text-destructive h-6 w-6 rounded-full p-0"
 						onclick={() => toggleStarredApp(app)}
 						aria-label="Unstar {app.trackName}"
 						title="Unstar"
 					>
 						<Star class="h-3 w-3" fill="currentColor" />
-					</button>
+					</Button>
 				</span>
 			{/each}
 		</div>
@@ -430,19 +436,23 @@
 							class="h-4 w-4 shrink-0 rounded"
 						/>
 					{/if}
-					<button
-						class="max-w-42 truncate cursor-pointer text-left"
+					<Button
+						variant="link"
+						size="sm"
+						class="h-auto max-w-42 justify-start truncate p-0 text-left text-xs text-muted"
 						onclick={() => pickRecent(bundleId)}
-						title={bundleId}>{appDisplayName(bundleId)}</button
+						title={bundleId}>{appDisplayName(bundleId)}</Button
 					>
-					<button
-						class="text-muted hover:text-err cursor-pointer rounded-full p-0.5"
+					<Button
+						variant="ghost"
+						size="icon"
+						class="text-muted hover:text-destructive h-6 w-6 rounded-full p-0"
 						onclick={() => removeRecent(bundleId)}
 						aria-label="Remove {bundleId} from recents"
 						title="Remove from recents"
 					>
 						<X class="h-3 w-3" />
-					</button>
+					</Button>
 				</span>
 			{/each}
 		</div>
@@ -497,9 +507,11 @@
 					{:else}
 						<div class="flex shrink-0 items-center gap-1.5">
 							<div class="hidden items-center gap-1.5 sm:flex">
-								<button
+								<Button
+									variant="ghost"
+									size="icon"
 									class={cn(
-										"cursor-pointer rounded-md p-1.5",
+										"h-8 w-8 rounded-md p-0",
 										isStarredBundleId(r.bundleId)
 											? "text-warn"
 											: "text-muted hover:text-text",
@@ -518,7 +530,7 @@
 											? "currentColor"
 											: "none"}
 									/>
-								</button>
+								</Button>
 								<CopyButton
 									text={curlFor(r.bundleId)}
 									label="curl"
@@ -602,9 +614,11 @@
 					<div
 						class="border-border flex flex-wrap items-center gap-1.5 border-t py-2 sm:hidden"
 					>
-						<button
+						<Button
+							variant="ghost"
+							size="icon"
 							class={cn(
-								"cursor-pointer rounded-md p-1.5",
+								"h-8 w-8 rounded-md p-0",
 								isStarredBundleId(r.bundleId)
 									? "text-warn"
 									: "text-muted hover:text-text",
@@ -623,7 +637,7 @@
 									? "currentColor"
 									: "none"}
 							/>
-						</button>
+						</Button>
 						<CopyButton text={curlFor(r.bundleId)} label="curl" />
 						{#if canDecrypt}
 							<Button

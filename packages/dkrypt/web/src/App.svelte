@@ -39,7 +39,9 @@
 	import OnboardingTour from "#components/OnboardingTour.svelte";
 	import ShortcutsHelp from "#components/ShortcutsHelp.svelte";
 	import Badge from "#lib/components/ui/Badge.svelte";
+	import Avatar from "#lib/components/ui/Avatar.svelte";
 	import Button from "#lib/components/ui/Button.svelte";
+	import Checkbox from "#lib/components/ui/Checkbox.svelte";
 	import Input from "#lib/components/ui/Input.svelte";
 	import { buttonVariants } from "#lib/components/ui/variants";
 	import { cn } from "#lib/utils";
@@ -195,36 +197,44 @@
 		});
 	});
 
-	async function togglePushOnSuccess(): Promise<void> {
-		await pushNotificationPrefs({ pushOnSuccess });
+	async function togglePushOnSuccess(value = pushOnSuccess): Promise<void> {
+		pushOnSuccess = value;
+		await pushNotificationPrefs({ pushOnSuccess: value });
 	}
 
-	async function togglePushOnFailure(): Promise<void> {
-		await pushNotificationPrefs({ pushOnFailure });
+	async function togglePushOnFailure(value = pushOnFailure): Promise<void> {
+		pushOnFailure = value;
+		await pushNotificationPrefs({ pushOnFailure: value });
 	}
 
-	async function togglePushOnAlerts(): Promise<void> {
-		await pushNotificationPrefs({ pushOnAlerts });
+	async function togglePushOnAlerts(value = pushOnAlerts): Promise<void> {
+		pushOnAlerts = value;
+		await pushNotificationPrefs({ pushOnAlerts: value });
 	}
 
-	async function togglePushOnKeyExpiry(): Promise<void> {
-		await pushNotificationPrefs({ pushOnKeyExpiry });
+	async function togglePushOnKeyExpiry(value = pushOnKeyExpiry): Promise<void> {
+		pushOnKeyExpiry = value;
+		await pushNotificationPrefs({ pushOnKeyExpiry: value });
 	}
 
-	async function toggleEmailOnSuccess(): Promise<void> {
-		await pushNotificationPrefs({ emailOnSuccess });
+	async function toggleEmailOnSuccess(value = emailOnSuccess): Promise<void> {
+		emailOnSuccess = value;
+		await pushNotificationPrefs({ emailOnSuccess: value });
 	}
 
-	async function toggleEmailOnFailure(): Promise<void> {
-		await pushNotificationPrefs({ emailOnFailure });
+	async function toggleEmailOnFailure(value = emailOnFailure): Promise<void> {
+		emailOnFailure = value;
+		await pushNotificationPrefs({ emailOnFailure: value });
 	}
 
-	async function toggleEmailOnAlerts(): Promise<void> {
-		await pushNotificationPrefs({ emailOnAlerts });
+	async function toggleEmailOnAlerts(value = emailOnAlerts): Promise<void> {
+		emailOnAlerts = value;
+		await pushNotificationPrefs({ emailOnAlerts: value });
 	}
 
-	async function toggleEmailOnKeyExpiry(): Promise<void> {
-		await pushNotificationPrefs({ emailOnKeyExpiry });
+	async function toggleEmailOnKeyExpiry(value = emailOnKeyExpiry): Promise<void> {
+		emailOnKeyExpiry = value;
+		await pushNotificationPrefs({ emailOnKeyExpiry: value });
 	}
 
 	async function saveNotifyEmail(): Promise<void> {
@@ -534,37 +544,59 @@
 {:else if !sessionState.loggedIn}
 	<Login />
 {:else}
-	<div class="min-h-screen">
+	<div class="app-shell min-h-screen bg-background">
 		<MaintenanceBanner />
+		<div class="flex min-h-screen">
+			<aside class="app-sidebar hidden w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar lg:flex">
+				<div class="border-b border-sidebar-border px-5 py-5">
+					<div class="flex items-center gap-3">
+						<div class="bg-sidebar-primary/15 flex size-9 items-center justify-center rounded-lg">
+							<Lock class="size-4 text-sidebar-primary" aria-hidden="true" />
+						</div>
+						<div class="min-w-0">
+							<div class="text-sm font-semibold tracking-tight text-sidebar-foreground">dkrypt</div>
+							<div class="truncate text-xs text-sidebar-foreground/60">Operations console</div>
+						</div>
+					</div>
+				</div>
+				<nav class="flex flex-1 flex-col gap-1 p-4" aria-label="Workspace">
+					<div class="mb-2 px-3 text-[10px] font-semibold tracking-[0.14em] text-sidebar-foreground/45 uppercase">Workspace</div>
+					{#each visibleTabs as t (t.id)}
+						{@const Icon = TAB_ICON[t.id]}
+						<Button
+							variant={tabState.active === t.id ? "secondary" : "ghost"}
+							class={cn("group w-full justify-start gap-3 px-3 text-sm", tabState.active === t.id ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm" : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground")}
+							onclick={() => setActiveTab(t.id)}
+							aria-current={tabState.active === t.id ? "page" : undefined}
+						>
+							<Icon class="size-4" />
+							<span>{t.label}</span>
+							{#if tabState.active === t.id}<span class="bg-sidebar-primary ml-auto size-1.5 rounded-full"></span>{/if}
+						</Button>
+					{/each}
+				</nav>
+				<div class="border-t border-sidebar-border p-4">
+					<div class="flex items-center gap-2 rounded-lg border border-sidebar-border bg-sidebar-accent/50 px-3 py-2.5">
+						<span class="relative flex size-2">
+							<span class="absolute inline-flex size-full animate-ping rounded-full bg-ok/60"></span>
+							<span class="relative inline-flex size-2 rounded-full bg-ok"></span>
+						</span>
+						<span class="text-xs font-medium text-sidebar-foreground/75">Live workspace</span>
+					</div>
+				</div>
+			</aside>
+			<div class="min-w-0 flex-1">
 		<header
-			class="glass-topbar sticky top-0 z-30 flex flex-wrap items-center gap-3 px-3 py-3 sm:px-5 lg:flex-nowrap xl:px-6"
+			class="glass-topbar sticky top-0 z-30 flex flex-wrap items-center gap-3 px-3 py-3 sm:px-5 lg:flex-nowrap xl:px-8"
 		>
-			<div class="flex items-center gap-3">
+			<div class="flex items-center gap-3 lg:hidden">
 				<Lock class="brand-mark" aria-hidden="true" />
 				<h1 class="text-[15px] font-semibold tracking-tight">dkrypt</h1>
 			</div>
-			<nav
-				class="glass-nav order-3 hidden w-full items-center justify-center gap-1 p-1 lg:order-none lg:flex lg:w-auto lg:flex-1"
-				aria-label="Primary"
-			>
-				{#each visibleTabs as t (t.id)}
-					{@const Icon = TAB_ICON[t.id]}
-					<button
-						type="button"
-						class={cn(
-							"glass-nav-item flex cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium whitespace-nowrap",
-							tabState.active === t.id ? "is-active" : "",
-						)}
-						onclick={() => setActiveTab(t.id)}
-						aria-current={tabState.active === t.id
-							? "page"
-							: undefined}
-					>
-						<Icon class="h-3.5 w-3.5" />
-						{t.label}
-					</button>
-				{/each}
-			</nav>
+			<div class="hidden min-w-0 flex-1 lg:block">
+				<div class="text-[11px] font-medium tracking-[0.14em] text-muted-foreground uppercase">Workspace</div>
+				<div class="truncate text-sm font-semibold text-foreground">{visibleTabs.find((t) => t.id === tabState.active)?.label ?? "Workspace"}</div>
+			</div>
 			<div class="flex items-center gap-2.5">
 				<HeaderOnlineUsers />
 				<a
@@ -625,27 +657,15 @@
 				<NotificationBell />
 				<DropdownMenu.Root bind:open={accountMenuOpen}>
 					<DropdownMenu.Trigger
-						class="border-border hover:border-accent relative h-8 w-8 shrink-0 cursor-pointer overflow-hidden rounded-full border"
+						class="relative shrink-0 cursor-pointer rounded-full border border-border transition-colors hover:border-primary"
 						aria-label="Account menu"
 						title={sessionState.displayName ?? sessionState.sub}
 					>
-						{#if sessionState.avatarUrl}
-							<img
-								src={sessionState.avatarUrl}
-								alt=""
-								class="h-full w-full object-cover"
-							/>
-						{:else}
-							<div
-								class="bg-panel-muted text-muted flex h-full w-full items-center justify-center text-[11px] font-medium"
-							>
-								{initials(
-									sessionState.displayName ??
-										sessionState.sub ??
-										"",
-								)}
-							</div>
-						{/if}
+						<Avatar
+							src={sessionState.avatarUrl}
+							fallback={initials(sessionState.displayName ?? sessionState.sub ?? "")}
+							class="size-9"
+						/>
 						{#if otherOnlineUsers.length > 0}
 							<span
 								class="bg-ok border-panel absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2"
@@ -653,7 +673,7 @@
 						{/if}
 					</DropdownMenu.Trigger>
 					<DropdownMenu.Content
-							class="account-menu border-border bg-panel z-50 w-72 rounded-xl border p-3 shadow-2xl"
+							class="account-menu z-50 w-72 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-md"
 							sideOffset={8}
 							align="end"
 						>
@@ -740,7 +760,14 @@
 											>{identity.displayName} · @{identity.username}</span
 										>
 											{#if (sessionState.identities?.length ?? 0) > 1}
-												<button class="ml-auto shrink-0 text-xs text-muted hover:text-danger" onclick={() => disconnectIdentity(identity.provider)}>Disconnect</button>
+											<Button
+												variant="link"
+												size="sm"
+												class="ml-auto h-auto shrink-0 p-0 text-xs text-muted hover:text-destructive"
+												onclick={() => disconnectIdentity(identity.provider)}
+											>
+												Disconnect
+											</Button>
 											{/if}
 										</div>
 									{/each}
@@ -816,9 +843,10 @@
 								</div>
 								<div class="flex flex-wrap gap-1.5">
 									{#each ACCENT_PRESETS as preset (preset.id)}
-										<button
-											type="button"
-											class="h-5 w-5 cursor-pointer rounded-full border-2"
+										<Button
+											variant="ghost"
+											size="icon"
+											class="h-5 w-5 rounded-full border-2 p-0"
 											style="background-color: {themeState.value ===
 											'light'
 												? preset.light
@@ -828,9 +856,10 @@
 												: 'transparent'};"
 											onclick={() =>
 												chooseAccent(preset.id)}
+											aria-pressed={accentState.value === preset.id}
 											aria-label="Accent: {preset.label}"
 											title={preset.label}
-										></button>
+										></Button>
 									{/each}
 								</div>
 							</div>
@@ -882,60 +911,20 @@
 									<div class="text-center">Email</div>
 
 									<div>Successful decrypts</div>
-									<input
-										class="justify-self-center"
-										type="checkbox"
-										bind:checked={pushOnSuccess}
-										onchange={togglePushOnSuccess}
-									/>
-									<input
-										class="justify-self-center"
-										type="checkbox"
-										bind:checked={emailOnSuccess}
-										onchange={toggleEmailOnSuccess}
-									/>
+										<Checkbox class="justify-self-center" checked={pushOnSuccess} onCheckedChange={togglePushOnSuccess} aria-label="Push notifications for successful decrypts" />
+										<Checkbox class="justify-self-center" checked={emailOnSuccess} onCheckedChange={toggleEmailOnSuccess} aria-label="Email notifications for successful decrypts" />
 
 									<div>Failed decrypts</div>
-									<input
-										class="justify-self-center"
-										type="checkbox"
-										bind:checked={pushOnFailure}
-										onchange={togglePushOnFailure}
-									/>
-									<input
-										class="justify-self-center"
-										type="checkbox"
-										bind:checked={emailOnFailure}
-										onchange={toggleEmailOnFailure}
-									/>
+										<Checkbox class="justify-self-center" checked={pushOnFailure} onCheckedChange={togglePushOnFailure} aria-label="Push notifications for failed decrypts" />
+										<Checkbox class="justify-self-center" checked={emailOnFailure} onCheckedChange={toggleEmailOnFailure} aria-label="Email notifications for failed decrypts" />
 
 									<div>Device/system alerts</div>
-									<input
-										class="justify-self-center"
-										type="checkbox"
-										bind:checked={pushOnAlerts}
-										onchange={togglePushOnAlerts}
-									/>
-									<input
-										class="justify-self-center"
-										type="checkbox"
-										bind:checked={emailOnAlerts}
-										onchange={toggleEmailOnAlerts}
-									/>
+										<Checkbox class="justify-self-center" checked={pushOnAlerts} onCheckedChange={togglePushOnAlerts} aria-label="Push notifications for device and system alerts" />
+										<Checkbox class="justify-self-center" checked={emailOnAlerts} onCheckedChange={toggleEmailOnAlerts} aria-label="Email notifications for device and system alerts" />
 
 									<div>API key expiring soon</div>
-									<input
-										class="justify-self-center"
-										type="checkbox"
-										bind:checked={pushOnKeyExpiry}
-										onchange={togglePushOnKeyExpiry}
-									/>
-									<input
-										class="justify-self-center"
-										type="checkbox"
-										bind:checked={emailOnKeyExpiry}
-										onchange={toggleEmailOnKeyExpiry}
-									/>
+										<Checkbox class="justify-self-center" checked={pushOnKeyExpiry} onCheckedChange={togglePushOnKeyExpiry} aria-label="Push notifications for expiring API keys" />
+										<Checkbox class="justify-self-center" checked={emailOnKeyExpiry} onCheckedChange={toggleEmailOnKeyExpiry} aria-label="Email notifications for expiring API keys" />
 								</div>
 
 								<div class="mt-3 flex gap-2">
@@ -1053,21 +1042,23 @@
 				</div>
 			</div>
 		</main>
-		<button
-			type="button"
-			class="glass-status-pull fixed top-1/2 right-0 z-40 flex h-20 w-7 -translate-y-1/2 items-center justify-center rounded-l-xl lg:hidden"
+		<Button
+			variant="outline"
+			size="icon"
+			class="fixed top-1/2 right-0 z-40 h-20 w-8 -translate-y-1/2 rounded-l-lg rounded-r-none lg:hidden"
 			onclick={() => (mobileStatusOpen = true)}
 			aria-label="Open status drawer"
 		>
 			<PanelRightOpen class="h-4 w-4" />
-		</button>
+		</Button>
 		{#if mobileStatusOpen}
-			<button
+			<Button
+				variant="ghost"
 				type="button"
-				class="fixed inset-0 z-40 bg-black/35 lg:hidden"
+				class="fixed inset-0 z-40 h-auto w-auto rounded-none bg-black/35 p-0 hover:bg-black/35 lg:hidden"
 				onclick={() => (mobileStatusOpen = false)}
 				aria-label="Close status drawer"
-			></button>
+			></Button>
 		{/if}
 		<aside
 			class={cn(
@@ -1083,23 +1074,25 @@
 			</div>
 			<StatusPanel />
 		</aside>
-		<nav class="glass-mobile-nav mobile-primary-nav fixed z-40 flex overflow-x-auto p-1 lg:hidden" aria-label="Primary">
+		<nav class="mobile-primary-nav fixed z-40 flex overflow-x-auto border border-border bg-card p-1 shadow-lg lg:hidden" aria-label="Primary">
 			{#each visibleTabs as t (t.id)}
 				{@const Icon = TAB_ICON[t.id]}
-				<button
-					type="button"
+				<Button
+					variant={tabState.active === t.id ? "secondary" : "ghost"}
 					class={cn(
-						"flex min-w-13 flex-1 cursor-pointer flex-col items-center gap-0.5 rounded-lg py-2 text-[10.5px] transition-colors",
-						tabState.active === t.id ? "bg-accent/10 text-accent" : "text-muted hover:text-text",
+						"min-w-13 flex-1 flex-col gap-0.5 rounded-md py-2 text-[10.5px]",
+						tabState.active === t.id ? "text-primary" : "text-muted-foreground",
 					)}
 					onclick={() => setActiveTab(t.id)}
 					aria-current={tabState.active === t.id ? "page" : undefined}
 				>
 					<Icon class="h-5 w-5" />
 					{t.label}
-				</button>
+				</Button>
 			{/each}
 		</nav>
+	</div>
+	</div>
 	</div>
 {/if}
 

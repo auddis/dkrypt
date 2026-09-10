@@ -59,6 +59,7 @@
 	<div class="relative">
 		<Combobox.Input
 			{id}
+			data-slot="combobox-input"
 			{placeholder}
 			onfocus={() => (open = true)}
 			oninput={(e: Event) => {
@@ -66,7 +67,7 @@
 				open = true;
 			}}
 			class={cn(
-				"glass-input flex h-9 w-full items-center rounded-xl px-3 pr-8 text-sm text-text focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+				"border-input bg-background ring-offset-background flex h-9 w-full items-center rounded-md border px-3 pr-8 text-sm text-foreground shadow-sm focus:ring-ring focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
 				className,
 			)}
 		/>
@@ -76,7 +77,8 @@
 	</div>
 	<Combobox.Portal>
 		<Combobox.Content
-			class="glass-popover z-50 overflow-hidden rounded-xl p-1"
+			data-slot="combobox-content"
+			class="border-border bg-popover text-popover-foreground z-50 overflow-hidden rounded-md border p-1 shadow-md"
 			style="width: var(--bits-floating-anchor-width); min-width: max(var(--bits-floating-anchor-width), 12rem);"
 			sideOffset={4}
 		>
@@ -85,12 +87,12 @@
 					<Combobox.Item
 						value={item.value}
 						label={item.label}
-						class="data-highlighted:bg-panel-muted/80 data-highlighted:ring-accent/60 flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-sm text-text data-highlighted:ring-1"
+						class="data-highlighted:bg-secondary data-highlighted:ring-ring flex cursor-pointer items-center justify-between rounded-md px-2.5 py-2 text-sm text-foreground data-highlighted:ring-1"
 					>
 						{#snippet children({ selected })}
 							<span class="truncate">{item.label}</span>
 							{#if selected}<Check
-									class="text-accent h-4 w-4 shrink-0"
+									class="text-primary h-4 w-4 shrink-0"
 								/>{/if}
 						{/snippet}
 					</Combobox.Item>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fmtCountdown } from '#lib/format';
   import { refreshSessionTtl, sessionState } from '#lib/session.svelte';
+  import Alert from '#lib/components/ui/Alert.svelte';
   import Button from '#lib/components/ui/Button.svelte';
   import { showToast } from '#lib/ui.svelte';
 
@@ -38,8 +39,9 @@
 </script>
 
 {#if showWarning && !dismissed}
-  <div
-    class="mb-4 flex items-center justify-between gap-3 rounded-lg border border-warn/40 bg-warn/10 px-3.5 py-3 text-[13px] text-warn"
+  <Alert
+    variant="warning"
+    class="mb-4 flex items-center justify-between gap-3 px-3.5 py-3 text-[13px]"
     role="status"
     aria-live="polite"
   >
@@ -48,5 +50,5 @@
       <Button size="sm" variant="secondary" loading={refreshing} onclick={staySignedIn}>Stay signed in</Button>
       <Button size="sm" variant="secondary" onclick={() => (dismissed = true)} aria-label="Dismiss">Dismiss</Button>
     </div>
-  </div>
+  </Alert>
 {/if}

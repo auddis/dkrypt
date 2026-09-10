@@ -3,53 +3,138 @@
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 :root {
-	--color-bg: #080b14;
-	--color-panel: #121827;
-	--color-panel-muted: #192238;
-	--color-border: #2c3854;
-	--color-text: #edf2ff;
-	--color-muted: #95a3bf;
-	--color-accent: #78a4ff;
-	--color-accent-contrast: #ffffff;
-	--color-ok: #3ecf8e;
-	--color-warn: #f5a623;
-	--color-err: #f2545b;
-}
-
-[data-theme='light'] {
-	--color-bg: #eaf0fb;
-	--color-panel: #f9fbff;
-	--color-panel-muted: #edf3ff;
-	--color-border: #c7d4ea;
-	--color-text: #14203a;
-	--color-muted: #64718a;
+	--background: #f7f8fb;
+	--foreground: #141821;
+	--card: #ffffff;
+	--card-foreground: #141821;
+	--popover: #ffffff;
+	--popover-foreground: #141821;
+	--primary: var(--color-accent);
+	--primary-foreground: var(--color-accent-contrast);
+	--secondary: #eef1f6;
+	--secondary-foreground: #2a3140;
+	--muted: #eef1f6;
+	--muted-foreground: #697386;
+	--accent: #e9edf5;
+	--accent-foreground: #141821;
+	--destructive: #c83b4b;
+	--destructive-foreground: #ffffff;
+	--border: #dfe4ed;
+	--input: #d6dce7;
+	--ring: var(--color-accent);
+	--radius: 0.75rem;
+	--chart-1: #4f78e7;
+	--chart-2: #30a878;
+	--chart-3: #e39a35;
+	--chart-4: #9a70dd;
+	--chart-5: #de6671;
+	--sidebar: #f0f3f8;
+	--sidebar-foreground: #141821;
+	--sidebar-primary: var(--color-accent);
+	--sidebar-primary-foreground: var(--color-accent-contrast);
+	--sidebar-accent: #e4e9f2;
+	--sidebar-accent-foreground: #141821;
+	--sidebar-border: #dfe4ed;
+	--sidebar-ring: var(--color-accent);
+	--color-bg: var(--background);
+	--color-panel: var(--card);
+	--color-panel-muted: var(--muted);
+	--color-border: var(--border);
+	--color-text: var(--foreground);
+	--color-muted: var(--muted-foreground);
 	--color-accent: #386fe8;
 	--color-accent-contrast: #ffffff;
-	--color-ok: #1f9d67;
-	--color-warn: #a8650a;
-	--color-err: #cf3540;
+	--ok: #1f9d67;
+	--warn: #a8650a;
+	--err: #cf3540;
+	--color-ok: var(--ok);
+	--color-warn: var(--warn);
+	--color-err: var(--err);
+}
+
+[data-theme='dark'] {
+	--background: #0c0f15;
+	--foreground: #f1f4f9;
+	--card: #141923;
+	--card-foreground: #f1f4f9;
+	--popover: #171c27;
+	--popover-foreground: #f1f4f9;
+	--secondary: #1d2430;
+	--secondary-foreground: #e6eaf2;
+	--muted: #1a212d;
+	--muted-foreground: #9aa6b9;
+	--accent: #232c3b;
+	--accent-foreground: #f1f4f9;
+	--destructive: #d24d5b;
+	--border: #293343;
+	--input: #303b4c;
+	--sidebar: #10141c;
+	--sidebar-foreground: #f1f4f9;
+	--sidebar-accent: #1b2431;
+	--sidebar-accent-foreground: #f1f4f9;
+	--sidebar-border: #263142;
+	--color-accent: #78a4ff;
+	--color-accent-contrast: #ffffff;
+	--ok: #3ecf8e;
+	--warn: #f5a623;
+	--err: #f2545b;
 }
 
 @theme inline {
-	--color-bg: var(--color-bg);
-	--color-panel: var(--color-panel);
-	--color-panel-muted: var(--color-panel-muted);
-	--color-border: var(--color-border);
-	--color-text: var(--color-text);
-	--color-muted: var(--color-muted);
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-ui-muted: var(--muted);
+	--color-ui-muted-foreground: var(--muted-foreground);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+	--color-sidebar: var(--sidebar);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-sidebar-primary: var(--sidebar-primary);
+	--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+	--color-sidebar-accent: var(--sidebar-accent);
+	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+	--color-sidebar-border: var(--sidebar-border);
+	--color-sidebar-ring: var(--sidebar-ring);
+	--color-chart-1: var(--chart-1);
+	--color-chart-2: var(--chart-2);
+	--color-chart-3: var(--chart-3);
+	--color-chart-4: var(--chart-4);
+	--color-chart-5: var(--chart-5);
+	--color-bg: var(--background);
+	--color-panel: var(--card);
+	--color-panel-muted: var(--muted);
+	--color-text: var(--foreground);
+	--color-muted: var(--muted-foreground);
 	--color-accent: var(--color-accent);
 	--color-accent-contrast: var(--color-accent-contrast);
-	--color-ok: var(--color-ok);
-	--color-warn: var(--color-warn);
-	--color-err: var(--color-err);
+	--color-ok: var(--ok);
+	--color-warn: var(--warn);
+	--color-err: var(--err);
 	--font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 	--font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
 }
 
 @layer base {
 	html {
 		scrollbar-gutter: stable;
-		color-scheme: light dark;
+		color-scheme: light;
 	}
 
 	[data-theme='dark'] {
@@ -61,11 +146,10 @@
 	}
 
 	body {
-		@apply bg-bg text-text font-sans antialiased;
+		@apply bg-background text-foreground font-sans antialiased;
 		background-image:
-			radial-gradient(circle at 12% -8%, color-mix(in srgb, var(--color-accent) 25%, transparent), transparent 28rem),
-			radial-gradient(circle at 96% 18%, color-mix(in srgb, #b577ff 16%, transparent), transparent 32rem),
-			linear-gradient(145deg, var(--color-bg), color-mix(in srgb, var(--color-bg) 75%, #111a34));
+			radial-gradient(circle at 12% -8%, color-mix(in srgb, var(--color-accent) 9%, transparent), transparent 30rem),
+			radial-gradient(circle at 96% 18%, color-mix(in srgb, #8b5cf6 7%, transparent), transparent 34rem);
 		min-height: 100dvh;
 	}
 
@@ -138,21 +222,16 @@
 }
 
 .glass-card {
-	border: 1px solid color-mix(in srgb, var(--color-border) 76%, white 24%);
-	background:
-		linear-gradient(135deg, color-mix(in srgb, var(--color-panel) 90%, white 10%), color-mix(in srgb, var(--color-panel) 76%, transparent)),
-		color-mix(in srgb, var(--color-panel) 84%, transparent);
-	box-shadow:
-		inset 0 1px 0 color-mix(in srgb, white 16%, transparent),
-		0 18px 48px color-mix(in srgb, #020617 20%, transparent);
-	backdrop-filter: blur(16px) saturate(135%);
+	border: 1px solid var(--border);
+	background: var(--card);
+	box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 5%, transparent), 0 12px 32px color-mix(in srgb, var(--foreground) 5%, transparent);
 }
 
 .glass-popover {
-	border: 1px solid color-mix(in srgb, var(--color-border) 70%, white 30%);
-	background: color-mix(in srgb, var(--color-panel) 88%, transparent);
-	box-shadow: inset 0 1px 0 color-mix(in srgb, white 16%, transparent), 0 18px 48px color-mix(in srgb, #020617 28%, transparent);
-	backdrop-filter: blur(24px) saturate(135%);
+	border: 1px solid var(--border);
+	background: var(--popover);
+	color: var(--popover-foreground);
+	box-shadow: 0 10px 32px color-mix(in srgb, var(--foreground) 12%, transparent);
 }
 
 .glass-card-content {
@@ -164,11 +243,9 @@
 }
 
 .workspace-content .glass-card:hover {
-	border-color: color-mix(in srgb, var(--color-border) 56%, var(--color-accent) 44%);
-	box-shadow:
-		inset 0 1px 0 color-mix(in srgb, white 18%, transparent),
-		0 22px 56px color-mix(in srgb, #020617 24%, transparent);
-	transition: border-color 220ms ease, box-shadow 220ms ease;
+	border-color: color-mix(in srgb, var(--border) 60%, var(--color-accent) 40%);
+	box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 5%, transparent), 0 16px 36px color-mix(in srgb, var(--foreground) 7%, transparent);
+	transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
 @keyframes glass-surface-in {
@@ -184,16 +261,13 @@
 }
 
 .status-surface {
-	background:
-		linear-gradient(155deg, color-mix(in srgb, var(--color-panel) 83%, var(--color-accent) 17%), color-mix(in srgb, var(--color-panel) 86%, transparent)),
-		var(--color-panel);
+	background: var(--card);
 }
 
 .glass-topbar {
-	border-bottom: 1px solid color-mix(in srgb, var(--color-border) 74%, white 26%);
-	background: color-mix(in srgb, var(--color-panel) 74%, transparent);
-	box-shadow: 0 8px 30px color-mix(in srgb, #020617 13%, transparent);
-	backdrop-filter: blur(30px) saturate(150%);
+	border-bottom: 1px solid var(--border);
+	background: color-mix(in srgb, var(--background) 90%, transparent);
+	backdrop-filter: blur(18px);
 }
 
 .brand-mark {
@@ -207,10 +281,10 @@
 .glass-key,
 .glass-mobile-nav,
 .glass-toolbar {
-	border: 1px solid color-mix(in srgb, var(--color-border) 72%, white 28%);
-	background: color-mix(in srgb, var(--color-panel-muted) 57%, transparent);
-	box-shadow: inset 0 1px 0 color-mix(in srgb, white 15%, transparent), 0 8px 28px color-mix(in srgb, #020617 12%, transparent);
-	backdrop-filter: blur(20px) saturate(140%);
+	border: 1px solid var(--border);
+	background: color-mix(in srgb, var(--card) 84%, transparent);
+	box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 4%, transparent);
+	backdrop-filter: blur(14px);
 }
 
 .glass-nav {
@@ -219,21 +293,20 @@
 
 .glass-nav-item {
 	border: 1px solid transparent;
-	border-radius: 0.7rem;
+	border-radius: 0.5rem;
 	color: var(--color-muted);
-	transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
+	transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease;
 }
 
 .glass-nav-item:hover {
 	color: var(--color-text);
-	background: color-mix(in srgb, var(--color-panel) 68%, transparent);
+	background: var(--accent);
 }
 
 .glass-nav-item.is-active {
-	border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
+	border-color: color-mix(in srgb, var(--color-accent) 35%, var(--border));
 	color: var(--color-accent);
-	background: linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 21%, transparent), color-mix(in srgb, var(--color-panel) 60%, transparent));
-	box-shadow: inset 0 1px 0 color-mix(in srgb, white 17%, transparent), 0 7px 20px color-mix(in srgb, var(--color-accent) 12%, transparent);
+	background: color-mix(in srgb, var(--color-accent) 10%, var(--accent));
 }
 
 .glass-key {
@@ -280,17 +353,13 @@
 }
 
 .glass-tabs {
-	border: 1px solid color-mix(in srgb, var(--color-border) 72%, white 28%);
+	border: 1px solid var(--border);
 	border-radius: 0.9rem;
-	background: color-mix(in srgb, var(--color-panel-muted) 48%, transparent);
-	box-shadow: inset 0 1px 0 color-mix(in srgb, white 12%, transparent);
-	backdrop-filter: blur(18px);
+	background: var(--muted);
 }
 
 .glass-badge {
-	border: 1px solid color-mix(in srgb, currentColor 16%, var(--color-border));
-	box-shadow: inset 0 1px 0 color-mix(in srgb, white 12%, transparent);
-	backdrop-filter: blur(10px);
+	border: 1px solid color-mix(in srgb, currentColor 16%, var(--border));
 }
 
 .log-toolbar {
@@ -399,16 +468,16 @@
 }
 
 .glass-input {
-	border: 1px solid color-mix(in srgb, var(--color-border) 72%, white 28%);
-	background: color-mix(in srgb, var(--color-panel-muted) 66%, transparent);
-	box-shadow: inset 0 1px 2px color-mix(in srgb, #020617 10%, transparent), 0 1px 0 color-mix(in srgb, white 12%, transparent);
+	border: 1px solid var(--input);
+	background: var(--background);
+	box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 4%, transparent);
 	transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
 }
 
 .glass-input:focus {
-	border-color: color-mix(in srgb, var(--color-accent) 68%, var(--color-border));
-	background: color-mix(in srgb, var(--color-panel-muted) 82%, transparent);
-	box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 16%, transparent), inset 0 1px 2px color-mix(in srgb, #020617 8%, transparent);
+	border-color: var(--color-accent);
+	background: var(--background);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 15%, transparent);
 }
 
 @media (min-width: 768px) {

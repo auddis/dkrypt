@@ -134,16 +134,17 @@
   <div class="mb-3 flex items-center justify-between gap-2">
     <div class="text-sm font-medium">{trackName} - TestFlight builds</div>
     {#if trains !== null}
-      <button
-        type="button"
-        class="text-muted hover:text-text cursor-pointer disabled:opacity-50"
+      <Button
+        variant="ghost"
+        size="icon"
+        class="text-muted hover:text-foreground h-7 w-7 p-0"
         disabled={refreshingTrains}
         onclick={refresh}
         aria-label="Refresh TestFlight builds"
         title="Refresh TestFlight builds"
       >
         <RefreshCw class="h-3.5 w-3.5 {refreshingTrains ? 'animate-spin' : ''}" />
-      </button>
+      </Button>
     {/if}
   </div>
   <RateLimitHint bucket="external" />
@@ -165,8 +166,9 @@
     <div class="max-h-[55vh] overflow-y-auto">
       {#each filteredTrains as t (t.trainVersion)}
         <div class="border-border border-t py-2 first:border-t-0">
-          <button
-            class="flex w-full cursor-pointer items-center justify-between gap-3 text-left text-[13px]"
+          <Button
+            variant="ghost"
+            class="h-auto w-full justify-between p-0 text-left text-[13px] font-normal"
             onclick={() => toggleTrain(t.trainVersion)}
           >
             <span class="flex items-center gap-1.5">
@@ -174,7 +176,7 @@
               v{t.trainVersion}
             </span>
             <Badge variant="secondary">{t.buildCount} build{t.buildCount === 1 ? '' : 's'}</Badge>
-          </button>
+          </Button>
 
           {#if expandedTrain === t.trainVersion}
             <div class="mt-2 pl-3">

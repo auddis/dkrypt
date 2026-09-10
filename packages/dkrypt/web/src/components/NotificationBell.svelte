@@ -3,6 +3,7 @@
   import { Bell, CircleCheck, CircleX, Info, TriangleAlert } from 'lucide-svelte';
   import { fetchNotifications, markNotificationsRead, type DashboardNotification } from '#lib/api';
   import { buttonVariants } from '#lib/components/ui/variants';
+  import Button from '#lib/components/ui/Button.svelte';
   import { clearToastHistory, toastHistoryState } from '#lib/ui.svelte';
   import RelativeTime from '#components/RelativeTime.svelte';
   import { cn } from '#lib/utils';
@@ -68,11 +69,11 @@
     {/if}
   </Popover.Trigger>
   <Popover.Portal>
-    <Popover.Content class="border-border bg-panel z-50 w-80 rounded-xl border p-3 shadow-2xl" sideOffset={8} align="end">
+    <Popover.Content class="border-border bg-popover text-popover-foreground z-50 w-80 rounded-md border p-3 shadow-md" sideOffset={8} align="end">
       <div class="mb-2 flex items-center justify-between">
         <span class="text-sm font-medium">Notifications</span>
         {#if localItems.length > 0}
-          <button class="text-muted hover:text-text cursor-pointer text-xs" onclick={clearToastHistory}>Clear local</button>
+          <Button variant="link" size="sm" class="h-auto p-0 text-xs text-muted" onclick={clearToastHistory}>Clear local</Button>
         {/if}
       </div>
       {#if notifications.length > 0}

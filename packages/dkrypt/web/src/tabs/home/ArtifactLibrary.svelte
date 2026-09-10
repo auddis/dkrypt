@@ -11,6 +11,7 @@
   import { fmtBytesGB, fmtRelative, fmtSize } from '#lib/format';
   import { PermissionFlag } from '#lib/permissions';
   import { sessionHasPermission } from '#lib/session.svelte';
+  import { buttonVariants } from '#lib/components/ui/variants';
 
   const canDecrypt = $derived(sessionHasPermission(PermissionFlag.requestDecrypt));
   let artifacts = $state<ArtifactRecord[]>([]);
@@ -66,9 +67,9 @@
       </div>
       <div class="flex w-full items-center gap-2 sm:w-auto sm:min-w-[18rem]">
         <Input bind:value={query} onkeydown={(event) => event.key === 'Enter' && void load()} placeholder="Search apps or versions…" class="min-w-0 flex-1 sm:w-64" />
-        <button type="button" class="text-muted hover:text-text cursor-pointer disabled:opacity-50" disabled={loading} onclick={() => void load()} aria-label="Refresh IPA Library" title="Refresh IPA Library">
+        <Button variant="ghost" size="icon" class="text-muted hover:text-foreground h-8 w-8 p-0" disabled={loading} onclick={() => void load()} aria-label="Refresh IPA Library" title="Refresh IPA Library">
           <RefreshCw class="h-3.5 w-3.5 {loading ? 'animate-spin' : ''}" />
-        </button>
+        </Button>
       </div>
     </div>
 
@@ -105,8 +106,8 @@
                 <div class="text-muted mt-0.5 truncate" title={new Date(artifact.lastAccessedAt).toLocaleString()}>{fmtRelative(new Date(artifact.lastAccessedAt).getTime())}</div>
               </div>
             </div>
-            <a href={artifact.fileUrl} download class="sm:justify-self-end">
-              <Button size="sm" variant="secondary"><Download class="h-3.5 w-3.5" />Download</Button>
+            <a href={artifact.fileUrl} download class="{buttonVariants('secondary', 'sm')} sm:justify-self-end">
+              <Download class="h-3.5 w-3.5" />Download
             </a>
           </div>
         {/each}

@@ -13,8 +13,9 @@
 <input
   bind:this={ref}
   bind:value
+  data-slot="input"
   class={cn(
-    'glass-input h-9 w-full rounded-xl px-3 text-sm text-text placeholder:text-muted focus:outline-none disabled:opacity-50',
+    'border-input bg-background ring-offset-background placeholder:text-muted-foreground flex h-9 w-full rounded-md border px-3 py-1 text-sm text-foreground shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50',
     className,
   )}
   {...rest}

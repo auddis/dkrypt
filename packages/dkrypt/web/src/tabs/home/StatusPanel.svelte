@@ -29,6 +29,7 @@
 		type SchedulerRunOutcome,
 	} from "#lib/api";
 	import Badge from "#lib/components/ui/Badge.svelte";
+	import Button from "#lib/components/ui/Button.svelte";
 	import Card from "#lib/components/ui/Card.svelte";
 	import Popover from "#lib/components/ui/Popover.svelte";
 	import {
@@ -439,9 +440,10 @@
 					{HEALTH_LABEL[overallHealth.level]}
 				</span>
 				<span>Checked <RelativeTime ms={health.checkedAt} /></span>
-				<button
-					type="button"
-					class="hover:text-text disabled:opacity-50"
+				<Button
+					variant="ghost"
+					size="icon"
+					class="h-7 w-7 p-0 text-muted"
 					disabled={refreshingHealth}
 					onclick={refreshHealth}
 					aria-label="Refresh device status"
@@ -452,7 +454,7 @@
 							? 'animate-spin'
 							: ''}"
 					/>
-				</button>
+				</Button>
 				<CopyButton
 					text={debugBundleText()}
 					title="Copy debug info (device health, queue, disk)"

@@ -26,6 +26,7 @@
 	import Badge from "#lib/components/ui/Badge.svelte";
 	import Button from "#lib/components/ui/Button.svelte";
 	import Card from "#lib/components/ui/Card.svelte";
+	import Checkbox from "#lib/components/ui/Checkbox.svelte";
 	import Input from "#lib/components/ui/Input.svelte";
 	import {
 		buttonVariants,
@@ -639,15 +640,14 @@
 		</div>
 	{/snippet}
 	{#if entries.length > 0}
-		<label class="mb-3 inline-flex cursor-pointer items-center gap-2 text-xs text-muted">
-			<input
-				type="checkbox"
+		<div class="mb-3 inline-flex items-center gap-2 text-xs text-muted">
+			<Checkbox
 				checked={selected.size === entries.length}
-				onchange={toggleSelectAll}
+				onCheckedChange={toggleSelectAll}
 				aria-label="Select or unselect all loaded jobs"
 			/>
 			Select all loaded
-		</label>
+		</div>
 	{/if}
 	<div class="mb-3 flex flex-wrap items-center gap-2.5">
 		<div class="relative max-w-xs flex-1">
@@ -657,14 +657,16 @@
 				class="pr-8"
 			/>
 			{#if searchText}
-				<button
-					class="text-muted hover:text-text absolute top-1/2 right-2 -translate-y-1/2 cursor-pointer"
+				<Button
+					variant="ghost"
+					size="icon"
+					class="text-muted hover:text-foreground absolute top-1/2 right-1.5 h-7 w-7 -translate-y-1/2"
 					onclick={clearSearch}
 					aria-label="Clear search"
 					title="Clear search"
 				>
 					<X class="h-3.5 w-3.5" />
-				</button>
+				</Button>
 			{/if}
 		</div>
 		<div class="flex flex-wrap gap-1">
@@ -725,32 +727,38 @@
 					class="border-accent text-accent inline-flex items-center gap-1.5 rounded-full border pr-1 pl-2.5 py-1 text-[12px]"
 				>
 					Failure category: {failureCategoryFilter}
-					<button
-						class="hover:text-err cursor-pointer rounded-full p-0.5"
+					<Button
+						variant="ghost"
+						size="icon"
+						class="hover:text-destructive h-6 w-6 rounded-full p-0"
 						onclick={() => (failureCategoryFilter = "")}
 						aria-label="Clear failure category filter"
 						title="Clear failure category filter"
 					>
 						<X class="h-3 w-3" />
-					</button>
+					</Button>
 				</span>
 			{/if}
 			{#each savedViews.presets as p (p.name)}
 				<span
 					class="border-border text-muted hover:text-text hover:border-accent inline-flex items-center gap-1 rounded-full border pr-1 pl-2.5 py-1 text-[12px]"
 				>
-					<button
-						class="cursor-pointer"
-						onclick={() => applyPreset(p)}>{p.name}</button
+					<Button
+						variant="link"
+						size="sm"
+						class="h-auto p-0 text-xs text-muted"
+						onclick={() => applyPreset(p)}>{p.name}</Button
 					>
-					<button
-						class="text-muted hover:text-err cursor-pointer rounded-full p-0.5"
+					<Button
+						variant="ghost"
+						size="icon"
+						class="text-muted hover:text-destructive h-6 w-6 rounded-full p-0"
 						onclick={() => removePreset(p.name)}
 						aria-label="Delete preset {p.name}"
 						title="Delete preset"
 					>
 						<X class="h-3 w-3" />
-					</button>
+					</Button>
 				</span>
 			{/each}
 			<div class="flex items-center gap-1.5">
@@ -830,28 +838,28 @@
 									<div
 										class="history-feed-summary flex min-w-0 flex-1 items-start gap-3"
 									>
-										<input
+										<Checkbox
 											class="mt-1"
-											type="checkbox"
 											checked={selected.has(j.id)}
-											onchange={() => toggleSelect(j.id)}
+											onCheckedChange={() => toggleSelect(j.id)}
 											aria-label="Select {j.bundleId}"
 										/>
-										<div class="min-w-0 flex-1">
-											<div
-												class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
-											>
-											<AppIcon bundleId={j.bundleId} src={appIconUrl(j.bundleId)} label={appDisplayName(j.bundleId)} class="h-5 w-5" />
-												<button
-													class="max-w-full cursor-pointer truncate text-[12.5px] font-medium hover:text-accent hover:underline"
-													title="View stats for {appDisplayName(
-														j.bundleId,
-													)}"
-													onclick={() =>
-														openStats(j.bundleId)}
-												>
-													{appDisplayName(j.bundleId)}
-												</button>
+						<div class="min-w-0 flex-1">
+							<div
+								class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
+							>
+								<AppIcon bundleId={j.bundleId} src={appIconUrl(j.bundleId)} label={appDisplayName(j.bundleId)} class="h-5 w-5" />
+								<Button
+									variant="link"
+									size="sm"
+									class="h-auto max-w-full justify-start p-0 text-left text-[12.5px] font-medium"
+									title="View stats for {appDisplayName(
+										j.bundleId,
+									)}"
+									onclick={() => openStats(j.bundleId)}
+								>
+									{appDisplayName(j.bundleId)}
+								</Button>
 												{#if j.testflight}
 													<Badge variant="secondary"
 														>TestFlight</Badge

@@ -91,7 +91,7 @@
       {/each}
     </div>
     <div class="flex gap-2">
-      <button type="button" class="text-muted hover:text-text cursor-pointer text-xs" onclick={finish}>Skip</button>
+      <Button variant="link" size="sm" class="h-auto p-0 text-xs text-muted" onclick={finish}>Skip</Button>
       {#if step.actionLabel}
         <Button
           size="sm"
