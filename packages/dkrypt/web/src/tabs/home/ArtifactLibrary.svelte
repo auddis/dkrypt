@@ -80,15 +80,15 @@
     {:else}
       <div class="divide-border max-h-[34rem] divide-y overflow-y-auto pr-4">
         {#each artifacts as artifact (artifact.id)}
-          <div class="grid gap-3 py-3 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center xl:grid-cols-[minmax(0,1fr)_32rem_auto]">
-            <div class="flex min-w-0 items-center gap-3">
+          <div class="grid gap-4 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(14rem,1fr)_auto] sm:items-center xl:grid-cols-[minmax(15rem,1.2fr)_minmax(22rem,2fr)_auto]">
+            <div class="flex min-w-0 items-start gap-3">
               <AppIcon bundleId={artifact.bundleId} src={appIconUrl(artifact.bundleId)} label={appDisplayName(artifact.bundleId)} class="h-10 w-10" />
-              <div class="min-w-0">
-                <div class="truncate text-[13px] font-semibold">{appDisplayName(artifact.bundleId)}</div>
-                <div class="text-muted mt-0.5 truncate text-xs" title={artifact.bundleId}>{artifact.bundleId}</div>
+              <div class="min-w-0 flex-1">
+                <div class="break-words text-[13px] font-semibold" title={appDisplayName(artifact.bundleId)}>{appDisplayName(artifact.bundleId)}</div>
+                <div class="text-muted mt-0.5 break-all text-xs" title={artifact.bundleId}>{artifact.bundleId}</div>
               </div>
             </div>
-            <div class="grid grid-cols-2 gap-x-5 gap-y-2 text-xs sm:col-span-2 sm:grid-cols-4 xl:col-span-1 xl:w-[32rem]">
+            <div class="grid grid-cols-2 gap-x-5 gap-y-2 text-xs sm:col-span-2 sm:grid-cols-4 xl:col-span-1">
               <div class="min-w-0 text-center">
                 <div class="text-muted text-[10px] font-semibold tracking-[0.08em] uppercase">Version</div>
                 <div class="mt-0.5 truncate text-[13px] font-semibold" title={artifact.buildNumber ? `${artifact.versionLabel ?? ''} (${artifact.buildNumber})` : artifact.versionLabel}>{artifactVersion(artifact)}</div>

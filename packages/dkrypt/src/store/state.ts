@@ -280,6 +280,7 @@ export interface JobHistoryEntry {
   versionLabel?: string;
   queuedBy?: string;
   status: 'done' | 'failed';
+  warnings?: string[];
   error?: string;
   artifactId?: string;
   sizeBytes?: number;

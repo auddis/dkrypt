@@ -571,7 +571,6 @@
 						>
 							<Icon class="size-4" />
 							<span>{t.label}</span>
-							{#if tabState.active === t.id}<span class="bg-sidebar-primary ml-auto size-1.5 rounded-full"></span>{/if}
 						</Button>
 					{/each}
 				</nav>

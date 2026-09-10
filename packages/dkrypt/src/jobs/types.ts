@@ -31,6 +31,7 @@ export interface Job {
   status: JobStatus;
   progress: string;
   timeline?: JobTimelineEvent[];
+  warnings?: string[];
   error?: string;
   retryCount?: number;
   cancelledBy?: string;

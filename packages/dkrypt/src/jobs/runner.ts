@@ -10,6 +10,7 @@ import { installBuild } from '#testflight.js';
 import { getDeviceHealth, getDeviceInstallBlocker } from '#deviceHealth.js';
 import { lookupCurrentVersion, type ItunesLookupResult } from '#scheduler/itunes.js';
 import { extractIpaMetadata } from '#util/ipaMetadata.js';
+import { classifyIpaDecryptOutput } from '#util/ipadecryptOutput.js';
 import { artifactKeyForJob, promoteArtifact } from '#artifacts.js';
 
 const log = scopedLogger('jobs');
@@ -23,6 +24,7 @@ export async function runDecrypt(job: Job, device: DeviceRecord): Promise<void> 
   };
 
   ensureNotCancelled();
+  job.warnings = undefined;
   const health = await getDeviceHealth(device.id, true);
   let currentAppStoreVersion: ItunesLookupResult | undefined;
   if (!job.testflight && !job.externalVersionId) {
@@ -85,35 +87,46 @@ export async function runDecrypt(job: Job, device: DeviceRecord): Promise<void> 
     const child = spawn(config.ipadecryptBin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     job.childProcess = child;
 
-    let lastErrorLine: string | undefined;
+    let output = '';
 
-    const onLine = (chunk: Buffer) => {
-      const text = chunk.toString('utf8').trim();
+    const onOutput = (chunk: Buffer) => {
+      const rawText = chunk.toString('utf8');
+      output += rawText;
+      const text = rawText.trim();
       if (!text) return;
       const lines = text.split('\n');
       const lastLine = lines.at(-1) ?? text;
       job.progress = lastLine;
       recordTimeline(lastLine);
-      for (const line of lines) {
-        if (line.trimStart().startsWith('[err]')) lastErrorLine = line.trim();
-      }
       log.info('ipadecrypt output', { jobId: job.id, bundleId: job.bundleId, deviceId: device.id, line: lastLine });
       emitJobsChanged();
     };
 
-    child.stdout.on('data', onLine);
-    child.stderr.on('data', onLine);
+    child.stdout.on('data', onOutput);
+    child.stderr.on('data', onOutput);
 
     child.on('error', (err) => reject(err));
 
     child.on('close', (code) => {
       job.childProcess = undefined;
-      if (code === 0 && !lastErrorLine) {
-        resolve();
-      } else if (job.cancelledBy) {
+      const result = classifyIpaDecryptOutput(output);
+      if (job.cancelledBy) {
         reject(new Error(`cancelled by ${job.cancelledBy}`));
+      } else if (result.extensionOnly) {
+        job.warnings = result.warnings;
+        for (const warning of result.warnings) appendJobTimelineEvent(job, `Warning: ${warning}`, 'done');
+        log.warn('ipadecrypt completed with extension warnings', {
+          jobId: job.id,
+          bundleId: job.bundleId,
+          deviceId: device.id,
+          encryptedPaths: result.encryptedPaths,
+        });
+        emitJobsChanged();
+        resolve();
+      } else if (code === 0 && !result.error && result.encryptedPaths.length === 0) {
+        resolve();
       } else {
-        reject(new Error(lastErrorLine ?? `ipadecrypt exited with code ${code}: ${job.progress}`));
+        reject(new Error(result.error ?? `ipadecrypt exited with code ${code}: ${job.progress}`));
       }
     });
   });

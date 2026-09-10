@@ -89,6 +89,7 @@ export interface JobSummary {
   priority?: number;
   status: 'queued' | 'running' | 'done' | 'failed';
   progress: string;
+  warnings?: string[];
   error?: string;
   artifactId?: string;
   artifactUrl?: string;
@@ -264,6 +265,7 @@ export interface JobHistoryEntry {
   queuedBy?: string;
   requester?: { username?: string; displayName: string; avatarUrl?: string };
   status: 'done' | 'failed';
+  warnings?: string[];
   error?: string;
   artifactId?: string;
   sha256?: string;
@@ -308,6 +310,7 @@ export interface JobTimeline {
   bundleId: string;
   status: 'queued' | 'running' | 'done' | 'failed';
   events: JobTimelineEvent[];
+  warnings?: string[];
   guidance?: { category: string; title: string; action: string; retryRecommended: boolean };
   versionLabel?: string;
   deviceId?: string;

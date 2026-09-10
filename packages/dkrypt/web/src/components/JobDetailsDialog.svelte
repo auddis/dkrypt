@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Copy, Download, FileSearch, GitBranch } from 'lucide-svelte';
+  import Alert from '#lib/components/ui/Alert.svelte';
   import { fetchJobTimeline, jobDiagnosticUrl, type JobTimeline } from '#lib/api';
   import Badge from '#lib/components/ui/Badge.svelte';
   import Button from '#lib/components/ui/Button.svelte';
@@ -64,6 +65,12 @@
       {#if timeline.deviceId}<span class="text-xs text-muted">Device: {timeline.deviceId}</span>{/if}
       {#if timeline.sizeBytes}<span class="text-xs text-muted">{fmtSize(timeline.sizeBytes)}</span>{/if}
     </div>
+    {#if timeline.warnings?.length}
+      <Alert variant="warning" class="mb-4">
+        <div class="font-medium">Completed with warnings</div>
+        <div class="mt-1 text-xs">{timeline.warnings.join(' ')}</div>
+      </Alert>
+    {/if}
     {#if timeline.guidance}
       <div class="border-warn/40 bg-warn/10 mb-4 rounded-lg border p-3 text-sm">
         <div class="font-medium">{timeline.guidance.title}</div>

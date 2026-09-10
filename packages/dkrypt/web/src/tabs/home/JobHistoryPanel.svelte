@@ -904,10 +904,16 @@
 													j.status,
 												)}>{j.status}</Badge
 											>
+											{#if j.warnings?.length}
+												<Badge
+													variant="warning"
+													title={j.warnings.join(" ")}>warning</Badge
+												>
+											{/if}
 											<span class="text-xs text-muted"
-												><RelativeTime
-													ms={j.finishedAt}
-												/></span
+											><RelativeTime
+												ms={j.finishedAt}
+											/></span
 											>
 										</div>
 									</div>

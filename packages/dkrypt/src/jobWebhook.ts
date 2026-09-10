@@ -17,24 +17,31 @@ export function startJobWebhookDispatcher(): void {
     const labelText = label(entry);
     const artifact = entry.artifactId ? getArtifactById(entry.artifactId) : undefined;
     const hasArtifact = artifactFileAvailable(artifact);
+    const hasWarnings = entry.status === 'done' && (entry.warnings?.length ?? 0) > 0;
     const completionMessage = hasArtifact
       ? `${labelText} is ready to download.`
       : `${labelText} finished, but its artifact is unavailable.`;
+    const warningMessage = hasWarnings ? ` Completed with warnings: ${entry.warnings?.join(' ')}` : '';
     recordNotification({
       userId: entry.queuedBy ?? 'root',
-      title: entry.status === 'done' ? 'Decrypt finished' : 'Decrypt failed',
-      message: entry.status === 'done' ? completionMessage : `${labelText}: ${entry.error ?? 'the decrypt failed'}`,
-      severity: entry.status === 'done' ? hasArtifact ? 'success' : 'warning' : 'error',
+      title: entry.status === 'done'
+        ? hasWarnings ? 'Decrypt finished with warnings' : 'Decrypt finished'
+        : 'Decrypt failed',
+      message: entry.status === 'done' ? `${completionMessage}${warningMessage}` : `${labelText}: ${entry.error ?? 'the decrypt failed'}`,
+      severity: entry.status === 'done' ? hasWarnings ? 'warning' : hasArtifact ? 'success' : 'warning' : 'error',
       jobId: entry.id,
       href: `/?tab=home&job=${encodeURIComponent(entry.id)}`,
     });
     void notify('jobCompleted', {
-      title: entry.status === 'done' ? 'Decrypt finished' : 'Decrypt failed',
-      color: entry.status === 'done' ? hasArtifact ? EMBED_COLOR.ok : EMBED_COLOR.warn : EMBED_COLOR.err,
+      title: entry.status === 'done'
+        ? hasWarnings ? 'Decrypt finished with warnings' : 'Decrypt finished'
+        : 'Decrypt failed',
+      color: entry.status === 'done' ? hasWarnings ? EMBED_COLOR.warn : hasArtifact ? EMBED_COLOR.ok : EMBED_COLOR.warn : EMBED_COLOR.err,
       fields: [
         { name: 'App', value: label(entry), inline: true },
         { name: 'Source', value: entry.source, inline: true },
         ...(entry.status === 'done' && entry.sizeBytes ? [{ name: 'Size', value: fmtBytes(entry.sizeBytes), inline: true }] : []),
+        ...(hasWarnings ? [{ name: 'Warnings', value: entry.warnings?.join('\n') ?? '' }] : []),
         ...(entry.status === 'failed' && entry.error ? [{ name: 'Error', value: `\`\`\`${entry.error}\`\`\`` }] : []),
       ],
     });

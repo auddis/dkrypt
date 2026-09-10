@@ -62,16 +62,16 @@
 					const message =
 						data.status === "done"
 							? downloadUrl
-								? `${label} is ready to download.`
-								: `${label} finished, but its artifact is unavailable.`
+								? `${label} is ready to download.${data.warnings?.length ? ` Completed with warnings: ${data.warnings.join(" ")}` : ""}`
+								: `${label} finished, but its artifact is unavailable.${data.warnings?.length ? ` Completed with warnings: ${data.warnings.join(" ")}` : ""}`
 							: `${label} failed: ${data.error ?? "unknown error"}`;
-					notifyJobFinished(
+					const notifyTitle =
 						data.status === "done"
-							? "Decrypt finished"
-							: "Decrypt failed",
-						message,
-						downloadUrl,
-					);
+							? data.warnings?.length
+								? "Decrypt finished with warnings"
+								: "Decrypt finished"
+							: "Decrypt failed";
+					notifyJobFinished(notifyTitle, message, downloadUrl);
 					if (soundEnabledState.value) {
 						playChime();
 						vibrateCompletion(data.status === "done");
@@ -81,6 +81,7 @@
 					status: data.status,
 					progress: data.progress,
 					queue: data.queue,
+					warnings: data.warnings,
 					error: data.error,
 					artifactId: data.artifactId,
 					artifactUrl: data.artifactUrl,
@@ -299,6 +300,9 @@
 							>
 								{#if d.status === "done"}
 									<Badge variant="success">done</Badge>
+									{#if d.warnings?.length}
+										<Badge variant="warning" title={d.warnings.join(" ")}>warning</Badge>
+									{/if}
 								{:else if d.status === "failed"}
 									<Badge variant="destructive">failed</Badge>
 								{:else if d.status === "running"}

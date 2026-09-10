@@ -10,6 +10,7 @@ export interface TrackedDecrypt {
   status: string;
   progress?: string;
   queue?: { position: number; total: number };
+  warnings?: string[];
   error?: string;
   createdAt: number;
   artifactId?: string;

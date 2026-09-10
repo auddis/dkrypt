@@ -340,6 +340,7 @@ function toHistoryEntry(job: Job) {
     versionLabel: job.versionLabel,
     queuedBy: job.queuedBy,
     status: job.status as 'done' | 'failed',
+    warnings: job.warnings,
     error: job.error,
     sizeBytes: job.fileSizeBytes,
     source: job.source,
@@ -587,9 +588,12 @@ async function runOneJob(device: DeviceRecord, job: Job): Promise<void> {
   if (job.queuedBy) {
     const prefs = getUserPrefs(job.queuedBy);
     const label = job.versionLabel ? `${job.bundleId} (${job.versionLabel})` : job.bundleId;
-    const title = job.status === 'done' ? 'Decrypt finished' : 'Decrypt failed';
+    const hasWarnings = job.status === 'done' && (job.warnings?.length ?? 0) > 0;
+    const title = job.status === 'done'
+      ? hasWarnings ? 'Decrypt finished with warnings' : 'Decrypt finished'
+      : 'Decrypt failed';
     const body = job.status === 'done'
-      ? downloadUrl ? `${label} is ready to download.` : `${label} finished, but its artifact is unavailable.`
+      ? `${downloadUrl ? `${label} is ready to download.` : `${label} finished, but its artifact is unavailable.`}${hasWarnings ? ` Completed with warnings: ${job.warnings?.join(' ')}` : ''}`
       : `${label} failed: ${job.error ?? 'unknown error'}`;
 
     const shouldPush = job.status === 'done' ? (prefs.pushOnSuccess ?? true) : (prefs.pushOnFailure ?? true);

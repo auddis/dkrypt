@@ -30,6 +30,7 @@ export function jobSummary(job: Job) {
     priority: job.priority,
     status: job.status,
     progress: job.progress,
+    warnings: job.warnings,
     error: job.error,
     artifactId: job.artifactId,
     artifactUrl: job.artifactId ? `/v1/artifacts/${job.artifactId}/file` : undefined,
