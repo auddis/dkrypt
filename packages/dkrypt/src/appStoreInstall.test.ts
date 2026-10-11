@@ -10,10 +10,13 @@ let installRequest: Record<string, unknown> | undefined;
 let installStatus: Record<string, unknown> = {};
 let installStatusAfterRequest: Record<string, unknown> | undefined;
 let installStatusSequence: Record<string, unknown>[] = [];
+let deviceInstallStatus: Record<string, unknown> | undefined;
+let deviceInstallStatusErrors = 0;
 let guardedUninstallFails = false;
 let foregroundStatuses: boolean[] = [];
 let bridgeStatusErrors = 0;
 let postInstallStatusErrors = 0;
+let postInstallStatusSuccesses = 0;
 let foregroundRequests = 0;
 let listingPrice = 0;
 let listingBundleId = '';
@@ -38,10 +41,18 @@ mock.module('#idevice.js', () => ({
   },
   isAppStoreRunning: async () => true,
   readInstalledBundleVersions: async () => ({ shortVersion: lastInstalledBundle?.shortVersion, buildVersion: '106000' }),
+  readAppStoreInstallStatus: async () => {
+    if (deviceInstallStatusErrors > 0) {
+      deviceInstallStatusErrors -= 1;
+      throw new Error('device install status file unavailable');
+    }
+    return deviceInstallStatus;
+  },
   sendAppStoreBridgeRequest: async (_conn: object, request: Record<string, unknown>) => {
     if (request.action === 'status') {
       calls.push('status');
-      if (installRequest && postInstallStatusErrors > 0) {
+      if (installRequest && postInstallStatusSuccesses > 0) postInstallStatusSuccesses -= 1;
+      else if (installRequest && postInstallStatusErrors > 0) {
         postInstallStatusErrors -= 1;
         throw new Error('could not publish bridge request: command timed out');
       }
@@ -111,10 +122,13 @@ describe('installFromAppStore', () => {
     installStatus = {};
     installStatusAfterRequest = undefined;
     installStatusSequence = [];
+    deviceInstallStatus = undefined;
+    deviceInstallStatusErrors = 0;
     guardedUninstallFails = false;
     foregroundStatuses = [true];
     bridgeStatusErrors = 0;
     postInstallStatusErrors = 0;
+    postInstallStatusSuccesses = 0;
     foregroundRequests = 0;
     listingPrice = 0;
     listingBundleId = '';
@@ -221,6 +235,86 @@ describe('installFromAppStore', () => {
     await expect(installFromAppStore('com.hammerandchisel.discord')).resolves.toMatchObject({ shortVersion: '338.0' });
 
     expect(calls).toEqual(['restart', 'status', 'arm', 'request', 'status', 'clear']);
+  });
+
+  test('recognizes a completed purchase when bridge status stops responding and permits a retry', async () => {
+    let now = 0;
+    Date.now = () => now;
+    globalThis.setTimeout = ((handler: () => void) => {
+      now += 5_000;
+      handler();
+      return 0;
+    }) as unknown as typeof setTimeout;
+    installedBundles = Array(10).fill(undefined);
+    installStatusAfterRequest = { operationId: 'job-bridge-stalled', state: 'authorizing' };
+    deviceInstallStatus = { operationId: 'job-bridge-stalled', state: 'completed' };
+    postInstallStatusSuccesses = 1;
+    postInstallStatusErrors = 100;
+
+    try {
+      await expect(installFromAppStore('com.example.app', {
+        operationId: 'job-bridge-stalled',
+        waitTimeoutMs: 20_000,
+      })).rejects.toMatchObject({
+        message: 'App Store purchase request completed but com.example.app was not installed within 20s',
+        retryable: true,
+      });
+    } finally {
+      Date.now = originalDateNow;
+      globalThis.setTimeout = originalSetTimeout;
+    }
+    expect(calls).toEqual(['restart', 'status', 'arm', 'request', 'clear']);
+  });
+
+  test('uses bridge status when the device install status file cannot be read', async () => {
+    let now = 0;
+    Date.now = () => now;
+    globalThis.setTimeout = ((handler: () => void) => {
+      now += 5_000;
+      handler();
+      return 0;
+    }) as unknown as typeof setTimeout;
+    installedBundles = Array(10).fill(undefined);
+    deviceInstallStatusErrors = 100;
+    installStatusAfterRequest = { operationId: 'job-file-unavailable', state: 'completed' };
+
+    try {
+      await expect(installFromAppStore('com.example.app', {
+        operationId: 'job-file-unavailable',
+        waitTimeoutMs: 20_000,
+      })).rejects.toThrow('App Store purchase request completed but com.example.app was not installed within 20s');
+    } finally {
+      Date.now = originalDateNow;
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
+  test('does not claim confirmation failed when both install status paths stop responding', async () => {
+    let now = 0;
+    Date.now = () => now;
+    globalThis.setTimeout = ((handler: () => void) => {
+      now += 5_000;
+      handler();
+      return 0;
+    }) as unknown as typeof setTimeout;
+    installedBundles = Array(10).fill(undefined);
+    deviceInstallStatusErrors = 100;
+    installStatusAfterRequest = { operationId: 'job-status-unavailable', state: 'authorizing' };
+    postInstallStatusSuccesses = 1;
+    postInstallStatusErrors = 100;
+
+    try {
+      await expect(installFromAppStore('com.example.app', {
+        operationId: 'job-status-unavailable',
+        waitTimeoutMs: 20_000,
+      })).rejects.toMatchObject({
+        message: 'App Store install status could not be verified for com.example.app within 20s; the app was not installed',
+        retryable: true,
+      });
+    } finally {
+      Date.now = originalDateNow;
+      globalThis.setTimeout = originalSetTimeout;
+    }
   });
 
   test('continues when the App Store bridge is responsive but inactive', async () => {

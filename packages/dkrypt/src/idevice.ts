@@ -30,6 +30,7 @@ const AUTOCONFIRM_FLAG_PATHS = [
   '/private/var/mobile/Library/Caches/com.apple.ios.StoreKitUIService/autoinstall-autoconfirm.flag',
 ];
 const AUTOCONFIRM_TTL_MS = 6 * 60_000;
+const APP_STORE_INSTALL_STATUS_PATH = '/tmp/autoinstall-as-install-status.json';
 const BRIDGE_ROOT_PATH = '/tmp/autoinstall/v1';
 const BRIDGE_SECRET_FILE_NAME = 'autoinstall-bridge-secret';
 const BRIDGE_SECRET_REMOTE_PATH = '/var/mobile/Library/Preferences/dev.adrian.autoinstall-bridge.secret';
@@ -1442,6 +1443,13 @@ async function readRemoteFileIfExists(conn: DeviceClient, remotePath: string, ti
   if (code === 0) return stdout;
   if (code === 44) return undefined;
   throw new Error(`could not read remote file: ${stderr.trim() || stdout.trim() || `exit code ${code ?? 'unknown'}`}`);
+}
+
+export async function readAppStoreInstallStatus(conn: DeviceClient): Promise<Record<string, unknown> | undefined> {
+  const raw = await readRemoteFileIfExists(conn, APP_STORE_INSTALL_STATUS_PATH);
+  if (!raw) return undefined;
+  const parsed: unknown = JSON.parse(raw);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
 }
 
 export async function readBridgeHeartbeats(conn: DeviceClient): Promise<Partial<Record<BridgeChannel, BridgeHeartbeat>>> {

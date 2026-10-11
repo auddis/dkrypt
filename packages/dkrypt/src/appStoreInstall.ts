@@ -5,6 +5,7 @@ import {
   execCommand,
   findInstalledAppStoreBundle,
   isAppStoreRunning,
+  readAppStoreInstallStatus,
   readInstalledBundleVersions,
   sendAppStoreBridgeRequest,
   sendSpringBoardBridgeRequest,
@@ -30,12 +31,12 @@ const APP_STORE_BRIDGE_STATUS_TIMEOUT_MS = 3_000;
 const APP_STORE_BRIDGE_POLL_INTERVAL_MS = 500;
 const APP_STORE_INSTALL_STATUS_POLL_INTERVAL_MS = 5_000;
 
-class AppStoreAuthorizationTimeoutError extends Error {
-  readonly retryable = false;
+class AppStoreInstallTimeoutError extends Error {
+  readonly retryable = true;
 
   constructor(message: string) {
     super(message);
-    this.name = 'AppStoreAuthorizationTimeoutError';
+    this.name = 'AppStoreInstallTimeoutError';
   }
 }
 
@@ -222,20 +223,30 @@ export async function installFromAppStore(bundleId: string, options: AppStoreIns
       let lastReportedAt = 0;
       let lastUnexpectedVersion: string | undefined;
       let lastInstallState: string | undefined;
+      let lastInstallStatusVerified = false;
       let authorizationReported = false;
       while (Date.now() < deadline) {
         ensureNotCancelled();
-        if (Date.now() - lastInstallStatusAt >= APP_STORE_INSTALL_STATUS_POLL_INTERVAL_MS) {
+        if (lastInstallState !== 'completed' && Date.now() - lastInstallStatusAt >= APP_STORE_INSTALL_STATUS_POLL_INTERVAL_MS) {
           lastInstallStatusAt = Date.now();
-          let bridgeStatus: unknown;
+          let status: unknown;
           try {
-            bridgeStatus = await sendAppStoreBridgeRequest(conn, { action: 'status' }, APP_STORE_BRIDGE_STATUS_TIMEOUT_MS, options.signal);
+            status = await readAppStoreInstallStatus(conn);
           } catch (error) {
             ensureNotCancelled();
-            log.warn('App Store status poll failed while installation continues', { bundleId, externalVersionId, error: String(error) });
+            log.warn('App Store install status file could not be read', { bundleId, externalVersionId, error: String(error) });
+          }
+          if (!currentInstallStatus({ install: status }, operationId)) {
+            try {
+              status = (await sendAppStoreBridgeRequest(conn, { action: 'status' }, APP_STORE_BRIDGE_STATUS_TIMEOUT_MS, options.signal)).install;
+            } catch (error) {
+              ensureNotCancelled();
+              log.warn('App Store bridge status check failed while installation continues', { bundleId, externalVersionId, error: String(error) });
+            }
           }
           ensureNotCancelled();
-          const install = currentInstallStatus(bridgeStatus, operationId);
+          const install = currentInstallStatus({ install: status }, operationId);
+          lastInstallStatusVerified = Boolean(install);
           lastInstallState = typeof install?.state === 'string' ? install.state : lastInstallState;
           if (install?.state === 'failed') {
             const detail = typeof install.error === 'string' ? install.error : 'the App Store reported an installation failure';
@@ -273,13 +284,16 @@ export async function installFromAppStore(bundleId: string, options: AppStoreIns
       if (lastUnexpectedVersion && targetVersion) {
         throw new Error(`timed out waiting for ${bundleId} version ${targetVersion}; version ${lastUnexpectedVersion} remained installed after ${Math.round(waitTimeoutMs / 1000)}s`);
       }
+      if (!lastInstallStatusVerified) {
+        throw new AppStoreInstallTimeoutError(`App Store install status could not be verified for ${bundleId} within ${Math.round(waitTimeoutMs / 1000)}s; the app was not installed`);
+      }
       if (lastInstallState === 'authorizing' || lastInstallState === 'requires_user_action') {
-        throw new AppStoreAuthorizationTimeoutError(`Autoinstall could not complete the free App Store confirmation for ${bundleId} within ${Math.round(waitTimeoutMs / 1000)}s`);
+        throw new AppStoreInstallTimeoutError(`Autoinstall could not complete the free App Store confirmation for ${bundleId} within ${Math.round(waitTimeoutMs / 1000)}s`);
       }
       if (lastInstallState === 'completed') {
-        throw new Error(`App Store purchase request completed but ${bundleId} was not installed within ${Math.round(waitTimeoutMs / 1000)}s`);
+        throw new AppStoreInstallTimeoutError(`App Store purchase request completed but ${bundleId} was not installed within ${Math.round(waitTimeoutMs / 1000)}s`);
       }
-      throw new Error(`timed out waiting for ${bundleId} to install from the App Store after ${Math.round(waitTimeoutMs / 1000)}s`);
+      throw new AppStoreInstallTimeoutError(`timed out waiting for ${bundleId} to install from the App Store after ${Math.round(waitTimeoutMs / 1000)}s`);
     } finally {
       await clearAppStoreAutoConfirm(conn).catch(() => {});
     }
