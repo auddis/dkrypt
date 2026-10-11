@@ -10,6 +10,7 @@ import { scopedLogger } from '#logger.js';
 import { closeDashboardConnections, dashboardEvents, emitBillingChanged, emitJobsChanged } from '#events.js';
 import { cancelQueuedJob, enqueueDecryptJob } from '#jobs/store.js';
 import { config } from '#config.js';
+import { setCachedDeviceHealth } from '#deviceHealthCache.js';
 import { PermissionFlag, serializeBits } from '#permissions.js';
 import { buildTestServer } from '#testServer.js';
 import { buildServer as buildRawServer } from '#server.js';
@@ -1333,6 +1334,25 @@ test('native device operations validate inputs and preserve view and manage perm
     const missingRecoveryTarget = await server.inject({ method: 'POST', url: '/v1/dashboard/devices/missing/recover', headers: { cookie: administratorCookie } });
     expect(missingRecoveryTarget.statusCode).toBe(404);
   } finally {
+    await server.close();
+  }
+});
+
+test('device health dashboard serves cached telemetry without waiting for another device probe', async () => {
+  const device = createDevice({ name: `Cached health ${crypto.randomUUID()}`, transport: 'wifi', host: '127.0.0.1' }, 'test');
+  setCachedDeviceHealth(device.id, { reachable: true, checkedAt: Date.now(), jailbreakAvailable: true });
+  const server = await buildTestServer({ includePublicRoutes: false });
+
+  try {
+    const response = await server.inject({
+      method: 'GET',
+      url: `/v1/dashboard/devices/${device.id}/health`,
+      headers: { cookie: createSessionCookie('root', PermissionFlag.administrator) },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ reachable: true, refreshing: false });
+  } finally {
+    deleteDevice(device.id, 'test');
     await server.close();
   }
 });

@@ -564,10 +564,11 @@ export interface DecryptPreflightDevice {
   name: string;
   isPrimary: boolean;
   ready: boolean;
+  checking?: boolean;
   blockers: string[];
   warnings?: string[];
   readiness?: DeviceReadiness;
-  reachable: boolean;
+  reachable?: boolean;
   storageFreeBytes?: number;
   batteryPercent?: number;
 }
@@ -832,6 +833,7 @@ export function fetchOverview(): Promise<OverviewPayload> {
 
 export interface DeviceHealth extends DeviceTransportStatus {
   reachable: boolean;
+  refreshing?: boolean;
   transport?: 'usb' | 'wifi';
   capabilities?: string[];
   error?: string;

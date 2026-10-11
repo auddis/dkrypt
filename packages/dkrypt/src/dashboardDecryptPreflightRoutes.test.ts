@@ -177,6 +177,34 @@ test('App Store preflight reports the shared SpringBoard bridge outage', async (
   }
 });
 
+test('preflight does not wait indefinitely for an occupied device-health probe', async () => {
+  const device = createDevice('busy-device');
+  let releaseProbe: ((value: DeviceHealth) => void) | undefined;
+  const probe = new Promise<DeviceHealth>((resolve) => { releaseProbe = resolve; });
+  const server = build({
+    getEffectiveDevices: () => [device],
+    getDeviceHealth: () => probe,
+  });
+
+  try {
+    const request = server.inject({
+      method: 'POST',
+      url: '/v1/dashboard/decrypt/preflight',
+      headers: { cookie: sessionCookie(PermissionFlag.requestDecrypt) },
+      payload: { bundleId: 'com.myfitnesspal.mfp' },
+    });
+    const response = await Promise.race([
+      request,
+      Bun.sleep(1_500).then(() => undefined),
+    ]);
+    expect(response?.statusCode).toBe(200);
+    expect(response?.json()).toMatchObject({ canQueue: false, devices: [{ ready: false, checking: true }] });
+  } finally {
+    releaseProbe?.(createHealth());
+    await server.close();
+  }
+});
+
 test('TestFlight preflight exposes only verified devices and rejects an ineligible selection', async () => {
   const first = createDevice('device-one');
   const second = createDevice('device-two');

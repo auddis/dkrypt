@@ -20,6 +20,7 @@ const subsystemDetailSchema = Type.Object({
 
 export const deviceHealthResponseSchema = Type.Object({
   reachable: Type.Boolean(),
+  refreshing: Type.Optional(Type.Boolean()),
   transport: Type.Optional(deviceTransportSchema),
   transportState: Type.Optional(deviceTransportStateSchema),
   capabilities: Type.Optional(Type.Array(Type.String())),
@@ -122,7 +123,7 @@ export type DeviceInventoryResponse = Static<typeof deviceInventoryResponseSchem
 export type DeviceBridgeActionBody = Static<typeof deviceBridgeActionBodySchema>;
 
 type DeviceParams = { id: string };
-type DeviceHealthRouteErrors = { 400: ApiErrorEnvelope; 401: ApiErrorEnvelope; 403: ApiErrorEnvelope; 404: ApiErrorEnvelope; 502: ApiErrorEnvelope };
+type DeviceHealthRouteErrors = { 400: ApiErrorEnvelope; 401: ApiErrorEnvelope; 403: ApiErrorEnvelope; 404: ApiErrorEnvelope; 502: ApiErrorEnvelope; 503: ApiErrorEnvelope };
 
 export type DashboardDeviceHealthRoute = {
   Params: DeviceParams;

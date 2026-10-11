@@ -1181,7 +1181,7 @@ register('GET', '/v1/dashboard/overview', { querystring: dashboardOverviewQueryS
 register('GET', '/v1/dashboard/jobs', { response: { 200: dashboardJobHistoryPageSchema, 404: ErrorEnvelope } });
 register('GET', '/v1/dashboard/artifacts', { response: { 200: ArtifactPage } });
 register('GET', '/v1/dashboard/devices', { response: { 200: DeviceListResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } });
-register('GET', '/v1/dashboard/devices/:id/health', { params: object({ id: Identifier }), querystring: deviceForceQuerySchema, response: { 200: DeviceHealthResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 502: ErrorEnvelope } });
+register('GET', '/v1/dashboard/devices/:id/health', { params: object({ id: Identifier }), querystring: deviceForceQuerySchema, response: { 200: DeviceHealthResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 502: ErrorEnvelope, 503: ErrorEnvelope } });
 register('GET', '/v1/dashboard/devices/:id/preflight', { params: object({ id: Identifier }), response: { 200: DevicePreflightResponse, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 502: ErrorEnvelope } });
 register('GET', '/v1/dashboard/devices/:id/inventory', { params: object({ id: Identifier }), response: { 200: DeviceInventoryResponse, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 502: ErrorEnvelope } });
 register('PUT', '/v1/dashboard/devices/:id/dark-mode', { params: object({ id: Identifier }), body: object({ enabled: Type.Boolean() }), response: { 200: DeviceHealthResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 502: ErrorEnvelope } });

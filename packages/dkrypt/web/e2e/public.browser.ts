@@ -1639,6 +1639,32 @@ test('batch paste resolves App Store links and never auto-subscribes TestFlight 
   expect(inviteRequests).toBe(1);
 });
 
+test('busy device verification opens the queue review without labeling the device offline', async ({ page }) => {
+  await mockStableDashboardEvents(page);
+  await mockAuthenticatedDashboard(page, '2');
+  await page.route('**/v1/dashboard/search?q=*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ results: [{ bundleId: 'com.myfitnesspal.mfp', trackName: 'MyFitnessPal', trackId: 123, price: 0 }] }) });
+  });
+  await page.route('**/v1/dashboard/decrypt/preflight', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      bundleId: 'com.myfitnesspal.mfp',
+      testflight: false,
+      queueLength: 0,
+      canQueue: false,
+      devices: [{ id: 'busy-ipad', name: 'Busy iPad', isPrimary: true, ready: false, checking: true, blockers: ['Device health check is still running. Try again shortly.'] }],
+    }) });
+  });
+
+  await page.goto('/?tab=home');
+  await page.getByPlaceholder('Search the App Store to decrypt… (press / to focus)').fill('MyFitnessPal');
+  await page.getByRole('button', { name: 'Decrypt', exact: true }).click();
+  await expect(page.getByText('Device health check is still running. Try again shortly.')).toBeVisible();
+  await expect(page.getByText('Device verification is still running. You can queue now; the worker will recheck before starting.')).toBeVisible();
+  await expect(page.getByText('Device unreachable')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Queue anyway' })).toBeVisible();
+  await expectAccessible(page);
+});
+
 test('batch queue retries only failed entries after a partial success', async ({ page }) => {
   await mockStableDashboardEvents(page);
   await mockAuthenticatedDashboard(page, '2');

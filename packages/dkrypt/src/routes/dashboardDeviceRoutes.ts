@@ -33,6 +33,7 @@ import { PermissionFlag } from '#permissions.js';
 import { emitJobsChanged } from '#events.js';
 import { getActiveJobs, notifyDeviceDispatchStateChanged } from '#jobs/store.js';
 import { getDeviceHealth, isBridgeHeartbeatFresh } from '#deviceHealth.js';
+import { getCachedDeviceHealth } from '#deviceHealthCache.js';
 import { discoverDevices, execCommand, isDirectUsbDeviceAgentConnection, listInstalledAppStoreBundles, sendSpringBoardBridgeRequest, setupDeviceConnection, withAutoinstallDeviceAgent, withSSH, type DeviceConnection } from '#idevice.js';
 import { getTestFlightBridgeDiagnostics } from '#testflight.js';
 import {
@@ -54,6 +55,7 @@ import {
   updateDevice,
 } from '#store/state.js';
 import { createHttpErrorEnvelope } from '#util/httpResponse.js';
+import { resolveWithin } from '#util/resolveWithin.js';
 import type { DeviceTransport } from '#apiCommonContracts.js';
 import { config } from '#config.js';
 import { isSupportedDeviceHost } from '#deviceHost.js';
@@ -413,8 +415,25 @@ export const dashboardDeviceRoutes: FastifyPluginAsyncTypebox = async (server) =
     const device = resolveDevice(request.params.id);
     if (!device) return reply.code(404).send(createHttpErrorEnvelope(request.id, 404, 'device not found'));
     try {
-      const health = await getDeviceHealth(device.id, request.query.force === 'true');
-      return { ...health, subsystemDetails: getDeviceSubsystemDetails(device.id, health.subsystems) };
+      const force = request.query.force === 'true';
+      const cached = getCachedDeviceHealth(device.id);
+      if (!force && cached) {
+        const staleAfterMs = cached.value.reachable && cached.value.testFlightBridgeReachable !== false ? 45_000 : 120_000;
+        const refreshing = Date.now() - cached.at >= staleAfterMs;
+        if (refreshing) void getDeviceHealth(device.id).catch(() => undefined);
+        return { ...cached.value, refreshing, subsystemDetails: getDeviceSubsystemDetails(device.id, cached.value.subsystems) };
+      }
+      const snapshot = await resolveWithin(getDeviceHealth(device.id, force), force ? 8_000 : 1_000);
+      if (!snapshot.completed) {
+        return reply.code(503).send({
+          error: 'Device health check is still running. Try again shortly.',
+          code: 'device_health_refreshing',
+          message: 'Device health check is still running. Try again shortly.',
+          requestId: request.id,
+          retryable: true,
+        });
+      }
+      return { ...snapshot.value, refreshing: false, subsystemDetails: getDeviceSubsystemDetails(device.id, snapshot.value.subsystems) };
     } catch (error) {
       return reply.code(502).send(createHttpErrorEnvelope(request.id, 502, `device health check failed: ${getErrorMessage(error)}`));
     }

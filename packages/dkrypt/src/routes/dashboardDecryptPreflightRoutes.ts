@@ -19,6 +19,7 @@ import { getVerifiedTestFlightCatalog, TestFlightCatalogUnavailableError } from 
 import { recentlyVerifiedTestFlightDevices } from '#testflightPolicy.js';
 import { canAccessProject } from '#dashboardJobPresentation.js';
 import { createHttpErrorEnvelope } from '#util/httpResponse.js';
+import { resolveWithin } from '#util/resolveWithin.js';
 
 export interface DashboardDecryptPreflightServices {
   canAccessProject: typeof canAccessProject;
@@ -123,7 +124,18 @@ export function createDashboardDecryptPreflightRoutes(overrides: Partial<Dashboa
       const primary = devices.find((device) => device.isPrimary) ?? devices[0];
       const checks = await Promise.all(devices.map(async (device) => {
         try {
-          const health = await services.getDeviceHealth(device.id, true);
+          const snapshot = await resolveWithin(services.getDeviceHealth(device.id), 1_000);
+          if (!snapshot.completed) {
+            return {
+              id: device.id,
+              name: device.name,
+              isPrimary: device.id === primary?.id,
+              ready: false,
+              checking: true,
+              blockers: ['Device health check is still running. Try again shortly.'],
+            };
+          }
+          const health = snapshot.value;
           const readiness = services.getDeviceReadiness(health, installSource);
           const blockers: string[] = [];
           if (!health.reachable) blockers.push(health.error ?? 'device is unreachable');

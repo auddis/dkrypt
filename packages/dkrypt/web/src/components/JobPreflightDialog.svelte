@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CheckCircle2, CircleX, ShieldCheck } from 'lucide-svelte';
+  import { CheckCircle2, CircleX, LoaderCircle, ShieldCheck } from 'lucide-svelte';
   import type { DecryptPreflight } from '#lib/api';
   import Button from '#lib/components/ui/Button.svelte';
   import Dialog from '#lib/components/ui/Dialog.svelte';
@@ -42,13 +42,13 @@
       {#each preflight.devices as device (device.id)}
         <div class="border-border rounded-lg border p-2.5">
           <div class="flex items-center gap-2">
-            {#if device.ready}<CheckCircle2 class="text-ok h-4 w-4 shrink-0" />{:else}<CircleX class="text-err h-4 w-4 shrink-0" />{/if}
+            {#if device.checking}<LoaderCircle class="text-warn h-4 w-4 shrink-0 animate-spin" />{:else if device.ready}<CheckCircle2 class="text-ok h-4 w-4 shrink-0" />{:else}<CircleX class="text-err h-4 w-4 shrink-0" />{/if}
             <span class="min-w-0 flex-1 truncate text-sm font-medium">{device.name}</span>
             {#if device.isPrimary}<span class="text-[11px] text-muted">Primary</span>{/if}
             {#if device.storageFreeBytes !== undefined}<span class="text-[11px] text-muted">{fmtSize(device.storageFreeBytes)} free</span>{/if}
           </div>
           {#if device.blockers.length > 0}
-            <div class="mt-1.5 text-xs text-err">{device.blockers.join(' · ')}</div>
+            <div class="mt-1.5 text-xs {device.checking ? 'text-warn' : 'text-err'}">{device.blockers.join(' · ')}</div>
           {:else if device.warnings?.length}
             <div class="mt-1.5 text-xs text-warn">{device.warnings.join(' · ')}</div>
           {:else if device.readiness?.reasons.length}
@@ -63,7 +63,7 @@
     </div>
 
     {#if !preflight.canQueue}
-      <div class="border-warn/40 bg-warn/10 mb-4 rounded-lg border p-3 text-xs text-warn">No device currently passes every check. You can still queue this job and resolve the device issue afterward.</div>
+      <div class="border-warn/40 bg-warn/10 mb-4 rounded-lg border p-3 text-xs text-warn">{preflight.devices.some((device) => device.checking) ? 'Device verification is still running. You can queue now; the worker will recheck before starting.' : 'No device currently passes every check. You can still queue this job and resolve the device issue afterward.'}</div>
     {/if}
     <div class="flex justify-end gap-2">
       <Button size="sm" variant="secondary" onclick={() => onOpenChange(false)}>Cancel</Button>

@@ -132,12 +132,16 @@
 	let volumeUnavailable = $state(false);
 	let health = $state<DeviceHealth | null>(null);
 	let refreshingHealth = $state(false);
+	let healthError = $state("");
 
 	async function refreshHealth(): Promise<void> {
 		if (!primaryDeviceId) return;
 		refreshingHealth = true;
 		try {
 			health = await fetchDeviceHealth(primaryDeviceId, true);
+			healthError = "";
+		} catch (error) {
+			healthError = error instanceof Error ? error.message : "Device health check failed";
 		} finally {
 			refreshingHealth = false;
 		}
@@ -169,7 +173,12 @@
 		const deviceId = primaryDeviceId;
 		if (!deviceId) return;
 		const load = () =>
-			void fetchDeviceHealth(deviceId).then((h) => (health = h));
+			void fetchDeviceHealth(deviceId).then((h) => {
+				health = h;
+				healthError = "";
+			}).catch((error) => {
+				healthError = error instanceof Error ? error.message : "Device health check failed";
+			});
 		load();
 		const interval = setInterval(load, 60_000);
 		return () => clearInterval(interval);
@@ -184,7 +193,7 @@
 			for (const d of devices)
 				void fetchDeviceHealth(d.id).then(
 					(h) => (poolHealth = { ...poolHealth, [d.id]: h }),
-				);
+				).catch(() => undefined);
 		};
 		load();
 		const interval = setInterval(load, 30_000);
@@ -455,7 +464,7 @@
 					></span>
 					{HEALTH_LABEL[overallHealth.level]}
 				</span>
-				<span>Checked <RelativeTime ms={health.checkedAt} /></span>
+				<span>{health.refreshing ? "Updating ·" : "Checked"} <RelativeTime ms={health.checkedAt} /></span>
 				<Button
 					variant="ghost"
 					size="icon"
@@ -478,6 +487,9 @@
 			</div>
 		{/if}
 	{/snippet}
+	{#if healthError}
+		<p role="status" class="mb-2 text-xs text-warning">{healthError}</p>
+	{/if}
 	<div class="mb-1.5 flex flex-wrap items-center gap-1.5">
 		{#if overview}
 			<Popover>
