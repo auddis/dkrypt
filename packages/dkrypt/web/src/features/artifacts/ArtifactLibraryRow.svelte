@@ -44,6 +44,13 @@
     const version = artifact.channel === 'testflight' ? value.split('_', 1)[0] : value;
     return artifact.buildNumber ? `${version} (${artifact.buildNumber})` : version;
   });
+  const gridColumns = $derived(columns.map((column) => {
+    if (column === 'app' || column === 'bundleId') return 'minmax(0, 1fr)';
+    if (column === 'version') return 'minmax(8.5rem, 10rem)';
+    if (column === 'source') return 'minmax(6.5rem, 7rem)';
+    if (column === 'size') return 'minmax(5.5rem, 6rem)';
+    return 'minmax(8rem, 9rem)';
+  }).join(' '));
 </script>
 
 <article data-artifact-id={artifact.id} class="artifact-library-row {listView ? 'grid gap-y-2.5 px-3.5 py-3 first:pt-3 last:pb-3 sm:px-4' : 'grid gap-3 rounded-xl border border-border/70 bg-background/50 p-4'}">
@@ -52,7 +59,7 @@
       <input type="checkbox" class="accent-accent col-start-1 row-start-1 mt-1 size-4 shrink-0 rounded border-border" checked={selected} disabled={selectionDisabled} onchange={(event) => onSelection(event.currentTarget.checked)} aria-label="Select {appDisplayName(artifact.bundleId)} {artifactVersion}" />
     {/if}
     <div class={canSelect ? 'col-start-2 row-start-1 min-w-0' : 'col-start-1 row-start-1 min-w-0'}>
-      <dl class="artifact-library-row-metadata flex min-w-0 flex-wrap items-start gap-x-3 gap-y-2 text-xs">
+      <dl class="artifact-library-row-metadata grid min-w-0 items-start gap-x-3 gap-y-2 text-xs" style:--artifact-grid-columns={gridColumns}>
         {#each columns as column (column)}
           <div class="artifact-library-field min-w-0" class:artifact-primary={column === 'app' || column === 'bundleId'}>
             <dt class="text-muted text-[10px] font-semibold tracking-[0.08em] uppercase">{column === 'app' ? 'App' : column === 'bundleId' ? 'Bundle ID' : column === 'version' ? 'Version' : column === 'source' ? 'Source' : column === 'size' ? 'Size' : 'Added'}</dt>
@@ -97,13 +104,12 @@
     container-type: inline-size;
   }
 
-  .artifact-library-field {
-    flex: 0 0 auto;
-    max-width: 100%;
+  .artifact-library-row-metadata {
+    grid-template-columns: var(--artifact-grid-columns);
   }
 
-  .artifact-library-field.artifact-primary {
-    flex: 1 1 9rem;
+  .artifact-library-field {
+    min-width: 0;
   }
 
   @container (max-width: 850px) {
@@ -122,8 +128,12 @@
   }
 
   @container (max-width: 520px) {
+    .artifact-library-row-metadata {
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.8fr);
+    }
+
     .artifact-library-field.artifact-primary {
-      flex-basis: 100%;
+      grid-column: 1 / -1;
     }
   }
 

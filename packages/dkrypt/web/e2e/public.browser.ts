@@ -549,8 +549,11 @@ test('collapsed sidebar gives library and history content the released space', a
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        artifacts: [{ id: 'layout-artifact', bundleId: 'com.example.layout', channel: 'appstore', versionLabel: '348.0', buildNumber: '113691', fileSizeBytes: 104857600, createdAt: '2026-09-25T12:00:00.000Z', fileUrl: '/v1/dashboard/artifacts/layout-artifact/file' }],
-        total: 1,
+        artifacts: [
+          { id: 'layout-artifact', bundleId: 'com.example.layout', channel: 'appstore', versionLabel: '348.0', buildNumber: '113691', fileSizeBytes: 104857600, createdAt: '2026-09-25T12:00:00.000Z', fileUrl: '/v1/dashboard/artifacts/layout-artifact/file' },
+          { id: 'layout-artifact-long', bundleId: 'com.example.a.much.longer.bundle.identifier', channel: 'testflight', versionLabel: '1.2.3', buildNumber: '9', fileSizeBytes: 1234567, createdAt: '2026-09-24T12:00:00.000Z', fileUrl: '/v1/dashboard/artifacts/layout-artifact-long/file' },
+        ],
+        total: 2,
         totalBytes: 104857600,
         maxBytes: 1048576000,
       }),
@@ -580,10 +583,16 @@ test('collapsed sidebar gives library and history content the released space', a
   expect(downloadBox?.width).toBe(detailsBox?.width);
   expect(downloadBox?.height).toBe(detailsBox?.height);
 
+  const otherArtifactRow = page.locator('[data-artifact-id="layout-artifact-long"]');
+  await expect(otherArtifactRow).toBeVisible();
+  const columnStarts = async (row: typeof artifactRow) => row.locator('dt').evaluateAll((headings) => Object.fromEntries(headings.map((heading) => [heading.textContent?.trim(), Math.round(heading.getBoundingClientRect().left)])));
+  expect(await columnStarts(otherArtifactRow)).toEqual(await columnStarts(artifactRow));
+
   const before = await historyRow.locator('.history-feed-summary').evaluate((element) => element.getBoundingClientRect().width);
   await page.getByRole('button', { name: 'Collapse sidebar' }).click();
   const after = await historyRow.locator('.history-feed-summary').evaluate((element) => element.getBoundingClientRect().width);
   expect(after).toBeGreaterThan(before + 100);
+  expect(await columnStarts(otherArtifactRow)).toEqual(await columnStarts(artifactRow));
   const versionWidth = await artifactRow.locator('dt', { hasText: 'Version' }).locator('..').evaluate((element) => element.getBoundingClientRect().width);
   expect(versionWidth).toBeLessThan(175);
   const appWidth = await artifactRow.locator('dt', { hasText: 'App' }).locator('..').evaluate((element) => element.getBoundingClientRect().width);
