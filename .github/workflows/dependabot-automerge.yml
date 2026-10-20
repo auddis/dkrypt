@@ -6,6 +6,7 @@ on:
     types: [completed]
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -41,3 +42,4 @@ jobs:
             printf 'GitHub did not merge Dependabot PR #%s after successful CI\n' "$PR_NUMBER" >&2
             exit 1
           fi
+          gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main

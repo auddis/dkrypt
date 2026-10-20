@@ -19,6 +19,10 @@ function shutdownRecoveryWorkflow(): string {
   return readFileSync(new URL('../../../.github/workflows/shutdown-recovery-smoke.yml', import.meta.url), 'utf8');
 }
 
+function dependabotAutomergeWorkflow(): string {
+  return readFileSync(new URL('../../../.github/workflows/dependabot-automerge.yml', import.meta.url), 'utf8');
+}
+
 function shutdownRecoveryScripts(): string[] {
   return [...shutdownRecoveryWorkflow().matchAll(/^[ ]+run_dkrypt_bun[^\n]*<<'JS'\r?\n([\s\S]*?)^[ ]+JS$/gm)]
     .map((match) => {
@@ -75,6 +79,13 @@ test('CI and image publishing use the Bun version pinned by the Dockerfile', () 
     expect(job).toContain('bun-version: ${{ steps.bun_version.outputs.version }}');
     expect(job).toContain("packages/dkrypt/Dockerfile | sort -u");
   }
+});
+
+test('Dependabot merges dispatch the production workflow with the required permission', () => {
+  const workflow = dependabotAutomergeWorkflow();
+  expect(workflow).toContain('  actions: write');
+  expect(workflow).toContain('gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main');
+  expect(workflow.indexOf('gh workflow run deploy.yml')).toBeGreaterThan(workflow.indexOf('if [ "$state" != "closed" ] || [ "$merged" != "true" ]; then'));
 });
 
 test('deployment smoke syntax validation detects duplicate declarations', () => {
