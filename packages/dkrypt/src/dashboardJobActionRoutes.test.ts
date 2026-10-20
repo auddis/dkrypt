@@ -8,6 +8,7 @@ import { dashboardRouter } from '#routes/dashboard.js';
 import { createDashboardJobActionRoutes, type DashboardJobActionServices } from '#routes/dashboardJobActionRoutes.js';
 import { setSessionCookie } from '#session.js';
 import type { JobHistoryEntry } from '#store/state.js';
+import { buildTestServer } from '#testServer.js';
 
 function sessionCookie(permissions: bigint): string {
   let value = '';
@@ -66,6 +67,17 @@ test('dashboard job actions are not registered through the legacy router', () =>
   expect(routes).not.toContain('POST /v1/dashboard/jobs/:id/retry');
   expect(routes).not.toContain('GET /v1/dashboard/jobs/:id/diagnostic');
   expect(routes).not.toContain('POST /v1/dashboard/decrypt');
+});
+
+test('failed-job resolution notices stay out of public API-key documentation', async () => {
+  const server = await buildTestServer({ includePublicRoutes: false });
+  try {
+    await server.ready();
+    const document = server.swagger() as { paths?: Record<string, unknown> };
+    expect(Object.keys(document.paths ?? {}).some((path) => path.includes('resolution-notice'))).toBe(false);
+  } finally {
+    await server.close();
+  }
 });
 
 test('manual decrypt submission preserves project, device, and version selection', async () => {

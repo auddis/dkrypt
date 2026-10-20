@@ -291,7 +291,7 @@ export function createDashboardJobActionRoutes(overrides: Partial<DashboardJobAc
     };
 
     server.get<DashboardJobResolutionNoticeRoute>('/v1/dashboard/jobs/:id/resolution-notice', {
-      schema: getRouteContract('GET', '/v1/dashboard/jobs/:id/resolution-notice'),
+      schema: { ...getRouteContract('GET', '/v1/dashboard/jobs/:id/resolution-notice'), hide: true },
       preHandler: canNotifyFailedJobOwners,
     }, async (request, reply) => {
       const session = getFastifySession(request)!;
@@ -302,7 +302,7 @@ export function createDashboardJobActionRoutes(overrides: Partial<DashboardJobAc
     });
 
     server.post<DashboardJobResolutionNoticeRoute>('/v1/dashboard/jobs/:id/resolution-notice', {
-      schema: getRouteContract('POST', '/v1/dashboard/jobs/:id/resolution-notice'),
+      schema: { ...getRouteContract('POST', '/v1/dashboard/jobs/:id/resolution-notice'), hide: true },
       preHandler: canNotifyFailedJobOwners,
     }, async (request, reply) => {
       const session = getFastifySession(request)!;
