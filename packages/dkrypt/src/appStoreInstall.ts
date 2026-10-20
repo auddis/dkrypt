@@ -30,6 +30,8 @@ const APP_STORE_BRIDGE_READY_TIMEOUT_MS = 20_000;
 const APP_STORE_BRIDGE_STATUS_TIMEOUT_MS = 3_000;
 const APP_STORE_BRIDGE_POLL_INTERVAL_MS = 500;
 const APP_STORE_INSTALL_STATUS_POLL_INTERVAL_MS = 5_000;
+const APP_STORE_COMPLETED_DOWNLOAD_RETRY_DELAY_MS = 90_000;
+const APP_STORE_DOWNLOAD_RETRY_MIN_REMAINING_MS = 45_000;
 const APP_STORE_LOCALE_RE = /^[a-z]{2,3}[_-]([A-Za-z]{2})(?:@.*)?$/;
 
 class AppStoreInstallTimeoutError extends Error {
@@ -230,7 +232,7 @@ export async function installFromAppStore(bundleId: string, options: AppStoreIns
       await armAppStoreAutoConfirm(conn, 'Install');
       ensureNotCancelled();
 
-      const operationId = options.operationId ?? randomUUID();
+      let operationId = options.operationId ?? randomUUID();
       const request: Record<string, unknown> = { action: 'install', adamId: trackId, appName: listing.trackName, appNames, verifiedPrice: listing.price, contextMode: 'fallback', operationId };
       if (versionId !== undefined) request.versionId = versionId;
       const installResponse = await sendAppStoreBridgeRequest(conn, request, 20_000, options.signal);
@@ -252,6 +254,8 @@ export async function installFromAppStore(bundleId: string, options: AppStoreIns
       let lastInstallState: string | undefined;
       let lastInstallStatusVerified = false;
       let authorizationReported = false;
+      let purchaseCompletedAt: number | undefined;
+      let retriedCompletedPurchase = false;
       while (Date.now() < deadline) {
         ensureNotCancelled();
         if (lastInstallState !== 'completed' && Date.now() - lastInstallStatusAt >= APP_STORE_INSTALL_STATUS_POLL_INTERVAL_MS) {
@@ -275,6 +279,7 @@ export async function installFromAppStore(bundleId: string, options: AppStoreIns
           const install = currentInstallStatus({ install: status }, operationId);
           lastInstallStatusVerified = Boolean(install);
           lastInstallState = typeof install?.state === 'string' ? install.state : lastInstallState;
+          if (install?.state === 'completed') purchaseCompletedAt ??= Date.now();
           if (install?.state === 'failed') {
             const detail = typeof install.error === 'string' ? install.error : 'the App Store reported an installation failure';
             throw new Error(`App Store install operation failed: ${detail}`);
@@ -300,6 +305,25 @@ export async function installFromAppStore(bundleId: string, options: AppStoreIns
             report(`install verified: ${shortVersion ?? 'unknown version'} build ${installedVersion.buildVersion ?? 'unknown'} in ${Math.round((Date.now() - start) / 1000)}s`);
             return { ...installedVersion, bundleId, appPath: bundlePath, fairPlayProtected: true, elapsedMs: Date.now() - start };
           }
+        }
+        if (!retriedCompletedPurchase && purchaseCompletedAt !== undefined && Date.now() - purchaseCompletedAt >= APP_STORE_COMPLETED_DOWNLOAD_RETRY_DELAY_MS && Date.now() + APP_STORE_DOWNLOAD_RETRY_MIN_REMAINING_MS < deadline) {
+          ensureNotCancelled();
+          report('App Store confirmed the purchase but did not install the app; retrying the download once');
+          await restartAppStore(conn, options.signal);
+          await ensureAppStoreForeground(conn, options.signal);
+          await ensureAppStoreBridgeReady(conn, options.signal);
+          ensureNotCancelled();
+          await armAppStoreAutoConfirm(conn, 'Install');
+          operationId = `${operationId}-download-retry-1`;
+          const retryResponse = await sendAppStoreBridgeRequest(conn, { ...request, operationId }, 20_000, options.signal);
+          ensureNotCancelled();
+          if (retryResponse?.requested === false && retryResponse?.completed !== true) throw new Error('App Store did not start the download retry');
+          retriedCompletedPurchase = true;
+          purchaseCompletedAt = undefined;
+          lastInstallStatusAt = Number.NEGATIVE_INFINITY;
+          lastInstallStatusVerified = false;
+          lastInstallState = undefined;
+          authorizationReported = false;
         }
         const elapsedSec = Math.round((Date.now() - start) / 1000);
         if (elapsedSec - lastReportedAt >= 10) {

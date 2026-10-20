@@ -7,6 +7,7 @@ type InstalledBundle = { path: string; shortVersion: string };
 let installedBundles: Array<InstalledBundle | undefined> = [];
 let lastInstalledBundle: InstalledBundle | undefined;
 let installRequest: Record<string, unknown> | undefined;
+let installRequests: Record<string, unknown>[] = [];
 let installStatus: Record<string, unknown> = {};
 let installStatusAfterRequest: Record<string, unknown> | undefined;
 let installStatusSequence: Record<string, unknown>[] = [];
@@ -68,8 +69,9 @@ mock.module('#idevice.js', () => ({
       return { capabilities: ['install', 'status', 'diagnostics', 'foreground_status', 'localized_install_titles', 'protocol_v1', 'authenticated_requests', 'operation_responses', 'heartbeats', 'stale_artifact_cleanup'], foreground: foregroundStatuses.shift() ?? true, install: installStatus };
     }
     installRequest = request;
+    installRequests.push(request);
     calls.push('request');
-    if (installStatusAfterRequest) installStatus = installStatusAfterRequest;
+    if (installStatusAfterRequest) installStatus = { operationId: request.operationId, ...installStatusAfterRequest };
     return { ok: true, requested: true, operationId: request.operationId };
   },
   sendSpringBoardBridgeRequest: async () => {
@@ -123,6 +125,7 @@ describe('installFromAppStore', () => {
     ];
     lastInstalledBundle = undefined;
     installRequest = undefined;
+    installRequests = [];
     installStatus = {};
     installStatusAfterRequest = undefined;
     installStatusSequence = [];
@@ -289,6 +292,42 @@ describe('installFromAppStore', () => {
       globalThis.setTimeout = originalSetTimeout;
     }
     expect(calls).toEqual(['restart', 'status', 'arm', 'request', 'clear']);
+  });
+
+  test('retries a completed free purchase once when no app download follows', async () => {
+    let now = 0;
+    Date.now = () => now;
+    globalThis.setTimeout = ((handler: () => void) => {
+      now += 5_000;
+      handler();
+      return 0;
+    }) as unknown as typeof setTimeout;
+    installedBundles = [...Array(22).fill(undefined), { path: '/apps/Cleaner.app', shortVersion: '338.0' }];
+    installStatusAfterRequest = { state: 'completed' };
+
+    try {
+      await expect(installFromAppStore('com.example.app', {
+        operationId: 'job-purchase-only',
+        waitTimeoutMs: 180_000,
+        onProgress: (message) => progress.push(message),
+      })).resolves.toMatchObject({ shortVersion: '338.0' });
+    } finally {
+      Date.now = originalDateNow;
+      globalThis.setTimeout = originalSetTimeout;
+    }
+
+    expect(installRequests).toHaveLength(2);
+    expect(installRequests.map((request) => request.operationId)).toEqual(['job-purchase-only', 'job-purchase-only-download-retry-1']);
+    expect(calls.filter((call) => call === 'restart')).toHaveLength(2);
+    expect(progress).toContain('App Store confirmed the purchase but did not install the app; retrying the download once');
+  });
+
+  test('reports an error contained in the App Store purchase response', async () => {
+    installedBundles = [undefined, undefined];
+    installStatusAfterRequest = { state: 'failed', error: 'purchase authorization declined' };
+
+    await expect(installFromAppStore('com.example.app')).rejects.toThrow('App Store install operation failed: purchase authorization declined');
+    expect(installRequests).toHaveLength(1);
   });
 
   test('uses bridge status when the device install status file cannot be read', async () => {
