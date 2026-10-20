@@ -83,6 +83,7 @@ export const dashboardAuditLogEntrySchema = Type.Object({
   id: identifierSchema,
   ts: Type.Number(),
   actor: Type.String(),
+  actorDisplayName: Type.Optional(Type.String()),
   action: auditActionSchema,
   target: Type.String(),
   detail: Type.Optional(Type.String()),

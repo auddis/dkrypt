@@ -502,6 +502,8 @@ export interface UserPrefs {
   interfaceLanguage?: 'system' | 'en' | 'de';
   theme?: 'dark' | 'light' | 'auto';
   density?: 'comfortable' | 'compact';
+  sidebarWidth?: number;
+  sidebarCollapsed?: boolean;
   homeLayouts?: HomeLayoutPreference[];
   activeHomeLayoutId?: string;
   viewModes?: HomeViewModes;

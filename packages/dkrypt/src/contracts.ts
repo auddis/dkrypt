@@ -444,6 +444,7 @@ const AuthMfaResponse = object({ enabled: Type.Boolean(), recoveryCodesRemaining
 const AuthSessionResponse = object({
   loggedIn: Type.Boolean(),
   sub: Type.Optional(Identifier),
+  username: Type.Optional(Type.String()),
   displayName: Type.Optional(Type.String()),
   avatarUrl: Type.Optional(Type.String()),
   identities: Type.Array(JsonObject),
@@ -611,7 +612,7 @@ const PasskeyOptionsResponse = object({
   authenticatorSelection: Type.Optional(JsonObject),
 });
 const PasskeyMutationResponse = object({ passkey: Type.Optional(PasskeySummaryResponse) });
-const AuthProfileResponse = object({ displayName: Type.String(), linkedProviders: Type.Array(Type.String()) });
+const AuthProfileResponse = object({ username: Type.String(), displayName: Type.String(), linkedProviders: Type.Array(Type.String()) });
 const AuthConnectionResponse = object({ identities: Type.Array(JsonObject), linkedProviders: Type.Array(Type.String()) });
 const InsightsAppResponse = Type.Object({
   bundleId: BundleId,

@@ -134,6 +134,7 @@ export interface JobSummary {
   source: 'manual' | 'scheduler';
   channel?: 'appstore' | 'testflight';
   queuedBy?: string;
+  queuedByDisplayName?: string;
   priority?: number;
   deviceId?: string;
   preferredDeviceId?: string;
@@ -169,6 +170,7 @@ export interface ActiveJob {
   versionLabel?: string;
   testflight?: JobTestFlightSummary;
   queuedBy?: string;
+  queuedByDisplayName?: string;
   priority?: number;
   createdAt: number;
   queue?: JobQueueSummary;
@@ -642,6 +644,8 @@ export interface ApiKeyRecord {
   id: string;
   name: string;
   ownerId: string;
+  ownerDisplayName?: string;
+  ownerUsername?: string;
   status: 'pending' | 'approved' | 'denied';
   createdAt: number;
   approvedAt?: number;
@@ -659,6 +663,7 @@ export interface ApiKeyRecord {
 
 export interface AllowedUser {
   username: string;
+  accountUsername?: string;
   displayName?: string;
   avatarUrl?: string;
   roleIds: string[];
@@ -709,6 +714,7 @@ export interface AuditLogEntry {
   id: string;
   ts: number;
   actor: string;
+  actorDisplayName?: string;
   action:
     | 'user.add'
     | 'user.update'
@@ -781,6 +787,7 @@ export interface TestFlightSubscription {
   url: string;
   inviteCode: string;
   requestedBy: string;
+  requestedByDisplayName?: string;
   status: TestFlightSubscriptionStatus;
   appId?: number;
   bundleId?: string;
@@ -1039,6 +1046,7 @@ export interface WatchRevision {
   id: string;
   watchId: string;
   actor: string;
+  actorDisplayName?: string;
   at: number;
   action: 'created' | 'updated' | 'restored' | 'deleted';
   changedFields: string[];
@@ -1606,6 +1614,7 @@ export interface OperationalIncident {
   status: 'open' | 'in_progress' | 'snoozed' | 'resolved';
   recoveredAt?: number;
   assignedTo?: string;
+  assignedToDisplayName?: string;
   snoozedUntil?: number;
   resolutionNote?: string;
   createdAt: number;
@@ -2243,7 +2252,7 @@ export function fetchRoles(): Promise<{ roles: Role[] }> {
 
 export interface RoleImpactPreview {
   affectedCount: number;
-  members: Array<{ username: string; beforePermissions: string; afterPermissions: string }>;
+  members: Array<{ username: string; displayName?: string; beforePermissions: string; afterPermissions: string }>;
   truncated: boolean;
   memberDetailsHidden?: boolean;
 }
@@ -2656,6 +2665,7 @@ export interface DiagnosticReportDraft {
 export interface DiagnosticReport {
   id: string;
   userId?: string;
+  userDisplayName?: string;
   projectId: string;
   category: DiagnosticReportCategory;
   summary: string;

@@ -2532,6 +2532,93 @@ test('personalization search, artifact column order, and touch targets sync to t
   expect((savedPrefs.artifactLibrary as { columns: string[] }).columns).toEqual(['app', 'version', 'bundleId', 'source', 'size']);
 });
 
+test('sidebar collapse and drag width persist while Home layout controls live in Settings', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockAuthenticatedDashboard(page, '1');
+  await page.unroute('**/v1/dashboard/me/prefs');
+  const savedPrefs: Record<string, unknown> = { theme: 'dark', accent: 'blue', sound: true, sidebarWidth: 256, sidebarCollapsed: false };
+  await page.route('**/v1/dashboard/me/prefs', async (route) => {
+    if (route.request().method() === 'PUT') Object.assign(savedPrefs, route.request().postDataJSON());
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(savedPrefs) });
+  });
+
+  await page.goto('/');
+  const sidebar = page.locator('aside.app-sidebar');
+  await expect(sidebar).toHaveCSS('width', '256px');
+  await expect(page.getByRole('heading', { name: 'Home layout' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+  await expect(sidebar).toHaveCSS('width', '64px');
+  await expect(page.getByRole('button', { name: 'Home', exact: true })).toBeVisible();
+  await expect.poll(() => savedPrefs.sidebarCollapsed).toBe(true);
+
+  await page.reload();
+  await expect(sidebar).toHaveCSS('width', '64px');
+  await page.getByRole('button', { name: 'Expand sidebar' }).click();
+  await expect(sidebar).toHaveCSS('width', '256px');
+  const resizeHandle = page.getByRole('button', { name: /Resize sidebar/ });
+  await resizeHandle.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(sidebar).toHaveCSS('width', '272px');
+  await expect.poll(() => savedPrefs.sidebarWidth).toBe(272);
+  const handleBounds = await resizeHandle.boundingBox();
+  if (!handleBounds) throw new Error('sidebar resize handle is not visible');
+  await page.mouse.move(handleBounds.x + handleBounds.width / 2, handleBounds.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(handleBounds.x + handleBounds.width / 2 + 32, handleBounds.y + 40);
+  await page.mouse.up();
+  await expect(sidebar).toHaveCSS('width', '304px');
+  await expect.poll(() => savedPrefs.sidebarWidth).toBe(304);
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Personal', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Home layout' })).toBeVisible();
+  await page.reload();
+  await expect(sidebar).toHaveCSS('width', '304px');
+});
+
+test('account menu shows a stable username instead of an OAuth provider ID', async ({ page }) => {
+  await mockAuthenticatedDashboard(page, '1');
+  await page.unroute('**/v1/auth/session');
+  let displayName = 'Visual user';
+  let username = 'first-name';
+  const userId = 'discord:238058491548401664';
+  await page.route('**/v1/auth/session', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      loggedIn: true,
+      sub: userId,
+      username,
+      displayName,
+      permissions: '1',
+      identities: [],
+      linkedProviders: [],
+      githubOauthEnabled: false,
+      discordOauthEnabled: false,
+      deployment: { ref: 'abcdef0123456789' },
+      mfa: { enabled: false, recoveryCodesRemaining: 0, required: false },
+    }) });
+  });
+  await page.route('**/v1/auth/profile', async (route) => {
+    const body = route.request().postDataJSON() as { displayName: string; username: string };
+    displayName = body.displayName;
+    username = body.username;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ displayName, username, linkedProviders: [] }) });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  const menu = page.locator('.account-menu');
+  await expect(menu).toContainText('Visual user');
+  await expect(menu).toContainText('@first-name');
+  await expect(menu).not.toContainText(userId);
+  await page.getByRole('button', { name: 'Edit profile name' }).click();
+  await page.getByRole('textbox', { name: 'Profile name' }).fill('Chosen display name');
+  await page.getByRole('textbox', { name: 'Username' }).fill('chosen-name');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(menu).toContainText('Chosen display name');
+  await expect(menu).toContainText('@chosen-name');
+  await expect(menu).not.toContainText(userId);
+});
+
 test('diagnostic reports show a redacted preview and submit only after consent', async ({ page }) => {
   await mockAuthenticatedDashboard(page, '2');
   let submitted: Record<string, unknown> | undefined;
@@ -2595,7 +2682,7 @@ test('system forced-colors mode uses system surface and text colors', async ({ p
   const colors = await page.evaluate(() => {
     const style = getComputedStyle(document.documentElement);
     const card = document.querySelector<HTMLElement>('[data-slot="card"]');
-    const button = document.querySelector<HTMLElement>('button[data-slot="button"]');
+    const button = document.querySelector<HTMLElement>('button[data-slot="button"].bg-secondary');
     const systemPalette = document.createElement('div');
     systemPalette.style.backgroundColor = 'Canvas';
     systemPalette.style.color = 'CanvasText';
