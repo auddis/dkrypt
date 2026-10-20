@@ -561,6 +561,13 @@ export interface JobTimeline {
   ipaInfoPlist?: Record<string, unknown>;
 }
 
+export interface JobResolutionNoticePreview {
+  requester: string;
+  emailAvailable: boolean;
+  message: string;
+  notice?: { sentAt: number; sentBy: string; emailStatus: 'pending' | 'sent' | 'unavailable' | 'failed' };
+}
+
 export interface DecryptPreflightDevice {
   id: string;
   name: string;
@@ -2007,6 +2014,14 @@ export function retryJob(id: string, preferPrimary = false): Promise<{ ok: boole
 
 export function fetchJobTimeline(id: string): Promise<JobTimeline> {
   return apiJson(`/v1/dashboard/jobs/${encodeURIComponent(id)}/timeline`);
+}
+
+export function fetchJobResolutionNotice(id: string): Promise<JobResolutionNoticePreview> {
+  return apiJson(`/v1/dashboard/jobs/${encodeURIComponent(id)}/resolution-notice`);
+}
+
+export function sendJobResolutionNotice(id: string): Promise<JobResolutionNoticePreview> {
+  return apiJson(`/v1/dashboard/jobs/${encodeURIComponent(id)}/resolution-notice`, { method: 'POST' });
 }
 
 export function previewBulkJobReplay(ids: string[]): Promise<BulkJobPreview> {

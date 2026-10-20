@@ -54,6 +54,7 @@ const auditActionSchema = Type.Union([
   Type.Literal('artifact.archive'),
   Type.Literal('artifact.restore'),
   Type.Literal('incident.update'),
+  Type.Literal('job.resolution-notice'),
   Type.Literal('integration.create'),
   Type.Literal('integration.rotate'),
   Type.Literal('integration.revoke'),
