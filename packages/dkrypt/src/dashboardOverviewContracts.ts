@@ -19,7 +19,21 @@ export const dashboardOverviewResponseSchema = Type.Object({
   schedulerEnabled: Type.Boolean(),
   settings: schedulerSettingsResponseSchema,
   watches: Type.Array(dashboardWatchResponseSchema),
+  statusWatches: Type.Array(Type.Object({
+    id: Identifier,
+    bundleId: BundleId,
+    schedulable: Type.Boolean(),
+    nextRunAt: Type.Optional(Type.Number()),
+  })),
   devices: Type.Array(dashboardDeviceResponseSchema),
+  statusDevices: Type.Array(Type.Object({
+    id: Identifier,
+    name: Type.String(),
+    enabled: Type.Boolean(),
+    draining: Type.Boolean(),
+    isPrimary: Type.Optional(Type.Boolean()),
+    reachable: Type.Optional(Type.Boolean()),
+  })),
   deviceStatus: Type.Object({
     configured: Type.Integer({ minimum: 0 }),
     enabled: Type.Integer({ minimum: 0 }),

@@ -387,7 +387,9 @@ export interface OverviewPayload {
   schedulerEnabled: boolean;
   settings: SchedulerSettings;
   watches: AppWatch[];
+  statusWatches?: Array<{ id: string; bundleId: string; schedulable: boolean; nextRunAt?: number }>;
   devices: DeviceRecord[];
+  statusDevices?: Array<{ id: string; name: string; enabled: boolean; draining?: boolean; isPrimary?: boolean; reachable?: boolean }>;
   deviceStatus?: { configured: number; enabled: number; online: number; ready: number; attention: number; checking: number; unavailable: number; freshUntil?: number };
   lastSchedulerRunAt?: number;
   schedulerRunHistory: SchedulerRunEntry[];

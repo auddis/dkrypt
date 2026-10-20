@@ -29,10 +29,10 @@ import { recordFastifyDashboardActivity } from '#dashboardActivity.js';
 import { serializeDashboardDevice } from '#dashboardDevicePresentation.js';
 import { getRouteContract } from '#contracts.js';
 import { fastifyRequirePermission, fastifyRequireSession, getFastifySession } from '#session.js';
-import { PermissionFlag } from '#permissions.js';
+import { hasPermission, PermissionFlag } from '#permissions.js';
 import { emitJobsChanged } from '#events.js';
 import { getActiveJobs, notifyDeviceDispatchStateChanged } from '#jobs/store.js';
-import { getDeviceHealth, isBridgeHeartbeatFresh } from '#deviceHealth.js';
+import { getDeviceHealth, isBridgeHeartbeatFresh, type DeviceHealth } from '#deviceHealth.js';
 import { getCachedDeviceHealth } from '#deviceHealthCache.js';
 import { discoverDevices, execCommand, isDirectUsbDeviceAgentConnection, listInstalledAppStoreBundles, sendSpringBoardBridgeRequest, setupDeviceConnection, withAutoinstallDeviceAgent, withSSH, type DeviceConnection } from '#idevice.js';
 import { getTestFlightBridgeDiagnostics } from '#testflight.js';
@@ -140,6 +140,45 @@ export function parseDeviceConnection(body: unknown): { connection: DeviceConnec
 
 function resolveDevice(id: string) {
   return getDevice(id) ?? (id === 'primary' ? getPrimaryDevice() : undefined);
+}
+
+function canReadDeviceStatus(permissions: bigint, id: string, force = false): boolean {
+  if (hasPermission(permissions, PermissionFlag.manageDevices)) return true;
+  if (force) return false;
+  return hasPermission(permissions, PermissionFlag.viewDevices) || id === 'primary';
+}
+
+function resolveReadableStatusDevice(permissions: bigint, id: string): { device: DeviceRecord } | { status: 403 | 404; message: string } {
+  if (!canReadDeviceStatus(permissions, id)) return { status: 403, message: 'device history is unavailable' };
+  const device = resolveDevice(id);
+  return device ? { device } : { status: 404, message: 'device not found' };
+}
+
+function serializeMemberDeviceHealth(health: DeviceHealth, refreshing: boolean): DeviceHealth & { refreshing: boolean } {
+  return {
+    reachable: health.reachable,
+    refreshing,
+    checkedAt: health.checkedAt,
+    error: health.error,
+    testFlightRunning: health.testFlightRunning,
+    testFlightBridgeReachable: health.testFlightBridgeReachable,
+    batteryPercent: health.batteryPercent,
+    batteryCharging: health.batteryCharging,
+    batteryTemperatureC: health.batteryTemperatureC,
+    batteryCycleCount: health.batteryCycleCount,
+    batteryHealthPercent: health.batteryHealthPercent,
+    batteryDesignCapacityMah: health.batteryDesignCapacityMah,
+    batteryMaxCapacityMah: health.batteryMaxCapacityMah,
+    storageTotalBytes: health.storageTotalBytes,
+    storageUsedBytes: health.storageUsedBytes,
+    storageFreeBytes: health.storageFreeBytes,
+    storageUsedPercent: health.storageUsedPercent,
+    networkConnected: health.networkConnected,
+    internetAccess: health.internetAccess,
+    networkInterface: health.networkInterface,
+    networkIpAddress: health.networkIpAddress,
+    subsystems: health.subsystems,
+  };
 }
 
 const springBoardActions = {
@@ -408,20 +447,24 @@ export const dashboardDeviceRoutes: FastifyPluginAsyncTypebox = async (server) =
 
   server.get<DashboardDeviceHealthRoute>('/v1/dashboard/devices/:id/health', {
     schema: getRouteContract('GET', '/v1/dashboard/devices/:id/health'),
-    preHandler: canViewDevices,
     attachValidation: true,
   }, async (request, reply) => {
     if (request.validationError) return reply.code(400).send(createHttpErrorEnvelope(request.id, 400, 'device health query is invalid'));
+    const permissions = getFastifySession(request)!.permissions;
+    const canViewDeviceData = hasPermission(permissions, PermissionFlag.viewDevices) || hasPermission(permissions, PermissionFlag.manageDevices);
+    const force = request.query.force === 'true';
+    if (!canReadDeviceStatus(permissions, request.params.id, force)) return reply.code(403).send(createHttpErrorEnvelope(request.id, 403, 'device status is unavailable'));
     const device = resolveDevice(request.params.id);
     if (!device) return reply.code(404).send(createHttpErrorEnvelope(request.id, 404, 'device not found'));
     try {
-      const force = request.query.force === 'true';
       const cached = getCachedDeviceHealth(device.id);
       if (!force && cached) {
         const staleAfterMs = cached.value.reachable && cached.value.testFlightBridgeReachable !== false ? 45_000 : 120_000;
         const refreshing = Date.now() - cached.at >= staleAfterMs;
         if (refreshing) void getDeviceHealth(device.id).catch(() => undefined);
-        return { ...cached.value, refreshing, subsystemDetails: getDeviceSubsystemDetails(device.id, cached.value.subsystems) };
+        return canViewDeviceData
+          ? { ...cached.value, refreshing, subsystemDetails: getDeviceSubsystemDetails(device.id, cached.value.subsystems) }
+          : serializeMemberDeviceHealth(cached.value, refreshing);
       }
       const snapshot = await resolveWithin(getDeviceHealth(device.id, force), force ? 8_000 : 1_000);
       if (!snapshot.completed) {
@@ -433,9 +476,11 @@ export const dashboardDeviceRoutes: FastifyPluginAsyncTypebox = async (server) =
           retryable: true,
         });
       }
-      return { ...snapshot.value, refreshing: false, subsystemDetails: getDeviceSubsystemDetails(device.id, snapshot.value.subsystems) };
+      return canViewDeviceData
+        ? { ...snapshot.value, refreshing: false, subsystemDetails: getDeviceSubsystemDetails(device.id, snapshot.value.subsystems) }
+        : serializeMemberDeviceHealth(snapshot.value, false);
     } catch (error) {
-      return reply.code(502).send(createHttpErrorEnvelope(request.id, 502, `device health check failed: ${getErrorMessage(error)}`));
+      return reply.code(502).send(createHttpErrorEnvelope(request.id, 502, canViewDeviceData ? `device health check failed: ${getErrorMessage(error)}` : 'device health check failed'));
     }
   });
 
@@ -550,21 +595,28 @@ export const dashboardDeviceRoutes: FastifyPluginAsyncTypebox = async (server) =
 
   server.get<DashboardDeviceHealthHistoryRoute>('/v1/dashboard/devices/:id/health-history', {
     schema: getRouteContract('GET', '/v1/dashboard/devices/:id/health-history'),
-    preHandler: canViewDevices,
-  }, (request) => {
+  }, (request, reply) => {
+    const access = resolveReadableStatusDevice(getFastifySession(request)!.permissions, request.params.id);
+    if ('status' in access) return reply.code(access.status).send(createHttpErrorEnvelope(request.id, access.status, access.message));
     const hours = request.query.hours ?? 24;
-    return { buckets: getDeviceHealthHourlyBuckets(request.params.id, hours), uptimePercent: getDeviceUptimePercent(request.params.id, hours) ?? null };
+    return { buckets: getDeviceHealthHourlyBuckets(access.device.id, hours), uptimePercent: getDeviceUptimePercent(access.device.id, hours) ?? null };
   });
 
   server.get<DashboardDeviceBatteryHistoryRoute>('/v1/dashboard/devices/:id/battery-history', {
     schema: getRouteContract('GET', '/v1/dashboard/devices/:id/battery-history'),
-    preHandler: canViewDevices,
-  }, (request) => ({ buckets: getDeviceBatteryHourlyBuckets(request.params.id, request.query.hours ?? 24) }));
+  }, (request, reply) => {
+    const access = resolveReadableStatusDevice(getFastifySession(request)!.permissions, request.params.id);
+    if ('status' in access) return reply.code(access.status).send(createHttpErrorEnvelope(request.id, access.status, access.message));
+    return { buckets: getDeviceBatteryHourlyBuckets(access.device.id, request.query.hours ?? 24) };
+  });
 
   server.get<DashboardDeviceTemperatureHistoryRoute>('/v1/dashboard/devices/:id/temperature-history', {
     schema: getRouteContract('GET', '/v1/dashboard/devices/:id/temperature-history'),
-    preHandler: canViewDevices,
-  }, (request) => ({ buckets: getDeviceTemperatureHourlyBuckets(request.params.id, request.query.hours ?? 24) }));
+  }, (request, reply) => {
+    const access = resolveReadableStatusDevice(getFastifySession(request)!.permissions, request.params.id);
+    if ('status' in access) return reply.code(access.status).send(createHttpErrorEnvelope(request.id, access.status, access.message));
+    return { buckets: getDeviceTemperatureHourlyBuckets(access.device.id, request.query.hours ?? 24) };
+  });
 
   server.get<DashboardDeviceStorageHistoryRoute>('/v1/dashboard/devices/:id/storage-history', {
     schema: getRouteContract('GET', '/v1/dashboard/devices/:id/storage-history'),

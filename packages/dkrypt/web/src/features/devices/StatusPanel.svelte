@@ -45,10 +45,22 @@
 	import { sessionHasAnyPermission } from "#lib/session.svelte";
 
 	const overview = $derived(liveState.overview);
-	const canViewAutomation = $derived(sessionHasAnyPermission([PermissionFlag.viewAutomation, PermissionFlag.manageAutomation]));
+	const canViewDevices = $derived(sessionHasAnyPermission([PermissionFlag.viewDevices, PermissionFlag.manageDevices]));
+	const canManageDevices = $derived(sessionHasAnyPermission([PermissionFlag.manageDevices]));
+	const statusWatches = $derived(overview?.statusWatches ?? overview?.watches ?? []);
+	const statusDevices = $derived(overview?.statusDevices ?? overview?.devices.map((device) => ({
+		id: device.id,
+		name: device.name,
+		enabled: device.enabled,
+		draining: device.draining,
+		isPrimary: device.isPrimary,
+		reachable: undefined as boolean | undefined,
+	})) ?? []);
+	const primaryStatusDeviceId = $derived(statusDevices.find((device) => device.enabled && !device.draining && device.isPrimary)?.id ?? statusDevices.find((device) => device.enabled && !device.draining)?.id);
 	const primaryDeviceId = $derived(
-		overview?.devices.find((d) => d.isPrimary)?.id ??
-			overview?.devices[0]?.id,
+		canViewDevices
+			? primaryStatusDeviceId
+			: primaryStatusDeviceId ? "primary" : undefined,
 	);
 
 	type RunState =
@@ -92,7 +104,7 @@
 	});
 
 	const nextRunAt = $derived.by(() => {
-		const times = (overview?.watches ?? [])
+		const times = statusWatches
 			.map((w) => w.nextRunAt)
 			.filter((t): t is number => t !== undefined);
 		return times.length > 0 ? Math.min(...times) : undefined;
@@ -116,7 +128,7 @@
 	$effect(() => {
 		void ensureAppCatalog([
 			...(overview?.activeJobs ?? []).map((job) => job.bundleId),
-			...(overview?.watches ?? []).map((watch) => watch.bundleId),
+			...statusWatches.map((watch) => watch.bundleId),
 		]);
 	});
 
@@ -189,9 +201,13 @@
 	});
 
 	let poolHealth = $state<Record<string, DeviceHealth | undefined>>({});
+	function deviceReachability(device: { id: string; reachable?: boolean }): boolean | undefined {
+		return canViewDevices ? poolHealth[device.id]?.reachable : device.reachable;
+	}
 
 	$effect(() => {
-		const devices = overview?.devices ?? [];
+		const devices = statusDevices;
+		if (!canViewDevices) return;
 		if (devices.length <= 1) return;
 		const load = () => {
 			for (const d of devices)
@@ -205,11 +221,11 @@
 	});
 
 	const poolSummary = $derived.by(() => {
-		const devices = overview?.devices ?? [];
+		const devices = statusDevices;
 		if (devices.length <= 1) return null;
 		const enabled = devices.filter((d) => d.enabled);
 		const healthy = enabled.filter(
-			(d) => poolHealth[d.id]?.reachable,
+			(d) => deviceReachability(d),
 		).length;
 		return { healthy, total: enabled.length };
 	});
@@ -422,14 +438,14 @@
 			if (summary.unavailable > 0) return { label: `${summary.unavailable} device${summary.unavailable === 1 ? "" : "s"} unavailable`, detail: `${summary.checking} checking`, variant: "destructive" };
 			return { label: "Checking device", detail: "Waiting for a recent device health check.", variant: "secondary" };
 		}
-		if (overview.devices.length === 0) {
+		if (statusDevices.length === 0) {
 			return {
 				label: "No device connected",
 				detail: "Connect a device from Settings → Devices to run decrypts.",
 				variant: "secondary",
 			};
 		}
-		if (!overview.devices.some((device) => device.enabled)) {
+		if (!statusDevices.some((device) => device.enabled)) {
 			return {
 				label: "No enabled device",
 				detail: "Enable a device from Settings → Devices to run decrypts.",
@@ -444,7 +460,7 @@
 	});
 	const activeJobs = $derived(overview?.activeJobs.length ?? 0);
 	const schedulableWatchCount = $derived(
-		overview?.watches.filter((w) => w.schedulable).length ?? 0,
+		statusWatches.filter((w) => w.schedulable).length,
 	);
 
 	function debugBundleText(): string {
@@ -491,6 +507,7 @@
 					{HEALTH_LABEL[overallHealth.level]}
 				</span>
 				<span>{health.refreshing ? "Updating ·" : "Checked"} <RelativeTime ms={health.checkedAt} /></span>
+				{#if canManageDevices}
 				<Button
 					variant="ghost"
 					size="icon"
@@ -510,6 +527,7 @@
 					text={debugBundleText()}
 					title="Copy debug info (device health, queue, disk)"
 				/>
+				{/if}
 			</div>
 		{/if}
 	{/snippet}
@@ -517,7 +535,7 @@
 		<p role="status" class="mb-2 text-xs text-warning">{healthError}</p>
 	{/if}
 	<div class="mb-1.5 flex flex-wrap items-center gap-1.5">
-		{#if overview && canViewAutomation}
+		{#if overview}
 			<Popover>
 				{#snippet trigger()}
 					<Badge
@@ -596,11 +614,11 @@
 					{#if h.reachable && h.subsystems?.agent === "offline"}
 						<div class="text-warn max-w-xs whitespace-normal">USB and mux are connected. The on-device agent needs recovery before automation can run.</div>
 					{/if}
-					{#if overview?.devices.length}
+					{#if statusDevices.length}
 						<div class="text-muted">Devices</div>
-						{#each overview.devices as d (d.id)}
+						{#each statusDevices as d (d.id)}
 							<div>
-								{d.name}{d.id === primaryDeviceId
+								{d.name}{d.id === primaryStatusDeviceId
 									? " (primary)"
 									: ""} · {d.enabled ? "enabled" : "disabled"}
 							</div>
@@ -620,22 +638,22 @@
 						</Badge>
 					{/snippet}
 					<div class="flex flex-col gap-1 whitespace-nowrap">
-						{#each (overview?.devices ?? []).filter((d) => d.enabled) as d (d.id)}
-							{@const dh = poolHealth[d.id]}
+						{#each statusDevices.filter((d) => d.enabled) as d (d.id)}
+							{@const reachable = deviceReachability(d)}
 							<div>
 								<span
-									class={dh?.reachable
+									class={reachable
 										? "text-ok"
-										: dh
+										: reachable !== undefined
 											? "text-err"
 											: "text-muted"}
-									>{dh
-										? dh.reachable
+									>{reachable !== undefined
+										? reachable
 											? "online"
 											: "unreachable"
 										: "checking"}</span
 								>
-								· {d.name}{d.id === primaryDeviceId
+								· {d.name}{d.id === primaryStatusDeviceId
 									? " (primary)"
 									: ""}
 							</div>
@@ -859,9 +877,9 @@
 			</div>
 		</div>
 	{/if}
-	{#if overview?.watches.length}
+	{#if statusWatches.length}
 		<dl class="text-sm">
-			{#each overview.watches as w (w.id)}
+			{#each statusWatches as w (w.id)}
 				<div
 					class="border-border flex items-center gap-2.5 border-t py-2"
 				>

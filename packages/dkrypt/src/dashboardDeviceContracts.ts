@@ -33,19 +33,19 @@ export type DashboardDeviceActivityRoute = {
 export type DashboardDeviceHealthHistoryRoute = {
   Params: Static<typeof dashboardDeviceParamsSchema>;
   Querystring: Static<typeof dashboardDeviceHistoryQuerySchema>;
-  Reply: { 200: DashboardDeviceHealthHistoryResponse };
+  Reply: { 200: DashboardDeviceHealthHistoryResponse; 403: ApiErrorEnvelope; 404: ApiErrorEnvelope };
 };
 
 export type DashboardDeviceBatteryHistoryRoute = {
   Params: Static<typeof dashboardDeviceParamsSchema>;
   Querystring: Static<typeof dashboardDeviceHistoryQuerySchema>;
-  Reply: { 200: DashboardDeviceBatteryHistoryResponse };
+  Reply: { 200: DashboardDeviceBatteryHistoryResponse; 403: ApiErrorEnvelope; 404: ApiErrorEnvelope };
 };
 
 export type DashboardDeviceTemperatureHistoryRoute = {
   Params: Static<typeof dashboardDeviceParamsSchema>;
   Querystring: Static<typeof dashboardDeviceHistoryQuerySchema>;
-  Reply: { 200: DashboardDeviceTemperatureHistoryResponse };
+  Reply: { 200: DashboardDeviceTemperatureHistoryResponse; 403: ApiErrorEnvelope; 404: ApiErrorEnvelope };
 };
 
 export type DashboardDeviceStorageHistoryRoute = {

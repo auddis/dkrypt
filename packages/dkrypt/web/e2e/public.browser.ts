@@ -510,9 +510,9 @@ test('IPA Library visual layout stays consistent on desktop and mobile', async (
   const libraryCard = page.locator('[data-slot="card"]').filter({ hasText: 'IPA Library' });
   await expect(page.getByText('Visual App', { exact: true })).toBeVisible();
   const artifactRow = libraryCard.locator('[data-artifact-id="visual-artifact"]');
-  await expect(artifactRow.locator('dd > span.truncate.font-semibold')).toHaveText('348.0 (113691)');
+  await expect(artifactRow.locator('dd > span.break-words.font-semibold')).toHaveText('348.0 (113691)');
   const metadataRows = await artifactRow.locator('dt').evaluateAll((headings) => Object.fromEntries(headings.map((heading) => [heading.textContent?.trim(), heading.getBoundingClientRect().top])));
-  expect(metadataRows.Size).toBe(metadataRows.App);
+  expect(metadataRows.Size).toBeGreaterThan(metadataRows.App);
   const actionsTop = await artifactRow.locator('.artifact-library-row-actions').evaluate((element) => element.getBoundingClientRect().top);
   expect(actionsTop).toBeGreaterThan(metadataRows.App + 35);
   await expectVisualSnapshot(page, libraryCard, 'ipa-library-desktop.png');
@@ -525,20 +525,47 @@ test('IPA Library visual layout stays consistent on desktop and mobile', async (
   for (const width of [1200, 1652]) {
     await page.setViewportSize({ width, height: 1000 });
     const rows = await artifactRow.locator('dt').evaluateAll((headings) => Object.fromEntries(headings.map((heading) => [heading.textContent?.trim(), heading.getBoundingClientRect().top])));
-    expect(rows.Size, `viewport ${width}`).toBe(rows.App);
+    if (width === 1200) expect(rows.Size, `viewport ${width}`).toBeGreaterThan(rows.App);
     const rowActionsTop = await artifactRow.locator('.artifact-library-row-actions').evaluate((element) => element.getBoundingClientRect().top);
     expect(rowActionsTop, `viewport ${width}`).toBeGreaterThanOrEqual(rows.App);
-    const versionIsVisible = await artifactRow.locator('dd > span.truncate.font-semibold').evaluate((element) => element.scrollWidth <= element.clientWidth);
+    const versionIsVisible = await artifactRow.locator('dd > span.break-words.font-semibold').evaluate((element) => element.scrollWidth <= element.clientWidth);
     expect(versionIsVisible, `viewport ${width}`).toBe(true);
     if (width === 1200) await expectVisualSnapshot(page, libraryCard, 'ipa-library-narrow-desktop.png');
   }
 
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileRows = await artifactRow.locator('dt').evaluateAll((headings) => Object.fromEntries(headings.map((heading) => [heading.textContent?.trim(), heading.getBoundingClientRect().top])));
-  expect(mobileRows.Size).toBe(mobileRows.Version);
-  const mobileVersionIsVisible = await artifactRow.locator('dd > span.truncate.font-semibold').evaluate((element) => element.scrollWidth <= element.clientWidth);
+  expect(mobileRows.Size).toBeGreaterThan(mobileRows.Version);
+  const mobileVersionIsVisible = await artifactRow.locator('dd > span.break-words.font-semibold').evaluate((element) => element.scrollWidth <= element.clientWidth);
   expect(mobileVersionIsVisible).toBe(true);
   await expectVisualSnapshot(page, libraryCard, 'ipa-library-mobile.png');
+});
+
+test('IPA Library keeps app and bundle names readable with browser and dashboard sidebars open', async ({ page }) => {
+  await mockVisualDashboardData(page);
+  await mockStableDashboardEvents(page);
+  await mockAuthenticatedDashboard(page, '1');
+  await page.route('**/v1/dashboard/apps/metadata?*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ entries: [{ bundleId: 'com.hammerandchisel.discord', displayName: 'Discord - Talk, Play, Hang Out', updatedAt: Date.now() }] }) });
+  });
+  await page.route('**/v1/dashboard/artifacts**', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ artifacts: [{ id: 'sidebar-artifact', bundleId: 'com.hammerandchisel.discord', channel: 'testflight', versionLabel: '351.0', buildNumber: '116422', fileSizeBytes: 110900000, createdAt: new Date().toISOString(), pinnedAt: Date.now(), fileUrl: '/download/sidebar-artifact' }], total: 1, totalBytes: 110900000, maxBytes: 1_000_000_000 }) });
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?tab=home');
+  const row = page.locator('[data-artifact-id="sidebar-artifact"]');
+  const appName = row.getByRole('button', { name: 'Show full value: Discord - Talk, Play, Hang Out' });
+  const bundleId = row.getByRole('button', { name: 'Show full value: com.hammerandchisel.discord' });
+  await expect(appName).toBeVisible({ timeout: 15_000 });
+  for (const width of [1440, 1180, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const field of [appName, bundleId]) {
+      const clipped = await field.evaluate((element) => element.scrollWidth > element.clientWidth + 1);
+      expect(clipped, `${width}px ${await field.getAttribute('aria-label')}`).toBe(false);
+    }
+    expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), `${width}px artifact row overflow`).toBe(true);
+  }
 });
 
 test('collapsed sidebar gives library and history content the released space', async ({ page }) => {
@@ -612,7 +639,7 @@ test('collapsed sidebar gives library and history content the released space', a
   expect(wideAfter).toBeGreaterThan(wideBefore + 100);
 });
 
-test('job history cards reserve the full first row for app details and keep actions on one line', async ({ page }) => {
+test('job history cards keep names and actions readable from desktop to phone widths', async ({ page }) => {
   await mockVisualDashboardData(page);
   await mockStableDashboardEvents(page);
   await mockAuthenticatedDashboard(page, '1');
@@ -629,7 +656,7 @@ test('job history cards reserve the full first row for app details and keep acti
   await expect(row).toBeVisible();
   const rowWidth = await row.evaluate((element) => element.getBoundingClientRect().width);
   const summaryWidth = await row.locator('.history-feed-summary').evaluate((element) => element.getBoundingClientRect().width);
-  expect(summaryWidth).toBeGreaterThan(rowWidth * 0.85);
+  expect(summaryWidth).toBeGreaterThan(rowWidth * 0.55);
 
   await page.setViewportSize({ width: 320, height: 568 });
   const actions = row.locator('.history-feed-actions');
@@ -649,6 +676,95 @@ test('job history cards reserve the full first row for app details and keep acti
   expect(iconBounds).not.toBeNull();
   expect(nameBounds).not.toBeNull();
   expect(Math.abs(iconBounds!.y - nameBounds!.y)).toBeLessThanOrEqual(4);
+});
+
+test('job history groups version and status while keeping actions beside the app at constrained desktop widths', async ({ page }) => {
+  await mockVisualDashboardData(page);
+  await mockStableDashboardEvents(page);
+  await mockAuthenticatedDashboard(page, '1');
+  await page.route('**/v1/dashboard/apps/metadata?*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ entries: [{ bundleId: 'com.hammerandchisel.discord', displayName: 'Discord - Talk, Play, Hang Out', updatedAt: Date.now() }] }) });
+  });
+  await page.route('**/v1/dashboard/jobs?*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ history: [{ id: 'job-sidebar-layout', bundleId: 'com.hammerandchisel.discord', status: 'done', source: 'scheduler', testflight: true, versionLabel: '351.0_116422', sizeBytes: 110900000, createdAt: Date.now() - 60_000, finishedAt: Date.now() - 30_000, fileAvailable: true, artifactId: 'sidebar-artifact', downloadUrl: '/download/sidebar-artifact' }], total: 1 }) });
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?tab=home');
+  const row = page.locator('.history-feed-row').first();
+  await expect(row).toBeVisible();
+  const appName = row.getByRole('button', { name: 'Discord - Talk, Play, Hang Out' });
+  const version = row.getByText('351.0_116422', { exact: true });
+  const status = row.getByText('done', { exact: true });
+  const actions = row.locator('.history-feed-actions');
+  const [appBox, versionBox, statusBox, actionBox] = await Promise.all([appName.boundingBox(), version.boundingBox(), status.boundingBox(), actions.boundingBox()]);
+  expect(appBox).not.toBeNull();
+  expect(versionBox).not.toBeNull();
+  expect(statusBox).not.toBeNull();
+  expect(actionBox).not.toBeNull();
+  expect(Math.abs(versionBox!.y - statusBox!.y)).toBeLessThanOrEqual(8);
+  expect(Math.abs(appBox!.y - actionBox!.y)).toBeLessThanOrEqual(8);
+  const sourceBox = await row.getByText('TestFlight', { exact: true }).boundingBox();
+  expect(sourceBox).not.toBeNull();
+  expect(Math.abs(versionBox!.y - sourceBox!.y)).toBeLessThanOrEqual(8);
+  await expectVisualSnapshot(page, row, 'job-history-narrow-desktop.png');
+
+  await page.setViewportSize({ width: 320, height: 900 });
+  expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await expect(row.getByRole('button', { name: 'Inspect job' })).toBeVisible();
+  await expect(row.getByRole('link', { name: 'Download IPA' })).toBeVisible();
+  await row.getByRole('button', { name: 'Inspect job' }).click();
+  await expect(page.getByRole('dialog', { name: 'Discord - Talk, Play, Hang Out (351.0_116422)' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close details' }).click();
+  await page.addStyleTag({ content: '.mobile-primary-nav { display: none !important; }' });
+  await expectVisualSnapshot(page, row, 'job-history-mobile.png');
+});
+
+test('regular members see operational Status details without device controls', async ({ page }) => {
+  await mockAuthenticatedDashboard(page, '0');
+  await mockStableDashboardEvents(page);
+  await page.unroute('**/v1/dashboard/overview*');
+  await page.route('**/v1/dashboard/overview*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      schedulerEnabled: true,
+      settings: {},
+      watches: [],
+      statusWatches: [{ id: 'watch-discord', bundleId: 'com.hammerandchisel.discord', schedulable: true, nextRunAt: Date.now() + 3600_000 }],
+      devices: [],
+      statusDevices: [{ id: 'device-1', name: 'Lab iPad', enabled: true, isPrimary: true, reachable: true }],
+      deviceStatus: { configured: 1, enabled: 1, online: 1, ready: 1, attention: 0, checking: 0, unavailable: 0 },
+      schedulerRunHistory: [{ id: 'run-1', ts: Date.now() - 60_000, watchId: 'watch-discord', bundleId: 'com.hammerandchisel.discord', appStore: { ok: true, triggered: false, reason: 'Current' }, testflight: { ok: true, triggered: false, reason: 'Current' } }],
+      disk: { totalBytes: 1000, freeBytes: 800, usedBytes: 200, usedPercent: 0.2 },
+      maintenance: { active: false, manual: false, auto: false },
+      activeJobs: [],
+    }) });
+  });
+  await page.route('**/v1/dashboard/devices/primary/health', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ reachable: true, checkedAt: Date.now(), testFlightBridgeReachable: true, testFlightRunning: true, batteryPercent: 83, batteryCharging: true, batteryTemperatureC: 31, networkConnected: true, internetAccess: true, networkInterface: 'en0', networkIpAddress: '192.0.2.44', storageUsedPercent: 0.2 }) });
+  });
+  await page.route('**/v1/dashboard/devices/primary/health-history?*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ buckets: [{ hourStart: Date.now() - 3600_000, reachablePercent: 1, transitions: 0 }], uptimePercent: 1 }) });
+  });
+  await page.route('**/v1/dashboard/devices/primary/battery-history?*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ buckets: [{ hourStart: Date.now() - 3600_000, batteryPercent: 83 }] }) });
+  });
+  await page.route('**/v1/dashboard/devices/primary/temperature-history?*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ buckets: [{ hourStart: Date.now() - 3600_000, batteryTemperatureC: 31 }] }) });
+  });
+
+  await page.goto('/?tab=home');
+  await page.getByRole('button', { name: 'Open status drawer' }).click();
+  const status = page.locator('.status-surface:visible').first();
+  await expect(status.getByText('Scheduler on')).toBeVisible();
+  await expect(status.getByText('Device online')).toBeVisible();
+  await expect(status.getByText('83%')).toBeVisible();
+  await expect(status.getByText('Device reachability · last 24h')).toBeVisible();
+  await expect(status.getByText('Recent scheduler checks')).toBeVisible();
+  await expect(status.getByText('Staging disk')).toBeVisible();
+  await expect(status.getByRole('button', { name: 'Refresh device status' })).toHaveCount(0);
+  await expect(status.getByRole('button', { name: /Copy debug info/ })).toHaveCount(0);
+  await status.getByRole('button', { name: 'Internet' }).click();
+  await expect(page.getByText('192.0.2.44')).toBeVisible();
 });
 
 test('live updates suspend while hidden and refresh immediately when visible again', async ({ page }) => {

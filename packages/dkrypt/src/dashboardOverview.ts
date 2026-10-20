@@ -27,30 +27,55 @@ const DEVICE_STATUS_FRESH_MS = 10 * 60_000;
 export function buildDashboardOverview(permissions: bigint, userId: string, projectId = DEFAULT_PROJECT_ID) {
   const canViewAutomation = hasPermission(permissions, PermissionFlag.viewAutomation) || hasPermission(permissions, PermissionFlag.manageAutomation);
   const canViewDeviceData = hasPermission(permissions, PermissionFlag.viewDevices) || hasPermission(permissions, PermissionFlag.manageDevices);
-  const watches = canViewAutomation ? getEffectiveWatches().filter((watch) =>
+  const projectWatches = getEffectiveWatches().filter((watch) =>
     (watch.projectId ?? DEFAULT_PROJECT_ID) === projectId && canAccessProject(userId, permissions, watch.projectId ?? DEFAULT_PROJECT_ID),
-  ).map((watch) => {
+  );
+  const statusWatches = projectWatches.map((watch) => {
+    const schedulable = isWatchSchedulable(watch);
+    return {
+      id: watch.id,
+      bundleId: watch.bundleId,
+      schedulable,
+      nextRunAt: schedulable
+        ? nextRunnableCronOccurrence(watch.pollCron, effectiveTimeZone(watch.timezone), watch.maintenanceWindow, Date.now(), Date.now() + 366 * 24 * 60 * 60 * 1000)?.at
+        : undefined,
+    };
+  });
+  const watches = canViewAutomation ? projectWatches.map((watch, index) => {
     const publicWatch = { ...watch };
     delete publicWatch.lastScheduledAt;
     return {
       ...publicWatch,
       timezone: effectiveTimeZone(watch.timezone),
       missedRunPolicy: watch.missedRunPolicy ?? 'skip',
-      nextRunAt: isWatchSchedulable(watch)
-        ? nextRunnableCronOccurrence(watch.pollCron, effectiveTimeZone(watch.timezone), watch.maintenanceWindow, Date.now(), Date.now() + 366 * 24 * 60 * 60 * 1000)?.at
-        : undefined,
-      schedulable: isWatchSchedulable(watch),
+      nextRunAt: statusWatches[index]?.nextRunAt,
+      schedulable: statusWatches[index]?.schedulable ?? false,
       configIssues: getWatchConfigIssues(watch),
     };
   }) : [];
-  const schedulerRunHistory = canViewAutomation
-    ? getSchedulerRunHistory(200).filter((run) => watches.some((watch) => watch.id === run.watchId)).slice(0, 10)
-    : [];
+  const statusWatchIds = new Set(statusWatches.map((watch) => watch.id));
+  const schedulerRunHistory = getSchedulerRunHistory(200).filter((run) => run.watchId !== undefined && statusWatchIds.has(run.watchId)).slice(0, 10);
   const deviceRecords = getEffectiveDevices();
   const devices = canViewDeviceData ? deviceRecords.map((device) => serializeDashboardDevice(device)) : [];
+  const cachedHealthByDevice = new Map(deviceRecords.map((device) => [device.id, getCachedDeviceHealth(device.id)?.value] as const));
+  const freshHealthForDevice = (deviceId: string) => {
+    const health = cachedHealthByDevice.get(deviceId);
+    return health && Date.now() - health.checkedAt <= DEVICE_STATUS_FRESH_MS ? health : undefined;
+  };
+  const statusDevices = deviceRecords.map((device) => {
+    const health = freshHealthForDevice(device.id);
+    return {
+      id: device.id,
+      name: device.name,
+      enabled: device.enabled,
+      draining: device.draining ?? false,
+      isPrimary: device.isPrimary,
+      reachable: health?.reachable,
+    };
+  });
   const enabledDevices = deviceRecords.filter((device) => device.enabled);
-  const recentHealth = enabledDevices.map((device) => getCachedDeviceHealth(device.id)?.value)
-    .filter((health): health is NonNullable<typeof health> => health !== undefined && Date.now() - health.checkedAt <= DEVICE_STATUS_FRESH_MS);
+  const recentHealth = enabledDevices.map((device) => freshHealthForDevice(device.id))
+    .filter((health): health is NonNullable<typeof health> => health !== undefined);
   const onlineDevices = recentHealth.filter((health) => health.reachable).length;
   const readyDevices = recentHealth.filter((health) => health.reachable && !getDeviceInstallBlocker(health)).length;
   const unavailableDevices = recentHealth.length - onlineDevices;
@@ -70,10 +95,12 @@ export function buildDashboardOverview(permissions: bigint, userId: string, proj
   );
   const queueSummaries = getJobQueueSummaries(activeJobs);
   return {
-    schedulerEnabled: watches.some((watch) => watch.schedulable),
+    schedulerEnabled: statusWatches.some((watch) => watch.schedulable),
     settings: canViewAutomation ? settings : { ...settings, notifyWebhookUrl: '' },
     watches,
+    statusWatches,
     devices,
+    statusDevices,
     deviceStatus,
     lastSchedulerRunAt: schedulerRunHistory[0]?.ts,
     schedulerRunHistory,

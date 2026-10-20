@@ -4,7 +4,7 @@
   import Button from '#lib/components/ui/Button.svelte';
   import { showToast } from '#lib/ui.svelte';
 
-  let { value, monospace = false, sensitive = false }: { value: string; monospace?: boolean; sensitive?: boolean } = $props();
+  let { value, monospace = false, sensitive = false, wrap = false }: { value: string; monospace?: boolean; sensitive?: boolean; wrap?: boolean } = $props();
   let open = $state(false);
 
   async function copy(): Promise<void> {
@@ -19,7 +19,7 @@
 </script>
 
 <Popover.Root bind:open>
-  <Popover.Trigger class="min-w-0 max-w-full truncate text-left underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" title={value} aria-label={`Show full value: ${value}`} data-sensitive={sensitive ? 'true' : undefined}>
+  <Popover.Trigger class="min-w-0 max-w-full text-left underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent {wrap ? monospace ? 'block w-full break-all whitespace-normal' : 'block w-full break-words whitespace-normal' : 'truncate'}" title={value} aria-label={`Show full value: ${value}`} data-sensitive={sensitive ? 'true' : undefined}>
     <span class={monospace ? 'font-mono' : ''}>{value}</span>
   </Popover.Trigger>
   <Popover.Portal>

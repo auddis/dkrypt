@@ -1568,6 +1568,69 @@ test('dashboard overview gives ordinary members a device status without device c
   }
 });
 
+test('members can read primary operational status without device configuration or control access', async () => {
+  const server = await buildTestServer({ includePublicRoutes: false });
+  const device = createDevice({ name: `Status device ${crypto.randomUUID()}`, transport: 'usb', udid: crypto.randomUUID(), isPrimary: true }, 'test');
+  const memberCookie = createSessionCookie('root', PermissionFlag.requestDecrypt);
+  const noRoleCookie = createSessionCookie('root', 0n);
+  const automationCookie = createSessionCookie('root', PermissionFlag.viewAutomation);
+  const deviceViewerCookie = createSessionCookie('root', PermissionFlag.viewDevices);
+  setCachedDeviceHealth(device.id, {
+    reachable: true,
+    checkedAt: Date.now(),
+    batteryPercent: 83,
+    networkConnected: true,
+    networkInterface: 'en0',
+    networkIpAddress: '192.0.2.44',
+    testFlightBridgeReachable: true,
+  });
+
+  try {
+    const overview = await server.inject({ method: 'GET', url: '/v1/dashboard/overview', headers: { cookie: memberCookie } });
+    expect(overview.statusCode).toBe(200);
+    expect(overview.json()).toMatchObject({
+      devices: [],
+      statusDevices: expect.arrayContaining([expect.objectContaining({ id: device.id, name: device.name, isPrimary: true })]),
+      statusWatches: expect.any(Array),
+      schedulerRunHistory: expect.any(Array),
+    });
+    expect(JSON.stringify(overview.json())).not.toContain('192.0.2.44');
+    const defaultOverview = await server.inject({ method: 'GET', url: '/v1/dashboard/overview', headers: { cookie: noRoleCookie } });
+    expect(defaultOverview.json()).toMatchObject({ devices: [], statusDevices: expect.arrayContaining([expect.objectContaining({ id: device.id })]) });
+
+    const health = await server.inject({ method: 'GET', url: '/v1/dashboard/devices/primary/health', headers: { cookie: memberCookie } });
+    expect(health.statusCode).toBe(200);
+    expect(health.json()).toMatchObject({ reachable: true, batteryPercent: 83, networkConnected: true, networkInterface: 'en0', networkIpAddress: '192.0.2.44', testFlightBridgeReachable: true });
+    expect(health.json()).not.toHaveProperty('bridgeHeartbeats');
+    for (const cookie of [noRoleCookie, automationCookie]) {
+      const readOnlyHealth = await server.inject({ method: 'GET', url: '/v1/dashboard/devices/primary/health', headers: { cookie } });
+      expect(readOnlyHealth.statusCode).toBe(200);
+      expect(readOnlyHealth.json()).toMatchObject({ reachable: true, batteryPercent: 83 });
+    }
+
+    for (const type of ['health', 'battery', 'temperature']) {
+      const history = await server.inject({ method: 'GET', url: `/v1/dashboard/devices/primary/${type}-history?hours=1`, headers: { cookie: memberCookie } });
+      expect(history.statusCode).toBe(200);
+      expect(history.json().buckets).toHaveLength(1);
+    }
+
+    for (const url of [
+      '/v1/dashboard/devices',
+      `/v1/dashboard/devices/${device.id}/health`,
+      '/v1/dashboard/devices/primary/health?force=true',
+      `/v1/dashboard/devices/${device.id}/health-history`,
+    ]) {
+      const denied = await server.inject({ method: 'GET', url, headers: { cookie: memberCookie } });
+      expect(denied.statusCode).toBe(403);
+    }
+    const deniedViewerRefresh = await server.inject({ method: 'GET', url: '/v1/dashboard/devices/primary/health?force=true', headers: { cookie: deviceViewerCookie } });
+    expect(deniedViewerRefresh.statusCode).toBe(403);
+  } finally {
+    deleteDevice(device.id, 'test');
+    await server.close();
+  }
+});
+
 test('native dashboard logs and audit routes preserve permissions, paging, and project checks', async () => {
   const logsUserId = `github:logs-reader-${crypto.randomUUID()}`;
   const auditUserId = `github:audit-reader-${crypto.randomUUID()}`;
@@ -2302,11 +2365,14 @@ test('project event streams close immediately after membership is revoked', asyn
 test('scheduler watch lists and budget history stay within the selected project', async () => {
   const { server } = await signIn();
   const memberId = `github:project-watch-${crypto.randomUUID()}`;
+  const statusMemberId = `github:project-status-${crypto.randomUUID()}`;
   const permissions = PermissionFlag.viewAutomation | PermissionFlag.manageAutomation;
   const role = createRole({ name: `Watch manager ${crypto.randomUUID()}`, color: '#3498db', permissions: serializeBits(permissions) }, 'test');
   addAllowedUser(memberId, [role.id], 'test');
+  addAllowedUser(statusMemberId, [], 'test');
   const memberCookie = createSessionCookie(memberId, permissions);
-  const accessibleProject = createProject({ name: `Accessible ${crypto.randomUUID()}`, memberIds: [memberId] }, 'root').project!;
+  const statusOnlyCookie = createSessionCookie(statusMemberId, 0n);
+  const accessibleProject = createProject({ name: `Accessible ${crypto.randomUUID()}`, memberIds: [memberId, statusMemberId] }, 'root').project!;
   const hiddenProject = createProject({ name: `Hidden ${crypto.randomUUID()}` }, 'root').project!;
   const accessibleWatch = createWatch({
     projectId: accessibleProject.id,
@@ -2343,8 +2409,13 @@ test('scheduler watch lists and budget history stay within the selected project'
     const budgetResponse = await server.inject({ method: 'GET', url: `/v1/dashboard/github/budget-history?projectId=${accessibleProject.id}`, headers: { cookie: memberCookie } });
     const entries = (budgetResponse.json() as { entries: { watchId: string }[] }).entries;
     const calendarResponse = await server.inject({ method: 'GET', url: `/v1/dashboard/watches/calendar?projectId=${accessibleProject.id}&hours=24`, headers: { cookie: memberCookie } });
+    const statusOverview = await server.inject({ method: 'GET', url: `/v1/dashboard/overview?projectId=${accessibleProject.id}`, headers: { cookie: statusOnlyCookie } });
 
     expect(watchesResponse.statusCode).toBe(200);
+    expect(statusOverview.statusCode).toBe(200);
+    expect(statusOverview.json().watches).toEqual([]);
+    expect(statusOverview.json().statusWatches).toContainEqual(expect.objectContaining({ id: accessibleWatch.id, bundleId: accessibleWatch.bundleId }));
+    expect(statusOverview.json().statusWatches).not.toContainEqual(expect.objectContaining({ id: hiddenWatch.id }));
     expect(watches.map((watch) => watch.id)).toContain(accessibleWatch.id);
     expect(watches.map((watch) => watch.id)).not.toContain(hiddenWatch.id);
     expect(healthResponse.statusCode).toBe(200);

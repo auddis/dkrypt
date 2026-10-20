@@ -61,17 +61,17 @@
     <div class={canSelect ? 'col-start-2 row-start-1 min-w-0' : 'col-start-1 row-start-1 min-w-0'}>
       <dl class="artifact-library-row-metadata grid min-w-0 items-start gap-x-3 gap-y-2 text-xs" style:--artifact-grid-columns={gridColumns}>
         {#each columns as column (column)}
-          <div class="artifact-library-field min-w-0" class:artifact-primary={column === 'app' || column === 'bundleId'}>
+          <div class="artifact-library-field min-w-0" class:artifact-primary={column === 'app' || column === 'bundleId'} class:artifact-version={column === 'version'}>
             <dt class="text-muted text-[10px] font-semibold tracking-[0.08em] uppercase">{column === 'app' ? 'App' : column === 'bundleId' ? 'Bundle ID' : column === 'version' ? 'Version' : column === 'source' ? 'Source' : column === 'size' ? 'Size' : 'Added'}</dt>
             <dd class="mt-1 flex min-h-6 min-w-0 items-center gap-2 text-[13px]">
               {#if column === 'app'}
                 <AppIcon bundleId={artifact.bundleId} src={appIconUrl(artifact.bundleId)} label={appDisplayName(artifact.bundleId)} class="h-7 w-7 shrink-0" />
-                <RevealText value={appDisplayName(artifact.bundleId)} />
+                <RevealText value={appDisplayName(artifact.bundleId)} wrap />
                 {#if artifact.pinnedAt}<Badge variant="success">Pinned</Badge>{/if}
               {:else if column === 'bundleId'}
-                <RevealText value={artifact.bundleId} monospace sensitive />
+                <RevealText value={artifact.bundleId} monospace sensitive wrap />
               {:else if column === 'version'}
-                <span class="truncate font-semibold">{artifactVersion}</span>
+                <span class="break-words font-semibold">{artifactVersion}</span>
               {:else if column === 'source'}
                 <Badge variant={artifact.channel === 'testflight' ? 'secondary' : 'default'}>{artifact.channel === 'testflight' ? 'TestFlight' : 'App Store'}</Badge>
               {:else if column === 'size'}
@@ -113,6 +113,18 @@
   }
 
   @container (max-width: 850px) {
+    .artifact-library-row-metadata {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    .artifact-library-field.artifact-primary {
+      grid-column: span 3;
+    }
+
+    .artifact-library-field:not(.artifact-primary) {
+      grid-column: span 2;
+    }
+
     .artifact-library-row-content.has-selection {
       grid-template-columns: auto minmax(0, 1fr);
     }
@@ -129,12 +141,21 @@
 
   @container (max-width: 520px) {
     .artifact-library-row-metadata {
-      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.8fr);
+      grid-template-columns: repeat(6, minmax(0, 1fr));
     }
 
     .artifact-library-field.artifact-primary {
-      grid-column: 1 / -1;
+      grid-column: span 6;
     }
   }
 
+  @container (max-width: 380px) {
+    .artifact-library-field.artifact-version {
+      grid-column: span 6;
+    }
+
+    .artifact-library-field:not(.artifact-primary, .artifact-version) {
+      grid-column: span 3;
+    }
+  }
 </style>

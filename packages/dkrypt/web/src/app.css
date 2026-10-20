@@ -555,16 +555,18 @@ summary:focus-visible {
 	transition: background-color 180ms ease, border-color 180ms ease;
 }
 
-.history-feed-summary {
-	grid-column: 1 / -1;
+.history-feed-main {
+	grid-column: 1;
+	min-width: 0;
 }
 
 .history-feed-status {
-	grid-column: 1;
+	min-width: 0;
 }
 
 .history-feed-actions {
 	grid-column: 2;
+	grid-row: 1;
 	white-space: nowrap;
 }
 
@@ -604,6 +606,7 @@ summary:focus-visible {
 @container (max-width: 520px) {
 	.history-feed-actions {
 		grid-column: 1 / -1;
+		grid-row: 2;
 		justify-content: flex-end;
 	}
 }

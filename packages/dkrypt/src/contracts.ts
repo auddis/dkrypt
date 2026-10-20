@@ -1212,10 +1212,10 @@ register('POST', '/v1/internal/deployment/ready', { body: deploymentReadyBodySch
 register('GET', '/v1/dashboard/synthetic', { response: { 200: dashboardSyntheticResponseSchema } });
 register('GET', '/v1/dashboard/notifications', { response: { 200: notificationPageResponseSchema } });
 register('GET', '/v1/dashboard/devices/discover', { response: { 200: DeviceDiscoveryResponse, 401: ErrorEnvelope, 403: ErrorEnvelope, 502: ErrorEnvelope } });
-register('GET', '/v1/dashboard/devices/:id/health-history', { params: dashboardDeviceParamsSchema, querystring: dashboardDeviceHistoryQuerySchema, response: { 200: DeviceHealthHistoryResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } });
+register('GET', '/v1/dashboard/devices/:id/health-history', { params: dashboardDeviceParamsSchema, querystring: dashboardDeviceHistoryQuerySchema, response: { 200: DeviceHealthHistoryResponse, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope } });
 register('GET', '/v1/dashboard/devices/:id/activity', { params: dashboardDeviceParamsSchema, querystring: dashboardDeviceActivityQuerySchema, response: { 200: DeviceActivityResponse, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope } });
-register('GET', '/v1/dashboard/devices/:id/battery-history', { params: dashboardDeviceParamsSchema, querystring: dashboardDeviceHistoryQuerySchema, response: { 200: DeviceBatteryHistoryResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } });
-register('GET', '/v1/dashboard/devices/:id/temperature-history', { params: dashboardDeviceParamsSchema, querystring: dashboardDeviceHistoryQuerySchema, response: { 200: DeviceTemperatureHistoryResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } });
+register('GET', '/v1/dashboard/devices/:id/battery-history', { params: dashboardDeviceParamsSchema, querystring: dashboardDeviceHistoryQuerySchema, response: { 200: DeviceBatteryHistoryResponse, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope } });
+register('GET', '/v1/dashboard/devices/:id/temperature-history', { params: dashboardDeviceParamsSchema, querystring: dashboardDeviceHistoryQuerySchema, response: { 200: DeviceTemperatureHistoryResponse, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope } });
 register('GET', '/v1/dashboard/devices/:id/storage-history', { params: dashboardDeviceParamsSchema, querystring: dashboardDeviceHistoryQuerySchema, response: { 200: DeviceStorageHistoryResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } });
 register('GET', '/v1/dashboard/jobs/eta/:bundleId', { params: object({ bundleId: BundleId }), response: { 200: JobEtaResponse } });
 register('GET', '/v1/dashboard/jobs/slo', { response: { 200: JobSloResponse } });

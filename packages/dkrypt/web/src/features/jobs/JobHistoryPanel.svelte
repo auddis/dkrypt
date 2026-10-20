@@ -1106,82 +1106,47 @@
 								<article
 									class="history-feed-row"
 								>
-									<div
-										class="history-feed-summary flex min-w-0 flex-1 items-start gap-3"
-									>
-										<Checkbox
-											class="mt-1"
-											checked={selected.has(j.id)}
-											onCheckedChange={() => toggleSelect(j.id)}
-											aria-label="Select {j.bundleId}"
-										/>
-						<div class="min-w-0 flex-1">
-							<div class="flex min-w-0 items-center gap-2">
-								<AppIcon bundleId={j.bundleId} src={appIconUrl(j.bundleId)} label={appDisplayName(j.bundleId)} class="h-5 w-5 shrink-0" />
-								<Button
-									variant="link"
-									size="sm"
-									class="h-auto min-w-0 flex-1 justify-start p-0 text-left text-[12.5px] font-medium"
-									title="View stats for {appDisplayName(j.bundleId)}"
-									onclick={() => openStats(j.bundleId)}
-								>
-									<span class="block min-w-0 truncate">{appDisplayName(j.bundleId)}</span>
-								</Button>
-							</div>
-							<div class="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-								{#if j.testflight}
-									<Badge variant="secondary">TestFlight</Badge>
-								{/if}
-								<span
-									class="border-border bg-panel-muted inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border py-0.5 pr-2 pl-1 text-[11px] text-muted"
-									title={requester.username ?? requester.displayName}
-								>
-									{#if requester.avatarUrl}
-										<img src={requester.avatarUrl} alt="" class="h-4 w-4 shrink-0 rounded-full object-cover" />
-									{:else}
-										<span class="bg-panel flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-semibold">
-											{requesterInitials(requester.displayName)}
-										</span>
-									{/if}
-									<span class="truncate">{requester.displayName}</span>
-								</span>
-							</div>
-											<div
-												class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted"
-												title={j.bundleId}
+									<div class="history-feed-main min-w-0">
+										<div class="history-feed-summary flex min-w-0 items-start gap-3">
+											<Checkbox
+												class="mt-1"
+												checked={selected.has(j.id)}
+												onCheckedChange={() => toggleSelect(j.id)}
+												aria-label="Select {j.bundleId}"
+											/>
+											<AppIcon bundleId={j.bundleId} src={appIconUrl(j.bundleId)} label={appDisplayName(j.bundleId)} class="mt-0.5 h-5 w-5 shrink-0" />
+											<Button
+												variant="link"
+												size="sm"
+												class="h-auto min-w-0 flex-1 justify-start p-0 text-left text-[12.5px] font-medium whitespace-normal"
+												title="View stats for {appDisplayName(j.bundleId)}"
+												onclick={() => openStats(j.bundleId)}
 											>
-												<span
-											>{j.versionLabel ??
-													"Current App Store release"}</span
-												>
-												<span
-													>{fmtSize(
-														j.sizeBytes,
-													)}</span
-												>
-											</div>
+												<span class="block min-w-0 break-words">{appDisplayName(j.bundleId)}</span>
+											</Button>
 										</div>
-									</div>
-									<div
-										class="history-feed-status min-w-0 self-start"
-									>
-										<div class="flex items-center gap-2">
-											<Badge
-												variant={statusToBadgeVariant(
-													j.status,
-												)}>{j.status}</Badge
+										<div class="history-feed-meta mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 text-xs">
+											<span class="break-words text-muted" title={j.bundleId}>{j.versionLabel ?? "Current App Store release"}</span>
+											<span class="shrink-0 text-muted">{fmtSize(j.sizeBytes)}</span>
+											<div class="history-feed-status flex min-w-0 flex-wrap items-center gap-2">
+												<Badge variant={statusToBadgeVariant(j.status)}>{j.status}</Badge>
+												{#if j.warnings?.length}<Badge variant="warning" title={j.warnings.join(" ")}>warning</Badge>{/if}
+												<span class="text-muted"><RelativeTime ms={j.finishedAt} /></span>
+											</div>
+											{#if j.testflight}<Badge variant="secondary">TestFlight</Badge>{/if}
+											<span
+												class="border-border bg-panel-muted inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border py-0.5 pr-2 pl-1 text-[11px] text-muted"
+												title={requester.username ?? requester.displayName}
 											>
-											{#if j.warnings?.length}
-												<Badge
-													variant="warning"
-													title={j.warnings.join(" ")}>warning</Badge
-												>
-											{/if}
-											<span class="text-xs text-muted"
-											><RelativeTime
-												ms={j.finishedAt}
-											/></span
-											>
+												{#if requester.avatarUrl}
+													<img src={requester.avatarUrl} alt="" class="h-4 w-4 shrink-0 rounded-full object-cover" />
+												{:else}
+													<span class="bg-panel flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-semibold">
+														{requesterInitials(requester.displayName)}
+													</span>
+												{/if}
+												<span class="truncate">{requester.displayName}</span>
+											</span>
 										</div>
 									</div>
 									<div
