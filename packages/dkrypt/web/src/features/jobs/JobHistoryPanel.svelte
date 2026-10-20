@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from "svelte";
-	import { Eye, Grid2X2, History, List, X } from "lucide-svelte";
+	import { Download, Eye, Grid2X2, History, List, RotateCcw, X } from "lucide-svelte";
 	import BundleStatsDialog from "#components/BundleStatsDialog.svelte";
 	import JobAttemptCompareDialog from "#features/jobs/JobAttemptCompareDialog.svelte";
 	import BulkJobPreviewDialog from "#components/BulkJobPreviewDialog.svelte";
@@ -1116,40 +1116,36 @@
 											aria-label="Select {j.bundleId}"
 										/>
 						<div class="min-w-0 flex-1">
-							<div
-								class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
-							>
-								<AppIcon bundleId={j.bundleId} src={appIconUrl(j.bundleId)} label={appDisplayName(j.bundleId)} class="h-5 w-5" />
+							<div class="flex min-w-0 items-center gap-2">
+								<AppIcon bundleId={j.bundleId} src={appIconUrl(j.bundleId)} label={appDisplayName(j.bundleId)} class="h-5 w-5 shrink-0" />
 								<Button
 									variant="link"
 									size="sm"
-									class="h-auto max-w-full justify-start p-0 text-left text-[12.5px] font-medium"
-									title="View stats for {appDisplayName(
-										j.bundleId,
-									)}"
+									class="h-auto min-w-0 flex-1 justify-start p-0 text-left text-[12.5px] font-medium"
+									title="View stats for {appDisplayName(j.bundleId)}"
 									onclick={() => openStats(j.bundleId)}
 								>
-									{appDisplayName(j.bundleId)}
+									<span class="block min-w-0 truncate">{appDisplayName(j.bundleId)}</span>
 								</Button>
-												{#if j.testflight}
-													<Badge variant="secondary"
-														>TestFlight</Badge
-													>
-												{/if}
-											<span
-												class="border-border bg-panel-muted inline-flex max-w-full items-center gap-1.5 rounded-full border py-0.5 pr-2 pl-1 text-[11px] text-muted"
-												title={requester.username ?? requester.displayName}
-											>
-												{#if requester.avatarUrl}
-													<img src={requester.avatarUrl} alt="" class="h-4 w-4 shrink-0 rounded-full object-cover" />
-												{:else}
-													<span class="bg-panel flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-semibold">
-														{requesterInitials(requester.displayName)}
-													</span>
-												{/if}
-												<span class="truncate">{requester.displayName}</span>
-											</span>
-										</div>
+							</div>
+							<div class="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+								{#if j.testflight}
+									<Badge variant="secondary">TestFlight</Badge>
+								{/if}
+								<span
+									class="border-border bg-panel-muted inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border py-0.5 pr-2 pl-1 text-[11px] text-muted"
+									title={requester.username ?? requester.displayName}
+								>
+									{#if requester.avatarUrl}
+										<img src={requester.avatarUrl} alt="" class="h-4 w-4 shrink-0 rounded-full object-cover" />
+									{:else}
+										<span class="bg-panel flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-semibold">
+											{requesterInitials(requester.displayName)}
+										</span>
+									{/if}
+									<span class="truncate">{requester.displayName}</span>
+								</span>
+							</div>
 											<div
 												class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted"
 												title={j.bundleId}
@@ -1189,28 +1185,31 @@
 										</div>
 									</div>
 									<div
-										class="history-feed-actions flex min-w-0 flex-wrap items-center justify-end gap-1.5 self-start"
+										class="history-feed-actions flex min-w-0 flex-nowrap items-center justify-end gap-1 self-start"
 									>
 										{#if j.status === "failed"}
-											<Button data-list-primary-action size="sm" variant="secondary" onclick={() => openJobDetails(j)} title="Inspect job"><Eye class="h-3.5 w-3.5" /></Button>
-											<Button size="sm" loading={requeueing.has(j.id)} onclick={() => retryJobFromHistory(j)}>Retry</Button>
+											<Button data-list-primary-action size="icon" variant="ghost" class="h-8 w-8" onclick={() => openJobDetails(j)} aria-label="Inspect job" title="Inspect job"><Eye class="h-4 w-4" /></Button>
+											<Button size="icon" variant="ghost" class="h-8 w-8" loading={requeueing.has(j.id)} onclick={() => retryJobFromHistory(j)} aria-label="Retry failed job" title="Retry failed job"><RotateCcw class="h-4 w-4" /></Button>
 										{:else}
 											{#if j.downloadUrl}
-												<a class={buttonVariants("default", "sm")} href={j.downloadUrl}>Download</a>
+												<a class={buttonVariants("ghost", "sm")} href={j.downloadUrl} aria-label="Download IPA" title="Download IPA"><Download class="h-4 w-4" /></a>
 											{/if}
-											<Button data-list-primary-action size="sm" variant="secondary" onclick={() => openJobDetails(j)} title="Inspect job"><Eye class="h-3.5 w-3.5" /></Button>
+											<Button data-list-primary-action size="icon" variant="ghost" class="h-8 w-8" onclick={() => openJobDetails(j)} aria-label="Inspect job" title="Inspect job"><Eye class="h-4 w-4" /></Button>
 											<Button
-												size="sm"
-												variant="secondary"
+												size="icon"
+												variant="ghost"
+												class="h-8 w-8"
 												loading={requeueing.has(j.id)}
 												onclick={() => decryptAgain(j)}
-												>Decrypt again</Button
+												aria-label="Decrypt again"
+												title="Decrypt again"
+												><RotateCcw class="h-4 w-4" /></Button
 											>
 										{/if}
 										{#if j.artifactId && j.fileAvailable}
 											<CopyButton
 												text={curlFor(j)}
-												label="curl"
+												title="Copy curl command"
 											/>
 										{/if}
 									</div>

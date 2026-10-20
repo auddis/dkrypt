@@ -612,6 +612,45 @@ test('collapsed sidebar gives library and history content the released space', a
   expect(wideAfter).toBeGreaterThan(wideBefore + 100);
 });
 
+test('job history cards reserve the full first row for app details and keep actions on one line', async ({ page }) => {
+  await mockVisualDashboardData(page);
+  await mockStableDashboardEvents(page);
+  await mockAuthenticatedDashboard(page, '1');
+  await page.route('**/v1/dashboard/jobs?*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ history: [{ id: 'job-card-layout', bundleId: 'com.example.a.long.bundle.identifier', status: 'done', source: 'manual', versionLabel: '348.0 (113691)', createdAt: Date.now() - 60_000, finishedAt: Date.now() - 30_000, fileAvailable: true, artifactId: 'job-card-artifact', downloadUrl: '/download/job-card-artifact' }], total: 1 }),
+    });
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?tab=home');
+  const row = page.locator('.history-feed-row').first();
+  await expect(row).toBeVisible();
+  const rowWidth = await row.evaluate((element) => element.getBoundingClientRect().width);
+  const summaryWidth = await row.locator('.history-feed-summary').evaluate((element) => element.getBoundingClientRect().width);
+  expect(summaryWidth).toBeGreaterThan(rowWidth * 0.85);
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  const actions = row.locator('.history-feed-actions');
+  await expect(actions).toBeVisible();
+  const actionBounds = await actions.boundingBox();
+  const mobileRowBounds = await row.boundingBox();
+  const lastActionBounds = await actions.locator('button, a').last().boundingBox();
+  expect(actionBounds).not.toBeNull();
+  expect(mobileRowBounds).not.toBeNull();
+  expect(lastActionBounds).not.toBeNull();
+  expect(actionBounds!.height).toBeLessThanOrEqual(36);
+  expect(actionBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(actionBounds!.x + actionBounds!.width).toBeLessThanOrEqual(320);
+  expect(lastActionBounds!.x + lastActionBounds!.width).toBeGreaterThan(mobileRowBounds!.x + mobileRowBounds!.width - 20);
+  const iconBounds = await row.locator('.history-feed-summary span[aria-label]').first().boundingBox();
+  const nameBounds = await row.getByRole('button', { name: 'com.example.a.long.bundle.identifier' }).boundingBox();
+  expect(iconBounds).not.toBeNull();
+  expect(nameBounds).not.toBeNull();
+  expect(Math.abs(iconBounds!.y - nameBounds!.y)).toBeLessThanOrEqual(4);
+});
+
 test('live updates suspend while hidden and refresh immediately when visible again', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1600 });
   await mockStableDashboardEvents(page);
