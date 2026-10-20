@@ -860,6 +860,44 @@ summary:focus-visible {
 	.responsive-table tr.table-row-header td::before {
 		content: none;
 	}
+
+	.responsive-table tr.member-row {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.responsive-table tr.member-row td.member-select {
+		order: 0;
+	}
+
+	.responsive-table tr.member-row td.member-identity {
+		order: 1;
+		justify-content: flex-start;
+		text-align: left;
+	}
+
+	.responsive-table tr.member-row td.member-identity::before {
+		content: none;
+	}
+
+	.responsive-table tr.member-row td.member-roles {
+		order: 2;
+	}
+
+	.responsive-table tr.member-row td.member-actions {
+		order: 3;
+		display: block;
+		text-align: left;
+	}
+
+	.responsive-table tr.member-row td.member-actions button {
+		width: 100%;
+		min-height: 44px;
+	}
+
+	.responsive-table tr.member-row td.member-meta {
+		order: 4;
+	}
 }
 
 @media (forced-colors: active) {

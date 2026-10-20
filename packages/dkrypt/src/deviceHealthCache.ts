@@ -1,4 +1,5 @@
 import type { DeviceHealth } from '#deviceHealth.js';
+import { emitDeviceHealthChanged } from '#events.js';
 
 interface CachedDeviceHealth {
   at: number;
@@ -13,4 +14,5 @@ export function getCachedDeviceHealth(deviceId: string): CachedDeviceHealth | un
 
 export function setCachedDeviceHealth(deviceId: string, value: DeviceHealth): void {
   deviceHealthCache.set(deviceId, { at: Date.now(), value });
+  emitDeviceHealthChanged();
 }

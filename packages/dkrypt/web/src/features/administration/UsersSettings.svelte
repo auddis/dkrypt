@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { Plus, ScrollText, UserX } from 'lucide-svelte';
   import EmptyState from '#components/EmptyState.svelte';
   import RelativeTime from '#components/RelativeTime.svelte';
@@ -31,7 +32,7 @@
   import VirtualizedList from '#components/VirtualizedList.svelte';
 
   const canManage = $derived(sessionHasPermission(PermissionFlag.manageUsers));
-  const canViewRoles = $derived(sessionHasAnyPermission([PermissionFlag.viewRoles, PermissionFlag.manageRoles]));
+  const canViewRoles = $derived(sessionHasAnyPermission([PermissionFlag.viewRoles, PermissionFlag.manageRoles, PermissionFlag.manageUsers]));
 
   let addOpen = $state(false);
   let username = $state('');
@@ -265,14 +266,20 @@
       `Roles: ${beforeRoles.join(', ') || 'none'} → ${afterRoles.join(', ') || 'none'}`,
       `Queue priority: ${manageUser.priority ?? 0} → ${Number(managePriority)}`,
     ].join('\n');
-    if (!(await confirmDialog(`Review access change before applying:\n\n${review}`, { confirmLabel: 'Apply access change' }))) return;
+    manageOpen = false;
+    await tick();
+    if (!(await confirmDialog(`Review access change before applying:\n\n${review}`, { confirmLabel: 'Apply access change' }))) {
+      manageOpen = true;
+      return;
+    }
     savingRoles = true;
     try {
       const { ok } = await updateUserRoles(manageUser.username, manageRoleIds, Number(managePriority));
-      if (ok) {
-        manageOpen = false;
-        void load();
-      }
+      if (ok) void load();
+      else manageOpen = true;
+    } catch (error) {
+      manageOpen = true;
+      throw error;
     } finally {
       savingRoles = false;
     }
@@ -282,11 +289,18 @@
     if (!manageUser) return;
     const username = manageUser.username;
     manageOpen = false;
-    if (!(await confirmDialog(`Remove every dashboard role from ${manageUser.displayName ?? manageUser.accountUsername ?? username}? They can still sign in but will only retain the default permissions.`))) return;
+    await tick();
+    if (!(await confirmDialog(`Remove every dashboard role from ${manageUser.displayName ?? manageUser.accountUsername ?? username}? They can still sign in but will only retain the default permissions.`))) {
+      manageOpen = true;
+      return;
+    }
     removing = true;
     try {
       await removeUser(username);
       void load();
+    } catch (error) {
+      manageOpen = true;
+      throw error;
     } finally {
       removing = false;
     }
@@ -340,15 +354,18 @@
             {@const defaultRole = (roles ?? []).find((r) => r.isDefault)}
             {#each filteredUsers as u (u.username)}
               {@const isSelf = u.username === (sessionState.sub ?? '').toLowerCase()}
-              <tr>
+              <tr class="member-row">
                 {#if canManage}
-                  <td data-label="Select">
+                  <td data-label="" class="member-select">
                     {#if !isSelf}
-                      <Checkbox checked={selectedUsers.has(u.username)} onCheckedChange={() => toggleSelectUser(u.username)} aria-label="Select {u.displayName ?? u.username}" />
+                      <div class="flex min-h-11 items-center gap-2.5 sm:min-h-0">
+                        <Checkbox id="select-member-{u.username}" class="size-5 sm:size-4" checked={selectedUsers.has(u.username)} onCheckedChange={() => toggleSelectUser(u.username)} aria-label="Select {u.displayName ?? u.username}" />
+                        <label for="select-member-{u.username}" class="cursor-pointer text-xs sm:sr-only">Select for bulk roles</label>
+                      </div>
                     {/if}
                   </td>
                 {/if}
-                <td data-label="User">
+                <td data-label="User" class="member-identity">
                   <div class="flex min-w-0 items-center gap-2">
                     {#if u.avatarUrl}<img src={u.avatarUrl} alt="" class="h-6 w-6 shrink-0 rounded-full object-cover" />{/if}
                     <div class="min-w-0">
@@ -357,7 +374,7 @@
                     </div>
                   </div>
                 </td>
-                <td data-label="Roles">
+                <td data-label="Roles" class="member-roles">
                   <div class="flex flex-wrap gap-1">
                     {#if defaultRole}
                       <Badge style="background-color: {defaultRole.color}22; color: {defaultRole.color}; border: 1px solid {defaultRole.color}55">
@@ -380,15 +397,15 @@
                     </div>
                   {/if}
                 </td>
-                <td data-label="Added" class="text-muted"><RelativeTime ms={u.addedAt} /></td>
-                <td data-label="Last active" class="text-muted">
+                <td data-label="Added" class="member-meta text-muted"><RelativeTime ms={u.addedAt} /></td>
+                <td data-label="Last active" class="member-meta text-muted">
                   {#if u.lastActiveAt}
                     <RelativeTime ms={u.lastActiveAt} />
                   {:else}
                     never
                   {/if}
                 </td>
-                <td data-label="Activity" class="text-xs text-muted">
+                <td data-label="Activity" class="member-meta text-xs text-muted">
                   {#if u.activity}
 					<div>{u.activity.manualJobs} jobs · {u.activity.completedJobs} done · {u.activity.failedJobs} failed</div>
 					<div>{u.activity.apiKeys} keys · {u.activity.apiRequests30d} API requests / 30d</div>
@@ -398,9 +415,9 @@
                   {/if}
                 </td>
                 {#if canManage}
-                  <td>
+                  <td class="member-actions">
                     {#if !isSelf}
-                      <Button size="sm" variant="secondary" onclick={() => openManage(u)}>Manage</Button>
+                      <Button size="sm" variant="secondary" onclick={() => openManage(u)}>Manage roles</Button>
                     {/if}
                   </td>
                 {/if}
@@ -478,7 +495,7 @@
 </div>
 
 {#if canManage}
-  <Dialog open={addOpen} onOpenChange={(v) => (addOpen = v)} class="max-w-md">
+  <Dialog open={addOpen} onOpenChange={(v) => (addOpen = v)} title="Assign roles to a member" class="max-h-[calc(100dvh-1rem)] max-w-md overflow-y-auto p-4 sm:p-6">
     <div class="mb-3 text-sm font-medium">Assign roles to a member</div>
     <label for="user-username" class="mb-1 block text-xs text-muted">Account username or OAuth ID</label>
     <Input id="user-username" placeholder="e.g. octocat" bind:value={username} />
@@ -489,10 +506,12 @@
       {:else}
         <div class="border-border flex flex-col divide-y rounded-lg border">
           {#each assignableRoles as role (role.id)}
-            <div class="flex items-center gap-2.5 px-3 py-2">
-              <Checkbox checked={newRoleIds.includes(role.id)} onCheckedChange={() => toggleNewRole(role.id)} aria-label="Assign {role.name}" />
-              <span class="h-2 w-2 shrink-0 rounded-full" style="background-color: {role.color}"></span>
-              <span class="text-[13px]">{role.name}</span>
+            <div class="flex min-h-11 items-center gap-2.5 px-3">
+              <Checkbox id="new-role-{role.id}" class="size-5" checked={newRoleIds.includes(role.id)} onCheckedChange={() => toggleNewRole(role.id)} aria-label="Assign {role.name}" />
+              <label for="new-role-{role.id}" class="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-2.5 py-2">
+                <span class="h-2 w-2 shrink-0 rounded-full" style="background-color: {role.color}"></span>
+                <span class="min-w-0 break-words text-[13px]">{role.name}</span>
+              </label>
             </div>
           {/each}
         </div>
@@ -501,7 +520,7 @@
     <Button class="mt-3.5 w-full" loading={submitting} onclick={submit} disabled={!username.trim()}>Add</Button>
   </Dialog>
 
-  <Dialog open={manageOpen} onOpenChange={(v) => (manageOpen = v)} class="max-w-md">
+  <Dialog open={manageOpen} onOpenChange={(v) => (manageOpen = v)} title="Manage member roles" class="max-h-[calc(100dvh-1rem)] max-w-md overflow-y-auto p-4 sm:p-6">
     {#if manageUser}
       <div class="mb-3 text-sm font-medium">Manage {manageUser.displayName ?? manageUser.accountUsername ?? manageUser.username}</div>
       <div class="max-h-[50vh] overflow-y-auto pr-0.5">
@@ -518,10 +537,12 @@
         {:else}
           <div class="border-border flex flex-col divide-y rounded-lg border">
             {#each assignableRoles as role (role.id)}
-              <div class="flex items-center gap-2.5 px-3 py-2">
-                <Checkbox checked={manageRoleIds.includes(role.id)} onCheckedChange={() => toggleManageRole(role.id)} aria-label="Assign {role.name}" />
-                <span class="h-2 w-2 shrink-0 rounded-full" style="background-color: {role.color}"></span>
-                <span class="text-[13px]">{role.name}</span>
+              <div class="flex min-h-11 items-center gap-2.5 px-3">
+                <Checkbox id="manage-role-{role.id}" class="size-5" checked={manageRoleIds.includes(role.id)} onCheckedChange={() => toggleManageRole(role.id)} aria-label="Assign {role.name}" />
+                <label for="manage-role-{role.id}" class="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-2.5 py-2">
+                  <span class="h-2 w-2 shrink-0 rounded-full" style="background-color: {role.color}"></span>
+                  <span class="min-w-0 break-words text-[13px]">{role.name}</span>
+                </label>
               </div>
             {/each}
           </div>
@@ -532,11 +553,11 @@
           Higher goes first among queued manual decrypts. 0 is the default - most people never need to touch this.
         </div>
       </div>
-      <Button class="mt-3.5 w-full" loading={savingRoles} onclick={saveRoles} disabled={rolesUnchanged}>
+      <Button class="mt-3.5 min-h-11 w-full" loading={savingRoles} onclick={saveRoles} disabled={rolesUnchanged}>
         Save roles
       </Button>
       <div class="border-border mt-4 border-t pt-4">
-        <Button variant="destructive" class="w-full" loading={removing} onclick={removeManaged}>Remove role assignments</Button>
+        <Button variant="outline" class="min-h-11 w-full border-destructive/50 text-destructive" loading={removing} onclick={removeManaged}>Remove role assignments</Button>
       </div>
     {/if}
   </Dialog>

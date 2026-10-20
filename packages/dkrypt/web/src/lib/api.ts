@@ -388,6 +388,7 @@ export interface OverviewPayload {
   settings: SchedulerSettings;
   watches: AppWatch[];
   devices: DeviceRecord[];
+  deviceStatus?: { configured: number; enabled: number; online: number; ready: number; attention: number; checking: number; unavailable: number; freshUntil?: number };
   lastSchedulerRunAt?: number;
   schedulerRunHistory: SchedulerRunEntry[];
   disk?: DiskUsage;

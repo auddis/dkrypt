@@ -30,6 +30,7 @@
 		type SchedulerRunOutcome,
 	} from "#lib/api";
 	import Badge from "#lib/components/ui/Badge.svelte";
+	import type { BadgeVariant } from "#lib/components/ui/variants";
 	import Button from "#lib/components/ui/Button.svelte";
 	import Card from "#lib/components/ui/Card.svelte";
 	import Popover from "#lib/components/ui/Popover.svelte";
@@ -40,8 +41,11 @@
 	} from "#lib/appCatalog.svelte";
 	import { fmtBytesGB, fmtCalendarDate, fmtDateTime, fmtNumber, fmtUntil, trendDelta } from "#lib/format.svelte";
 	import { liveState } from "#lib/live.svelte";
+	import { PermissionFlag } from "#lib/permissions";
+	import { sessionHasAnyPermission } from "#lib/session.svelte";
 
 	const overview = $derived(liveState.overview);
+	const canViewAutomation = $derived(sessionHasAnyPermission([PermissionFlag.viewAutomation, PermissionFlag.manageAutomation]));
 	const primaryDeviceId = $derived(
 		overview?.devices.find((d) => d.isPrimary)?.id ??
 			overview?.devices[0]?.id,
@@ -392,28 +396,50 @@
 		unknown: "Checking",
 	};
 
-	const deviceChip = $derived.by(() => {
+	const deviceChip = $derived.by((): { label: string; detail: string; variant: BadgeVariant } => {
 		if (!overview) {
 			return {
 				label: "Loading devices",
 				detail: "Loading the configured device pool.",
+				variant: "secondary",
 			};
+		}
+		const summary = overview.deviceStatus;
+		if (summary) {
+			if (summary.configured === 0) return { label: "No device connected", detail: "No decrypt device is configured.", variant: "secondary" };
+			if (summary.enabled === 0) return { label: "No enabled device", detail: "All decrypt devices are disabled.", variant: "secondary" };
+			if (summary.freshUntil !== undefined && now >= summary.freshUntil) {
+				return { label: "Device status outdated", detail: "The last device check is too old to confirm availability.", variant: "warning" };
+			}
+			if (summary.ready > 0) {
+				return {
+					label: summary.ready === summary.enabled ? `${summary.ready} device${summary.ready === 1 ? "" : "s"} ready` : `${summary.ready}/${summary.enabled} devices ready`,
+					detail: summary.ready === summary.enabled ? "Decrypt automation is available." : `${summary.attention} need attention · ${summary.unavailable} unavailable · ${summary.checking} checking`,
+					variant: summary.ready === summary.enabled ? "success" : "warning",
+				};
+			}
+			if (summary.attention > 0) return { label: summary.attention === 1 ? "Device needs attention" : `${summary.attention} devices need attention`, detail: "Connected, but decrypt automation is not ready.", variant: "warning" };
+			if (summary.unavailable > 0) return { label: `${summary.unavailable} device${summary.unavailable === 1 ? "" : "s"} unavailable`, detail: `${summary.checking} checking`, variant: "destructive" };
+			return { label: "Checking device", detail: "Waiting for a recent device health check.", variant: "secondary" };
 		}
 		if (overview.devices.length === 0) {
 			return {
 				label: "No device connected",
 				detail: "Connect a device from Settings → Devices to run decrypts.",
+				variant: "secondary",
 			};
 		}
 		if (!overview.devices.some((device) => device.enabled)) {
 			return {
 				label: "No enabled device",
 				detail: "Enable a device from Settings → Devices to run decrypts.",
+				variant: "secondary",
 			};
 		}
 		return {
 			label: "Checking device",
 			detail: "Checking the enabled device connection and autoinstall bridge.",
+			variant: "secondary",
 		};
 	});
 	const activeJobs = $derived(overview?.activeJobs.length ?? 0);
@@ -491,7 +517,7 @@
 		<p role="status" class="mb-2 text-xs text-warning">{healthError}</p>
 	{/if}
 	<div class="mb-1.5 flex flex-wrap items-center gap-1.5">
-		{#if overview}
+		{#if overview && canViewAutomation}
 			<Popover>
 				{#snippet trigger()}
 					<Badge
@@ -646,7 +672,7 @@
 		{:else}
 			<Popover>
 				{#snippet trigger()}
-					<Badge variant="secondary">{deviceChip.label}</Badge>
+					<Badge variant={deviceChip.variant}>{deviceChip.label}</Badge>
 				{/snippet}
 				<div class="max-w-xs whitespace-normal">{deviceChip.detail}</div>
 			</Popover>

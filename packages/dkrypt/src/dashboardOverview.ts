@@ -5,6 +5,8 @@ import { getMaintenanceStatus } from '#maintenance.js';
 import { getActiveJobs, getJobQueueSummaries, getQueueReason } from '#jobs/store.js';
 import type { Job } from '#jobs/types.js';
 import { hasPermission, PermissionFlag } from '#permissions.js';
+import { getCachedDeviceHealth } from '#deviceHealthCache.js';
+import { getDeviceInstallBlocker } from '#deviceInstallEligibility.js';
 import { serializeDashboardDevice } from '#dashboardDevicePresentation.js';
 import { canAccessProject } from '#dashboardJobPresentation.js';
 import { effectiveTimeZone } from '#util/timezone.js';
@@ -19,6 +21,8 @@ import {
   getWatchConfigIssues,
   isWatchSchedulable,
 } from '#store/state.js';
+
+const DEVICE_STATUS_FRESH_MS = 10 * 60_000;
 
 export function buildDashboardOverview(permissions: bigint, userId: string, projectId = DEFAULT_PROJECT_ID) {
   const canViewAutomation = hasPermission(permissions, PermissionFlag.viewAutomation) || hasPermission(permissions, PermissionFlag.manageAutomation);
@@ -42,7 +46,24 @@ export function buildDashboardOverview(permissions: bigint, userId: string, proj
   const schedulerRunHistory = canViewAutomation
     ? getSchedulerRunHistory(200).filter((run) => watches.some((watch) => watch.id === run.watchId)).slice(0, 10)
     : [];
-  const devices = canViewDeviceData ? getEffectiveDevices().map((device) => serializeDashboardDevice(device)) : [];
+  const deviceRecords = getEffectiveDevices();
+  const devices = canViewDeviceData ? deviceRecords.map((device) => serializeDashboardDevice(device)) : [];
+  const enabledDevices = deviceRecords.filter((device) => device.enabled);
+  const recentHealth = enabledDevices.map((device) => getCachedDeviceHealth(device.id)?.value)
+    .filter((health): health is NonNullable<typeof health> => health !== undefined && Date.now() - health.checkedAt <= DEVICE_STATUS_FRESH_MS);
+  const onlineDevices = recentHealth.filter((health) => health.reachable).length;
+  const readyDevices = recentHealth.filter((health) => health.reachable && !getDeviceInstallBlocker(health)).length;
+  const unavailableDevices = recentHealth.length - onlineDevices;
+  const deviceStatus = {
+    configured: deviceRecords.length,
+    enabled: enabledDevices.length,
+    online: onlineDevices,
+    ready: readyDevices,
+    attention: onlineDevices - readyDevices,
+    checking: enabledDevices.length - recentHealth.length,
+    unavailable: unavailableDevices,
+    freshUntil: recentHealth.length > 0 ? Math.min(...recentHealth.map((health) => health.checkedAt + DEVICE_STATUS_FRESH_MS)) : undefined,
+  };
   const settings = getEffectiveSettings();
   const activeJobs = getActiveJobs().filter((job): job is Job & { status: 'queued' | 'running' } =>
     (job.status === 'queued' || job.status === 'running') && (job.projectId ?? DEFAULT_PROJECT_ID) === projectId,
@@ -53,6 +74,7 @@ export function buildDashboardOverview(permissions: bigint, userId: string, proj
     settings: canViewAutomation ? settings : { ...settings, notifyWebhookUrl: '' },
     watches,
     devices,
+    deviceStatus,
     lastSchedulerRunAt: schedulerRunHistory[0]?.ts,
     schedulerRunHistory,
     disk: getDiskUsage(config.artifactDir),

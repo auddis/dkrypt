@@ -3145,6 +3145,116 @@ test('audit history virtualizes entries without losing older records', async ({ 
   await expectAccessible(page);
 });
 
+test('mobile managers can reach a member role assignment without sideways scrolling', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await mockStableDashboardEvents(page);
+  await mockAuthenticatedDashboard(page, '8194');
+  let savedRoleIds: string[] | undefined;
+  await page.route('**/v1/dashboard/users', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ users: [{ username: 'github:teammate', displayName: 'Teammate', roleIds: [], addedAt: Date.now(), priority: 0 }] }) });
+  });
+  await page.route('**/v1/dashboard/roles', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ roles: [{ id: 'operator', name: 'Operator', color: '#818cf8', permissions: '2', position: 1, isDefault: false, createdAt: Date.now(), updatedAt: Date.now() }] }) });
+  });
+  await page.route('**/v1/dashboard/audit-log*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ entries: [], total: 0 }) });
+  });
+  await page.route(/\/v1\/dashboard\/users\/.+/, async (route) => {
+    if (route.request().method() === 'PATCH') savedRoleIds = route.request().postDataJSON().roleIds;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+  });
+
+  await page.goto('/?tab=settings&stab=users');
+  await page.getByText('Select for bulk roles').click();
+  await expect(page.getByRole('checkbox', { name: 'Select Teammate' })).toBeChecked();
+  await page.getByText('Select for bulk roles').click();
+  const manage = page.getByRole('button', { name: 'Manage roles', exact: true });
+  await expect(manage).toBeVisible();
+  const manageBounds = await manage.boundingBox();
+  expect(manageBounds).not.toBeNull();
+  expect(manageBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(manageBounds!.x + manageBounds!.width).toBeLessThanOrEqual(320);
+  expect(manageBounds!.height).toBeGreaterThanOrEqual(44);
+  await manage.click();
+  const role = page.getByRole('checkbox', { name: 'Assign Operator' });
+  await expect(role).toBeVisible();
+  await page.getByText('Operator', { exact: true }).click();
+  await expect(role).toBeChecked();
+  await expectAccessible(page);
+  await page.getByRole('button', { name: 'Save roles' }).click();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(role).toBeChecked();
+  await page.getByRole('button', { name: 'Save roles' }).click();
+  await page.getByRole('button', { name: 'Apply access change' }).click();
+  await expect.poll(() => savedRoleIds).toEqual(['operator']);
+});
+
+test('ordinary and paid members see device availability in the status pane without health permissions', async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 900 });
+  await mockAuthenticatedDashboard(page, '2');
+  let isPaidPlan = false;
+  let detailedHealthRequests = 0;
+  await page.route('**/v1/dashboard/overview*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      schedulerEnabled: false,
+      settings: {},
+      watches: [],
+      devices: [],
+      deviceStatus: { configured: 1, enabled: 1, online: 1, ready: 1, attention: 0, checking: 0, unavailable: 0, freshUntil: Date.now() + 60_000 },
+      schedulerRunHistory: [],
+      disk: { totalBytes: 1, freeBytes: 1, usedBytes: 0, usedPercent: 0 },
+      isPaidPlan,
+      maintenance: { active: false, manual: false, auto: false },
+      activeJobs: [],
+    }) });
+  });
+  await page.route('**/v1/dashboard/devices/*/health*', async (route) => {
+    detailedHealthRequests += 1;
+    await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'forbidden' }) });
+  });
+
+  for (const paid of [false, true]) {
+    isPaidPlan = paid;
+    if (paid) await mockAuthenticatedSession(page, '0');
+    await page.goto('/?tab=home');
+    await expect(page.getByText('1 device ready', { exact: true }).first()).toBeVisible();
+    expect(detailedHealthRequests).toBe(0);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Open status drawer' }).click();
+  await expect(page.getByLabel('Status drawer').getByText('1 device ready', { exact: true })).toBeVisible();
+  expect(detailedHealthRequests).toBe(0);
+});
+
+test('member status warns when a connected device cannot decrypt and expires an old green reading', async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 900 });
+  await page.clock.install();
+  await mockAuthenticatedDashboard(page, '0');
+  let blocked = true;
+  await page.route('**/v1/dashboard/overview*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      schedulerEnabled: false,
+      settings: {},
+      watches: [],
+      devices: [],
+      deviceStatus: { configured: 1, enabled: 1, online: 1, ready: blocked ? 0 : 1, attention: blocked ? 1 : 0, checking: 0, unavailable: 0, freshUntil: Date.now() + 1_000 },
+      schedulerRunHistory: [],
+      disk: { totalBytes: 1, freeBytes: 1, usedBytes: 0, usedPercent: 0 },
+      isPaidPlan: true,
+      maintenance: { active: false, manual: false, auto: false },
+      activeJobs: [],
+    }) });
+  });
+
+  await page.goto('/?tab=home');
+  await expect(page.getByText('Device needs attention', { exact: true }).first()).toBeVisible();
+  blocked = false;
+  await page.reload();
+  await expect(page.getByText('1 device ready', { exact: true }).first()).toBeVisible();
+  await page.clock.fastForward(31_000);
+  await expect(page.getByText('Device status outdated', { exact: true }).first()).toBeVisible();
+});
+
 test('bulk retry queues only failures, continues after an error, and exports per-job results', async ({ page }) => {
   const entries = [
     {

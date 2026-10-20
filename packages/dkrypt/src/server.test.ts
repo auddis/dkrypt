@@ -542,6 +542,7 @@ test('native role routes preserve management gates and default-role protections'
   const server = await buildTestServer({ includePublicRoutes: false });
   const administratorCookie = createSessionCookie('root', PermissionFlag.administrator);
   const decryptOnlyCookie = createSessionCookie('root', PermissionFlag.requestDecrypt);
+  const memberManagerCookie = createSessionCookie('root', PermissionFlag.manageUsers);
   let roleId: string | undefined;
 
   try {
@@ -551,6 +552,13 @@ test('native role routes preserve management gates and default-role protections'
       headers: { cookie: decryptOnlyCookie },
     });
     expect(denied.statusCode).toBe(403);
+
+    const assignerRoles = await server.inject({ method: 'GET', url: '/v1/dashboard/roles', headers: { cookie: memberManagerCookie } });
+    expect(assignerRoles.statusCode).toBe(200);
+    expect(assignerRoles.json().roles).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'everyone' })]));
+
+    const deniedRoleEdit = await server.inject({ method: 'POST', url: '/v1/dashboard/roles', headers: { cookie: memberManagerCookie }, payload: { name: 'Unwanted Role', color: '#123abc', permissions: '0' } });
+    expect(deniedRoleEdit.statusCode).toBe(403);
 
     const listed = await server.inject({
       method: 'GET',
@@ -1503,6 +1511,59 @@ test('dashboard overview uses native Fastify routing and preserves project check
     expect(administratorOverview.statusCode).toBe(200);
     expect(administratorOverview.json()).toMatchObject({ projectId: 'default', devices: expect.any(Array), watches: expect.any(Array) });
   } finally {
+    await server.close();
+  }
+});
+
+test('dashboard overview gives ordinary members a device status without device configuration access', async () => {
+  const server = await buildTestServer({ includePublicRoutes: false });
+  const cookie = createSessionCookie('root', PermissionFlag.requestDecrypt);
+  let device: ReturnType<typeof createDevice> | undefined;
+
+  try {
+    const baselineResponse = await server.inject({ method: 'GET', url: '/v1/dashboard/overview', headers: { cookie } });
+    expect(baselineResponse.statusCode).toBe(200);
+    expect(baselineResponse.json()).toMatchObject({
+      devices: [],
+      deviceStatus: {
+        configured: expect.any(Number),
+        enabled: expect.any(Number),
+        online: expect.any(Number),
+        ready: expect.any(Number),
+        attention: expect.any(Number),
+        checking: expect.any(Number),
+        unavailable: expect.any(Number),
+      },
+    });
+    const baseline = baselineResponse.json().deviceStatus as { configured: number; enabled: number; online: number; ready: number; attention: number; checking: number };
+    const noRoleResponse = await server.inject({ method: 'GET', url: '/v1/dashboard/overview', headers: { cookie: createSessionCookie('root', 0n) } });
+    expect(noRoleResponse.statusCode).toBe(200);
+    expect(noRoleResponse.json()).toMatchObject({ devices: [], deviceStatus: baseline });
+    device = createDevice({ name: `Member status ${crypto.randomUUID()}`, transport: 'wifi', host: '127.0.0.1' }, 'test');
+    setCachedDeviceHealth(device.id, { reachable: true, jailbreakAvailable: true, checkedAt: Date.now() });
+
+    const onlineResponse = await server.inject({ method: 'GET', url: '/v1/dashboard/overview', headers: { cookie } });
+    expect(onlineResponse.statusCode).toBe(200);
+    expect(onlineResponse.json()).toMatchObject({
+      devices: [],
+      deviceStatus: { configured: baseline.configured + 1, enabled: baseline.enabled + 1, online: baseline.online + 1, ready: baseline.ready + 1, freshUntil: expect.any(Number) },
+    });
+
+    setCachedDeviceHealth(device.id, { reachable: true, jailbreakAvailable: true, testFlightBridgeReachable: false, checkedAt: Date.now() });
+    const blockedResponse = await server.inject({ method: 'GET', url: '/v1/dashboard/overview', headers: { cookie } });
+    expect(blockedResponse.json()).toMatchObject({
+      devices: [],
+      deviceStatus: { online: baseline.online + 1, ready: baseline.ready, attention: baseline.attention + 1 },
+    });
+
+    setCachedDeviceHealth(device.id, { reachable: true, jailbreakAvailable: true, checkedAt: Date.now() - 660_000 });
+    const staleResponse = await server.inject({ method: 'GET', url: '/v1/dashboard/overview', headers: { cookie } });
+    expect(staleResponse.json()).toMatchObject({
+      devices: [],
+      deviceStatus: { online: baseline.online, checking: baseline.checking + 1 },
+    });
+  } finally {
+    if (device) deleteDevice(device.id, 'test');
     await server.close();
   }
 });
@@ -2730,6 +2791,49 @@ test('Fastify sends the initial dashboard overview over SSE', async () => {
   } finally {
     clearTimeout(timeout);
     controller.abort();
+    await server.close();
+  }
+});
+
+test('member status overview updates when device health changes without exposing device records', async () => {
+  const server = await buildTestServer({ includePublicRoutes: false });
+  const device = createDevice({ name: `SSE status ${crypto.randomUUID()}`, transport: 'wifi', host: '127.0.0.1' }, 'test');
+  const baseUrl = await server.listen({ port: 0, host: '127.0.0.1' });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  const decoder = new TextDecoder();
+  let pending = '';
+  const readEvent = async (reader: { read(): Promise<{ value?: Uint8Array; done: boolean }> }): Promise<string> => {
+    while (!pending.includes('\n\n')) {
+      const chunk = await reader.read();
+      if (chunk.done) throw new Error('dashboard event stream ended unexpectedly');
+      pending += decoder.decode(chunk.value, { stream: true });
+    }
+    const boundary = pending.indexOf('\n\n');
+    const event = pending.slice(0, boundary);
+    pending = pending.slice(boundary + 2);
+    return event;
+  };
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/dashboard/events`, { headers: { cookie: createSessionCookie('root', PermissionFlag.requestDecrypt) }, signal: controller.signal });
+    expect(response.status).toBe(200);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('dashboard event stream has no reader');
+    await readEvent(reader);
+    await readEvent(reader);
+
+    setCachedDeviceHealth(device.id, { reachable: true, jailbreakAvailable: true, checkedAt: Date.now() });
+    const update = await readEvent(reader);
+    expect(update).toContain('event: overview');
+    const payload = JSON.parse(update.match(/^data: (.+)$/m)?.[1] ?? '{}') as { devices?: unknown[]; deviceStatus?: { online: number; ready: number } };
+    expect(payload.devices).toEqual([]);
+    expect(payload.deviceStatus?.online).toBeGreaterThanOrEqual(1);
+    expect(payload.deviceStatus?.ready).toBeGreaterThanOrEqual(1);
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+    deleteDevice(device.id, 'test');
     await server.close();
   }
 });

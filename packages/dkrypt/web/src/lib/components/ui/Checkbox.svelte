@@ -4,6 +4,7 @@
   import { cn } from '#lib/utils';
 
   interface Props {
+    id?: string;
     checked: boolean;
     indeterminate?: boolean;
     disabled?: boolean;

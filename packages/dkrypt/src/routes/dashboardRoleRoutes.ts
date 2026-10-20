@@ -17,7 +17,7 @@ import { createRole, DEFAULT_ROLE_ID, deleteRole, listRoles, previewRoleImpact, 
 import { createHttpErrorEnvelope } from '#util/httpResponse.js';
 import { dashboardRoleImpactBodySchema, dashboardRoleImpactResponseSchema, dashboardRoleParamsSchema } from '#dashboardRoleContracts.js';
 
-const canViewRoles = fastifyRequirePermission(PermissionFlag.viewRoles, PermissionFlag.manageRoles);
+const canViewRoles = fastifyRequirePermission(PermissionFlag.viewRoles, PermissionFlag.manageRoles, PermissionFlag.manageUsers);
 const canManageRoles = fastifyRequirePermission(PermissionFlag.manageRoles);
 
 export const dashboardRoleRoutes: FastifyPluginAsyncTypebox = async (server) => {

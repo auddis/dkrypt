@@ -181,7 +181,7 @@ test('core operational responses publish their required fields', async () => {
       ['/v1/health', 'get', ['ok', 'serviceReady', 'deployment', 'database', 'bridge', 'device']],
       ['/v1/status', 'get', ['status', 'checkedAt', 'deployment', 'components']],
       ['/v1/billing', 'get', ['enabled', 'provider', 'plans', 'providers', 'entitlement']],
-      ['/v1/dashboard/overview', 'get', ['schedulerEnabled', 'watches', 'devices', 'activeJobs']],
+      ['/v1/dashboard/overview', 'get', ['schedulerEnabled', 'watches', 'devices', 'deviceStatus', 'activeJobs']],
       ['/v1/dashboard/jobs', 'get', ['history', 'total', 'nextCursor']],
       ['/v1/dashboard/artifacts', 'get', ['artifacts', 'total', 'totalBytes', 'maxBytes']],
       ['/v1/dashboard/artifacts/bulk-pin', 'post', ['ok', 'pinned', 'changedIds', 'artifacts']],

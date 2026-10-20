@@ -71,7 +71,7 @@ export const dashboardEventsRoutes: FastifyPluginAsyncTypebox = async (server) =
     const presentOnlineUsers = (usernames: string[]) => usernames.map((userId) => ({ userId, displayName: getAuthProfile(userId)?.displayName ?? (userId === 'root' ? 'Administrator' : userId) }));
     sendEvent('presence', presentOnlineUsers(getOnlineUsernames()));
 
-    const onJobsChanged = () => sendEvent('overview', buildDashboardOverview(session.permissions, sub, projectId));
+    const onOverviewChanged = () => sendEvent('overview', buildDashboardOverview(session.permissions, sub, projectId));
     const onLogAdded = (entry: LogEntry) => {
       if (logBelongsToProject(entry, projectId)) sendEvent('log', entry);
     };
@@ -86,7 +86,8 @@ export const dashboardEventsRoutes: FastifyPluginAsyncTypebox = async (server) =
       }
     };
 
-    dashboardEvents.on('jobsChanged', onJobsChanged);
+    dashboardEvents.on('jobsChanged', onOverviewChanged);
+    dashboardEvents.on('deviceHealthChanged', onOverviewChanged);
     if (hasPermission(session.permissions, PermissionFlag.viewLogs)) dashboardEvents.on('logAdded', onLogAdded);
     dashboardEvents.on('historyAdded', onHistoryAdded);
     dashboardEvents.on('presenceChanged', onPresenceChanged);
@@ -104,7 +105,8 @@ export const dashboardEventsRoutes: FastifyPluginAsyncTypebox = async (server) =
       unregisterDashboardConnection();
       clearInterval(heartbeat);
       unregisterPresence(sub);
-      dashboardEvents.off('jobsChanged', onJobsChanged);
+      dashboardEvents.off('jobsChanged', onOverviewChanged);
+      dashboardEvents.off('deviceHealthChanged', onOverviewChanged);
       dashboardEvents.off('logAdded', onLogAdded);
       dashboardEvents.off('historyAdded', onHistoryAdded);
       dashboardEvents.off('presenceChanged', onPresenceChanged);

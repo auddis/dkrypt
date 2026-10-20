@@ -9,6 +9,10 @@ export function emitJobsChanged(): void {
   dashboardEvents.emit('jobsChanged');
 }
 
+export function emitDeviceHealthChanged(): void {
+  dashboardEvents.emit('deviceHealthChanged');
+}
+
 export function emitBillingChanged(): void {
   dashboardEvents.emit('billingChanged');
 }
