@@ -1220,7 +1220,7 @@ initDensity();
 			</div>
 		</header>
 		<main
-			class="mx-auto max-w-[1760px] px-3 pt-4 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:px-5 sm:pt-5 lg:px-6 lg:pb-6"
+			class={cn("mx-auto px-3 pt-4 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:px-5 sm:pt-5 lg:px-6 lg:pb-6", sidebarState.collapsed ? "max-w-[2200px]" : "max-w-[1760px]")}
 		>
 			<SessionExpiryBanner />
 			<ConnectionBanner />

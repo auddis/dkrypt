@@ -592,6 +592,13 @@ test('collapsed sidebar gives library and history content the released space', a
   await page.getByRole('button', { name: 'Select items' }).click();
   await expect(artifactRow.getByRole('checkbox')).toBeVisible();
   await expect(page.getByRole('group', { name: 'Bulk artifact actions' })).toBeVisible();
+
+  await page.setViewportSize({ width: 2048, height: 1000 });
+  await page.getByRole('button', { name: 'Expand sidebar' }).click();
+  const wideBefore = await artifactRow.evaluate((element) => element.getBoundingClientRect().width);
+  await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+  const wideAfter = await artifactRow.evaluate((element) => element.getBoundingClientRect().width);
+  expect(wideAfter).toBeGreaterThan(wideBefore + 100);
 });
 
 test('live updates suspend while hidden and refresh immediately when visible again', async ({ page }) => {
