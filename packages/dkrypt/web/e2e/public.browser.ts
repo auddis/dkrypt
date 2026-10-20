@@ -514,12 +514,12 @@ test('IPA Library visual layout stays consistent on desktop and mobile', async (
   const metadataRows = await artifactRow.locator('dt').evaluateAll((headings) => Object.fromEntries(headings.map((heading) => [heading.textContent?.trim(), heading.getBoundingClientRect().top])));
   expect(metadataRows.Size).toBe(metadataRows.App);
   const actionsTop = await artifactRow.locator('.artifact-library-row-actions').evaluate((element) => element.getBoundingClientRect().top);
-  expect(actionsTop).toBeLessThan(metadataRows.App + 35);
+  expect(actionsTop).toBeGreaterThan(metadataRows.App + 35);
   await expectVisualSnapshot(page, libraryCard, 'ipa-library-desktop.png');
 
   const boundaryStyle = await page.addStyleTag({ content: '[data-artifact-id="visual-artifact"] { width: calc(100% - 2px); }' });
   const boundaryActionsTop = await artifactRow.locator('.artifact-library-row-actions').evaluate((element) => element.getBoundingClientRect().top);
-  expect(boundaryActionsTop).toBeLessThan(metadataRows.App + 35);
+  expect(boundaryActionsTop).toBeGreaterThan(metadataRows.App + 35);
   await boundaryStyle.evaluate((element) => element.remove());
 
   for (const width of [1200, 1652]) {
@@ -527,7 +527,7 @@ test('IPA Library visual layout stays consistent on desktop and mobile', async (
     const rows = await artifactRow.locator('dt').evaluateAll((headings) => Object.fromEntries(headings.map((heading) => [heading.textContent?.trim(), heading.getBoundingClientRect().top])));
     expect(rows.Size, `viewport ${width}`).toBe(rows.App);
     const rowActionsTop = await artifactRow.locator('.artifact-library-row-actions').evaluate((element) => element.getBoundingClientRect().top);
-    expect(rowActionsTop, `viewport ${width}`).toBeLessThan(rows.App + 35);
+    expect(rowActionsTop, `viewport ${width}`).toBeGreaterThanOrEqual(rows.App);
     const versionIsVisible = await artifactRow.locator('dd > span.truncate.font-semibold').evaluate((element) => element.scrollWidth <= element.clientWidth);
     expect(versionIsVisible, `viewport ${width}`).toBe(true);
     if (width === 1200) await expectVisualSnapshot(page, libraryCard, 'ipa-library-narrow-desktop.png');
@@ -539,6 +539,59 @@ test('IPA Library visual layout stays consistent on desktop and mobile', async (
   const mobileVersionIsVisible = await artifactRow.locator('dd > span.truncate.font-semibold').evaluate((element) => element.scrollWidth <= element.clientWidth);
   expect(mobileVersionIsVisible).toBe(true);
   await expectVisualSnapshot(page, libraryCard, 'ipa-library-mobile.png');
+});
+
+test('collapsed sidebar gives library and history content the released space', async ({ page }) => {
+  await mockVisualDashboardData(page);
+  await mockStableDashboardEvents(page);
+  await mockAuthenticatedDashboard(page, '1');
+  await page.route('**/v1/dashboard/artifacts**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        artifacts: [{ id: 'layout-artifact', bundleId: 'com.example.layout', channel: 'appstore', versionLabel: '348.0', buildNumber: '113691', fileSizeBytes: 104857600, createdAt: '2026-09-25T12:00:00.000Z', fileUrl: '/v1/dashboard/artifacts/layout-artifact/file' }],
+        total: 1,
+        totalBytes: 104857600,
+        maxBytes: 1048576000,
+      }),
+    });
+  });
+  await page.route('**/v1/dashboard/jobs?*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ history: [{ id: 'layout-job', bundleId: 'com.example.layout', status: 'done', source: 'manual', createdAt: Date.now() - 60_000, finishedAt: Date.now() - 30_000, fileAvailable: true, downloadUrl: '/download/layout-job' }], total: 1 }),
+    });
+  });
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/?tab=home');
+  const artifactRow = page.locator('[data-artifact-id="layout-artifact"]');
+  const historyRow = page.locator('.history-feed-row').first();
+  await expect(artifactRow).toBeVisible();
+  await expect(historyRow).toBeVisible();
+  await expect(artifactRow.getByRole('checkbox')).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Bulk artifact actions' })).toHaveCount(0);
+  const detailsButton = artifactRow.getByRole('button', { name: 'Artifact details' });
+  const downloadButton = artifactRow.getByRole('link', { name: /Download/ });
+  const detailsBox = await detailsButton.boundingBox();
+  const downloadBox = await downloadButton.boundingBox();
+  expect(detailsBox).not.toBeNull();
+  expect(downloadBox).not.toBeNull();
+  expect(downloadBox?.width).toBe(detailsBox?.width);
+  expect(downloadBox?.height).toBe(detailsBox?.height);
+
+  const before = await historyRow.locator('.history-feed-summary').evaluate((element) => element.getBoundingClientRect().width);
+  await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+  const after = await historyRow.locator('.history-feed-summary').evaluate((element) => element.getBoundingClientRect().width);
+  expect(after).toBeGreaterThan(before + 100);
+  const versionWidth = await artifactRow.locator('dt', { hasText: 'Version' }).locator('..').evaluate((element) => element.getBoundingClientRect().width);
+  expect(versionWidth).toBeLessThan(175);
+  const appWidth = await artifactRow.locator('dt', { hasText: 'App' }).locator('..').evaluate((element) => element.getBoundingClientRect().width);
+  expect(appWidth).toBeGreaterThan(versionWidth);
+
+  await page.getByRole('button', { name: 'Select items' }).click();
+  await expect(artifactRow.getByRole('checkbox')).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Bulk artifact actions' })).toBeVisible();
 });
 
 test('live updates suspend while hidden and refresh immediately when visible again', async ({ page }) => {
@@ -970,6 +1023,7 @@ test('IPA Library archive and restore keep archive state separate from eviction 
   await page.getByRole('option', { name: 'Active', exact: true }).click();
   const activeArtifact = page.locator('article').filter({ hasText: 'com.example.archive' });
   await expect(activeArtifact).toHaveCount(1);
+  await page.getByRole('button', { name: 'Select items' }).click();
   await activeArtifact.getByRole('checkbox', { name: 'Select com.example.archive 2.4.0 (240)' }).check();
   const listRequestsBeforeBulkArchive = artifactListRequestCount;
   await page.getByRole('button', { name: 'Archive selected', exact: true }).click();
@@ -3023,6 +3077,7 @@ test('IPA Library bulk pinning sends one bounded update for the selected artifac
   const artifactResponse = page.waitForResponse((response) => response.url().includes('/v1/dashboard/artifacts?') && response.ok());
   await page.goto('/?tab=home');
   await artifactResponse;
+  await page.getByRole('button', { name: 'Select items' }).click();
   await page.getByRole('checkbox', { name: 'Select com.example.bulk 2.4.0 (240)' }).check();
   await page.getByRole('button', { name: 'Pin selected', exact: true }).click();
 
