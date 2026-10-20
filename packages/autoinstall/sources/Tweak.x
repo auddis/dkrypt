@@ -81,6 +81,11 @@ static void runSpawnAsync(const char *path, char *const argv[]) {
 - (void)_performPurchases:(id)purchases hasBundlePurchase:(BOOL)hasBundlePurchase withClientContext:(id)context completionBlock:(void (^)(id arg1))block;
 @end
 
+@protocol SSPurchaseResponseProtocol <NSObject>
+- (NSError *)error;
+- (NSArray *)downloadIdentifiers;
+@end
+
 @protocol SKUIItemProtocol <NSObject>
 - (instancetype)initWithLookupDictionary:(NSDictionary *)dict;
 @end
@@ -2302,10 +2307,13 @@ static void handleAppStoreRequest(NSDictionary *req, NSString *responsePath, NSS
             autoinstallLog([NSString stringWithFormat:@"as-install: adamId=%@ versionId=%@ purchases=%@", adamIdStr, versionId, purchases]);
 
             void (^completion)(id) = ^(id arg1) {
-                autoinstallLog([NSString stringWithFormat:@"as-install: completionBlock fired arg1=%@", arg1]);
+                id responseError = [arg1 respondsToSelector:@selector(error)] ? [(id<SSPurchaseResponseProtocol>)arg1 error] : nil;
+                NSError *error = [arg1 isKindOfClass:[NSError class]] ? (NSError *)arg1 : ([responseError isKindOfClass:[NSError class]] ? (NSError *)responseError : nil);
+                id responseDownloads = [arg1 respondsToSelector:@selector(downloadIdentifiers)] ? [(id<SSPurchaseResponseProtocol>)arg1 downloadIdentifiers] : nil;
+                NSUInteger downloadCount = [responseDownloads isKindOfClass:[NSArray class]] ? [(NSArray *)responseDownloads count] : 0;
+                autoinstallLog([NSString stringWithFormat:@"as-install: purchase response class=%@ errorDomain=%@ errorCode=%ld downloadCount=%lu", NSStringFromClass([arg1 class]), error.domain ?: @"none", (long)error.code, (unsigned long)downloadCount]);
                 autoinstallClearFreeAppStoreAuthorization(operationId);
-                if ([arg1 isKindOfClass:[NSError class]]) {
-                    NSError *error = (NSError *)arg1;
+                if (error) {
                     NSDictionary *failure = @{
                         @"ok": @NO,
                         @"operationId": operationId,
@@ -2316,8 +2324,8 @@ static void handleAppStoreRequest(NSDictionary *req, NSString *responsePath, NSS
                     writeJSONFile(kASInstallStatusPath, failure);
                     return;
                 }
-                writeBridgeTransaction(@"appstore", operationId, @"completed", @{@"ok": @YES, @"adamId": adamId, @"versionId": versionId ?: [NSNull null]});
-                writeJSONFile(kASInstallStatusPath, @{@"ok": @YES, @"operationId": operationId, @"state": @"completed", @"adamId": adamId});
+                writeBridgeTransaction(@"appstore", operationId, @"completed", @{@"ok": @YES, @"adamId": adamId, @"versionId": versionId ?: [NSNull null], @"downloadCount": @(downloadCount)});
+                writeJSONFile(kASInstallStatusPath, @{@"ok": @YES, @"operationId": operationId, @"state": @"completed", @"adamId": adamId, @"downloadCount": @(downloadCount)});
             };
 
             writeBridgeTransaction(@"appstore", operationId, @"requested", @{@"ok": @YES, @"adamId": adamId, @"versionId": versionId ?: [NSNull null]});
