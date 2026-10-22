@@ -88,6 +88,26 @@ async function loadStripeEnvironment(secretKey: string): Promise<string> {
   return stdout.trim();
 }
 
+async function loadInvalidCanaryConfiguration(): Promise<string> {
+  const child = Bun.spawn(
+    [process.execPath, '-e', "await import('./src/config.ts');"],
+    {
+      cwd: process.cwd(),
+      env: {
+        API_KEY: 'config-test-api-key',
+        SESSION_SIGNING_SECRET: 'config-test-session-signing-secret',
+        ADMIN_PASSWORD: 'config-test-admin-password',
+        BILLING_CATALOG_ROLLOUT: 'canary',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
+  const [stderr, exitCode] = await Promise.all([new Response(child.stderr).text(), child.exited]);
+  if (exitCode === 0) throw new Error('billing canary configuration unexpectedly succeeded');
+  return stderr;
+}
+
 describe('config defaults', () => {
   test('keeps completed job history for 24 hours by default', async () => {
     await expect(loadDefaultRetention()).resolves.toEqual({ jobRetentionMinutes: 1440 });
@@ -106,5 +126,9 @@ describe('config defaults', () => {
 
   test('recognizes restricted live Stripe keys as live mode', async () => {
     await expect(loadStripeEnvironment('rk_live_config-test-key')).resolves.toBe('live');
+  });
+
+  test('requires at least one account before enabling the catalog canary', async () => {
+    await expect(loadInvalidCanaryConfiguration()).resolves.toContain('BILLING_CATALOG_CANARY_USER_IDS is required');
   });
 });

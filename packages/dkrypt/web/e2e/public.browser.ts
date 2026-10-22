@@ -4,6 +4,21 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 test.use({ serviceWorkers: 'block' });
 
+const publicPricingPlans = [
+  { id: 'access', name: 'Access', description: 'IPA Library and two new decrypts per day.', amount: 2.5, currency: 'EUR', api: false, priority: 0, dailyDecryptLimit: 2 },
+  { id: 'standard', name: 'Standard', description: 'IPA Library and ten new decrypts per day.', amount: 5, currency: 'EUR', api: false, priority: 0, dailyDecryptLimit: 10 },
+  { id: 'plus', name: 'Plus', description: 'IPA Library and 25 new decrypts per day.', amount: 10, currency: 'EUR', api: false, priority: 0, dailyDecryptLimit: 25 },
+  { id: 'developer', name: 'Developer', description: 'IPA Library, 50 new decrypts per day, and API access.', amount: 15, currency: 'EUR', api: true, priority: 0, dailyDecryptLimit: 50, apiRatePerMinute: 30 },
+  { id: 'unlimited', name: 'Unlimited', description: 'IPA Library, unlimited new decrypts, and API access.', amount: 20, currency: 'EUR', api: true, priority: 0, apiRatePerMinute: 60 },
+  { id: 'unlimited_priority', name: 'Unlimited Priority', description: 'Unlimited new decrypts, API access, and higher queue priority.', amount: 30, currency: 'EUR', api: true, priority: 5, apiRatePerMinute: 120 },
+];
+
+async function mockPublicPricing(page: Page): Promise<void> {
+  await page.route('**/pricing/catalog.json', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ plans: publicPricingPlans }) });
+  });
+}
+
 async function expectAccessible(page: Page, scope?: string): Promise<void> {
   await page.locator('[data-sonner-toast]').evaluateAll(async (toasts) => {
     const animations = toasts.flatMap((toast) => toast.getAnimations({ subtree: true }))
@@ -370,10 +385,11 @@ test('status page renders an operational service and remains keyboard accessible
 
 test('pricing page fits a phone viewport without horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
+  await mockPublicPricing(page);
   await page.goto('/pricing');
 
   await expect(page.getByRole('heading', { name: 'Choose a dkrypt plan' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Sign in to subscribe' })).toHaveCount(4);
+  await expect(page.getByRole('link', { name: 'Sign in to subscribe' })).toHaveCount(6);
 
   const dimensions = await page.evaluate(() => ({
     bodyWidth: document.body.scrollWidth,
@@ -388,8 +404,10 @@ test('pricing page fits a phone viewport without horizontal overflow', async ({ 
 
 test('pricing page visual layout stays consistent on desktop and mobile', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
+  await mockPublicPricing(page);
   await page.goto('/pricing');
   await expect(page.getByRole('heading', { name: 'Choose a dkrypt plan' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Sign in to subscribe' })).toHaveCount(6);
   await expectVisualSnapshot(page, page, 'pricing-desktop.png', true);
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1967,19 +1985,20 @@ test('batch queue exports each result and error as a CSV download', async ({ pag
 });
 
 test('pricing plan checkout actions share a bottom baseline', async ({ page }) => {
+  await mockPublicPricing(page);
   for (const width of [1264, 1280, 1365, 1440, 1600]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto('/pricing');
 
     const buttons = page.getByRole('link', { name: 'Sign in to subscribe' });
-    const paymentDetails = page.getByText('Stripe or crypto checkout', { exact: true });
-    await expect(buttons).toHaveCount(4);
-    await expect(paymentDetails).toHaveCount(4);
+    const paymentDetails = page.getByText('Stripe checkout · crypto where available', { exact: true });
+    await expect(buttons).toHaveCount(6);
+    await expect(paymentDetails).toHaveCount(6);
     const cardLayout = await page.locator('main > div.grid > [data-slot="card"]').evaluateAll((cards) => cards.map((card) => {
       const rect = card.getBoundingClientRect();
       const button = card.querySelector('a[href="/#sign-in"]');
       const price = card.querySelector('.text-3xl');
-      const paymentDetails = [...card.querySelectorAll('div')].find((element) => element.textContent?.trim() === 'Stripe or crypto checkout');
+      const paymentDetails = [...card.querySelectorAll('div')].find((element) => element.textContent?.trim() === 'Stripe checkout · crypto where available');
       return {
         top: rect.top,
         buttonBottom: button?.getBoundingClientRect().bottom ?? Number.NaN,

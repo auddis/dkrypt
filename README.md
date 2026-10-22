@@ -133,12 +133,16 @@ Do not copy database files while the service is running. Use the dashboard backu
 
 Stripe remains the card and bank payment path. Configure the live Stripe secret, recurring price IDs, webhook secret, and tax settings in the runtime environment. Rotate API keys with `STRIPE_SECRET_KEY_PREVIOUS` during the overlap window; webhook signing-secret rotation remains separate. Stripe readiness is visible in the manager billing view and the configuration doctor.
 
+The current catalog has six tiers: Access (€2.50, two new decrypts per rolling 24 hours), Standard (€5, ten), Plus (€10, 25), Developer (€15, 50 and 30 API requests/minute), Unlimited (€20, unlimited and 60 API requests/minute), and Unlimited Priority (€30, unlimited, 120 API requests/minute, and higher queue priority). Every new tier includes IPA Library access. Library downloads, exact cached results, duplicate active jobs, and internal retries do not use a decrypt slot. API limits are per account across all keys, in addition to key-specific limits.
+
+Keep the four original `STRIPE_*_PRICE_ID` values configured for grandfathered subscribers. Create six new monthly EUR prices and set `STRIPE_ACCESS_PRICE_ID`, `STRIPE_STANDARD_PRICE_ID`, `STRIPE_PLUS_PRICE_ID`, `STRIPE_DEVELOPER_PRICE_ID`, `STRIPE_UNLIMITED_PRICE_ID`, and `STRIPE_UNLIMITED_PRIORITY_PRICE_ID`. `BILLING_CATALOG_ROLLOUT=off` continues to offer the original catalog; `canary` offers the new catalog only to the comma-separated account IDs in `BILLING_CATALOG_CANARY_USER_IDS`; `all` offers it to everyone. Do not remove the old price mappings while any grandfathered subscription remains. Switching away from a legacy plan is voluntary and irreversible.
+
 </details>
 
 <details>
 <summary>Crypto billing</summary>
 
-Crypto billing is an optional second payment method using NOWPayments hosted invoices. It supports the configured EUR plans and selected crypto assets without custody or private-key storage in dkrypt. Crypto checkout does not ask for Stripe billing-address data.
+Crypto billing is an optional second payment method using NOWPayments hosted invoices. It supports the configured EUR plans and selected crypto assets without custody or private-key storage in dkrypt. Crypto checkout does not ask for Stripe billing-address data. dkrypt checks the provider's minimum EUR-equivalent amount for each asset when showing checkout choices and rechecks at invoice creation; a tier below the minimum remains available by Stripe at its advertised price.
 
 Keep it disabled until the provider dashboard, wallet, IPN secret, webhook URL, and settlement settings are ready:
 

@@ -29,23 +29,28 @@ import { getRouteContract } from '#contracts.js';
 import { getAuthProfile } from '#identity.js';
 import { emitJobsChanged } from '#events.js';
 import { config } from '#config.js';
-import { PermissionFlag } from '#permissions.js';
+import { hasPermission, PermissionFlag } from '#permissions.js';
 import { applyWatchSchedules, checkForTestFlightUpdate, checkForUpdate, triggerTickNow } from '#scheduler/index.js';
 import { getGitHubRateLimitBudget, listDispatchRepos, listRepoWorkflows, validateDispatchTarget } from '#scheduler/github.js';
 import { fastifyRequirePermission, fastifyRequireSession, getFastifySession } from '#session.js';
 import {
   createWatch,
+  requestWatchBillingOwnerTransfer,
+  acceptWatchBillingOwnerTransfer,
   DEFAULT_PROJECT_ID,
   deleteWatch,
   getEffectiveWatches,
+  getUserEffectivePermissions,
   getGitHubBudgetTelemetry,
   getProject,
   getWatch,
+  listAllowedUsers,
   getWatchConfigIssues,
   getWatchHealthRollup,
   isWatchSchedulable,
   recordAudit,
   updateWatch,
+  userCanAccessProject,
   type AppWatch,
   type CreateWatchInput as WatchCreateInput,
   type DispatchTarget as WatchDispatchTarget,
@@ -140,6 +145,8 @@ function serializeWatch(watch: AppWatch): WatchResponse {
   delete publicWatch.lastScheduledAt;
   return {
     ...publicWatch,
+    billingOwnerDisplayName: watch.billingOwnerId ? getAuthProfile(watch.billingOwnerId)?.displayName ?? (watch.billingOwnerId === 'root' ? 'Operator' : watch.billingOwnerId) : 'System-owned',
+    billingOwnerTransferDisplayName: watch.billingOwnerTransfer ? getAuthProfile(watch.billingOwnerTransfer.userId)?.displayName ?? watch.billingOwnerTransfer.userId : undefined,
     timezone: effectiveTimeZone(watch.timezone),
     missedRunPolicy: watch.missedRunPolicy ?? 'skip',
     schedulable: isWatchSchedulable(watch),
@@ -347,6 +354,50 @@ export const dashboardWatchRoutes: FastifyPluginAsyncTypebox = async (server) =>
         .filter((watch) => canAccessProject(session.sub, session.permissions, watch.projectId ?? DEFAULT_PROJECT_ID))
         .map(serializeWatch),
     };
+  });
+
+  server.post('/v1/dashboard/watches/:id/ownership/request', {
+    schema: { hide: true, params: Type.Object({ id: Type.String({ minLength: 1, maxLength: 160 }) }), body: Type.Object({ userId: Type.String({ minLength: 1, maxLength: 160 }) }) },
+    preHandler: canManageWatches,
+  }, (request, reply) => {
+    const session = getFastifySession(request)!;
+    const watch = getWatch(request.params.id);
+    if (!watch || !canAccessProject(session.sub, session.permissions, watch.projectId ?? DEFAULT_PROJECT_ID)) return sendError(request, reply, 404, 'watch not found');
+    const result = requestWatchBillingOwnerTransfer(watch.id, request.body.userId, session.sub);
+    if (!result.ok || !result.watch) return sendError(request, reply, 409, result.error ?? 'ownership could not be requested');
+    applyWatchSchedules();
+    emitJobsChanged();
+    return serializeWatch(result.watch);
+  });
+
+  server.get('/v1/dashboard/watches/:id/ownership/eligible', {
+    schema: { hide: true, params: Type.Object({ id: Type.String({ minLength: 1, maxLength: 160 }) }) },
+    preHandler: canManageWatches,
+  }, (request, reply) => {
+    const session = getFastifySession(request)!;
+    const watch = getWatch(request.params.id);
+    if (!watch || !canAccessProject(session.sub, session.permissions, watch.projectId ?? DEFAULT_PROJECT_ID)) return sendError(request, reply, 404, 'watch not found');
+    const eligible = listAllowedUsers()
+      .filter((user) => userCanAccessProject(user.username, watch.projectId ?? DEFAULT_PROJECT_ID))
+      .filter((user) => hasPermission(getUserEffectivePermissions(user.username), PermissionFlag.requestDecrypt))
+      .filter((user) => hasPermission(getUserEffectivePermissions(user.username), PermissionFlag.viewAutomation | PermissionFlag.manageAutomation))
+      .map((user) => ({ id: user.username, name: getAuthProfile(user.username)?.displayName ?? user.username }));
+    if (session.sub === 'root') eligible.unshift({ id: 'root', name: 'Operator' });
+    return { users: eligible };
+  });
+
+  server.post('/v1/dashboard/watches/:id/ownership/accept', {
+    schema: { hide: true, params: Type.Object({ id: Type.String({ minLength: 1, maxLength: 160 }) }) },
+    preHandler: canViewScheduler,
+  }, (request, reply) => {
+    const session = getFastifySession(request)!;
+    const watch = getWatch(request.params.id);
+    if (!watch || !canAccessProject(session.sub, session.permissions, watch.projectId ?? DEFAULT_PROJECT_ID)) return sendError(request, reply, 404, 'watch not found');
+    const result = acceptWatchBillingOwnerTransfer(watch.id, session.sub);
+    if (!result.ok || !result.watch) return sendError(request, reply, 409, result.error ?? 'ownership could not be accepted');
+    applyWatchSchedules();
+    emitJobsChanged();
+    return serializeWatch(result.watch);
   });
 
   server.get<DashboardWatchExportRoute>('/v1/dashboard/watches/export', {

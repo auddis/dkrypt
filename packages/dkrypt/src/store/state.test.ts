@@ -33,7 +33,9 @@ import {
   createTestFlightSubscription,
   deleteUserPersonalData,
   createWatch,
+  acceptWatchBillingOwnerTransfer,
   deleteDevice,
+  deleteRole,
   deletePasskey,
   deleteBackupSnapshot,
   deleteWatch,
@@ -64,6 +66,7 @@ import {
   listSessionsForUser,
   markWatchScheduleRun,
   mergeUserAccounts,
+  requestWatchBillingOwnerTransfer,
   getWebhookDeliveryLog,
   importBackup,
   listAllowedUsers,
@@ -647,7 +650,7 @@ describe('exportBackup / importBackup', () => {
     const project = createProject({ name: `Roundtrip project ${randomUUID()}`, memberIds: ['roundtrip-user'] }, 'tester').project!;
     const backup = exportBackup();
 
-    expect(backup.backupVersion).toBe(9);
+    expect(backup.backupVersion).toBe(10);
     expect(backup.allowedUsers.some((u) => u.username === 'roundtrip-user')).toBe(true);
     expect(backup.projects).toContainEqual(expect.objectContaining({ id: project.id, memberIds: expect.arrayContaining(['roundtrip-user']) }));
 
@@ -656,6 +659,30 @@ describe('exportBackup / importBackup', () => {
     expect(listAllowedUsers().some((u) => u.username === 'roundtrip-user')).toBe(true);
     expect(getRole(role.id)).toMatchObject({ id: role.id, name: 'Roundtrip Role' });
     expect(getProject(project.id)?.memberIds).toContain('roundtrip-user');
+  });
+
+  test('restoring an older backup does not carry quota usage from the current installation', () => {
+    const database = openStateCollectionDatabase({
+      stateDir: config.stateDir,
+      filename: config.stateDatabaseFile,
+      busyTimeoutMs: config.stateDbBusyTimeoutMs,
+    }, ['decrypt_quota_ledger']);
+    const previousRows = database.query('SELECT job_id, owner_id, admitted_at, state FROM decrypt_quota_ledger').all() as Array<{ job_id: string; owner_id: string; admitted_at: number; state: string }>;
+    const insert = database.query('INSERT INTO decrypt_quota_ledger (job_id, owner_id, admitted_at, state) VALUES (?, ?, ?, ?)');
+
+    try {
+      database.exec('DELETE FROM decrypt_quota_ledger');
+      insert.run('quota-from-current-installation', 'quota-owner', Date.now(), 'consumed');
+      const olderBackup = { ...exportBackup(), backupVersion: 9 } as Record<string, unknown>;
+      delete olderBackup.decryptQuotaLedger;
+
+      expect(importBackup(olderBackup, 'tester').ok).toBe(true);
+      expect(exportBackup().decryptQuotaLedger).toEqual([]);
+    } finally {
+      database.exec('DELETE FROM decrypt_quota_ledger');
+      for (const row of previousRows) insert.run(row.job_id, row.owner_id, row.admitted_at, row.state);
+      database.close();
+    }
   });
 
   test('rejects backup watches with invalid recurring quiet hours', () => {
@@ -1083,9 +1110,10 @@ describe('getWatchConfigIssues', () => {
   test('flags a partially-filled watch as a likely mistake', () => {
     const { watch } = createWatch({ bundleId: 'com.example.app', repo: '', ghWorkflowFile: '', pollCron: '0 * * * *' }, 'tester');
     const issues = getWatchConfigIssues(watch!);
-    expect(issues.length).toBe(1);
-    expect(issues[0]).toMatch(/partially configured/);
-    expect(issues[0]).toMatch(/repo/);
+    expect(issues.length).toBe(2);
+    expect(issues.some((issue) => /partially configured/.test(issue))).toBe(true);
+    expect(issues.some((issue) => /repo/.test(issue))).toBe(true);
+    expect(issues.some((issue) => /billing owner no longer has decrypt access/.test(issue))).toBe(true);
   });
 
   test('flags a missing GH_TOKEN once the repo is set', () => {
@@ -1106,6 +1134,27 @@ describe('getWatchConfigIssues', () => {
 });
 
 describe('watch CRUD', () => {
+
+  test('watch billing ownership transfers only after an eligible recipient accepts', () => {
+    const suffix = randomUUID();
+    const username = `watch-owner-${suffix}`;
+    const role = createRole({ name: `watch-owner-role-${suffix}`, color: '#123456', permissions: serializeBits(PermissionFlag.requestDecrypt | PermissionFlag.viewAutomation) }, 'tester');
+    addAllowedUser(username, [role.id], 'tester');
+    const created = createWatch({ bundleId: `com.example.owner.${suffix}`, repo: 'owner/app', ghWorkflowFile: 'update.yml', pollCron: '0 * * * *', enabled: false }, 'root');
+
+    try {
+      const requested = requestWatchBillingOwnerTransfer(created.watch!.id, username, 'root');
+      expect(requested).toMatchObject({ ok: true, watch: { billingOwnerId: 'root', billingOwnerTransfer: { userId: username } } });
+      expect(acceptWatchBillingOwnerTransfer(created.watch!.id, 'another-user')).toMatchObject({ ok: false });
+      const accepted = acceptWatchBillingOwnerTransfer(created.watch!.id, username);
+      expect(accepted).toMatchObject({ ok: true, watch: { billingOwnerId: username } });
+      expect(accepted?.watch?.billingOwnerTransfer).toBeUndefined();
+    } finally {
+      deleteWatch(created.watch!.id, 'tester');
+      deleteUserPersonalData(username);
+      deleteRole(role.id, 'tester');
+    }
+  });
 
   test('persists complete watch records through the typed SQLite repository', () => {
     const bundleId = `com.example.watch.repository-${randomUUID()}`;

@@ -54,7 +54,7 @@ export const billingWebhookInboxQuerySchema = Type.Object(
 
 export const billingWebhookInboxParamsSchema = Type.Object({ id: Type.String({ minLength: 1, maxLength: 200 }) }, { additionalProperties: true });
 export const billingWebhookQuarantineBodySchema = Type.Object({ reason: Type.Optional(Type.String({ maxLength: 500 })) }, { additionalProperties: true });
-export const billingSubscriptionBodySchema = Type.Object({ planId: Type.String({ minLength: 1, maxLength: 200 }) }, { additionalProperties: true });
+export const billingSubscriptionBodySchema = Type.Object({ planId: Type.String({ minLength: 1, maxLength: 200 }), acknowledgeLegacyLoss: Type.Optional(Type.Boolean()) }, { additionalProperties: true });
 
 export type BillingCheckoutRoute = {
   Headers: Static<typeof billingIdempotencyKeyHeadersSchema>;

@@ -3,6 +3,7 @@
   import Button from '#lib/components/ui/Button.svelte';
   import Input from '#lib/components/ui/Input.svelte';
   import { createGithubOidcTrust, fetchGithubOidcPolicies, revokeGithubOidcTrust, type GithubOidcTrustPolicy } from '#lib/api';
+  import IntegrationOwnershipControl from '#features/administration/IntegrationOwnershipControl.svelte';
   import { projectSelectionState } from '#lib/projectSelection.svelte';
   import { confirmDialog, showToast } from '#lib/ui.svelte';
 
@@ -66,6 +67,7 @@
         <div class="min-w-0"><div class="font-medium">Repository {policy.repositoryId} · {policy.projectId} · {policy.enabled ? 'Active' : 'Revoked'}</div><div class="break-all text-muted">{policy.workflowRef} · {policy.ref ?? policy.environment} · {policy.bundleIds.join(', ')}</div></div>
         {#if policy.enabled}<Button size="sm" variant="secondary" disabled={busy} onclick={() => void revoke(policy.id)}>Revoke</Button>{/if}
       </div>
+      <IntegrationOwnershipControl integrationId={policy.id} ownerName={policy.billingOwnerDisplayName} transferName={policy.billingOwnerTransferDisplayName} onSaved={load} />
     {/each}
   </div>
 </Card>

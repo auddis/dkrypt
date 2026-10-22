@@ -6,6 +6,8 @@ import { recordFastifyDashboardActivity } from '#dashboardActivity.js';
 import { getDeviceHealth, getDeviceInstallBlocker, getDeviceReadiness } from '#deviceHealth.js';
 import { getRouteContract } from '#contracts.js';
 import { getActiveJobs } from '#jobs/store.js';
+import { getBillingEntitlements } from '#billing.js';
+import { getDecryptQuotaUsage } from '#jobs/repository.js';
 import { PermissionFlag } from '#permissions.js';
 import { fastifyRequirePermission, fastifyRequireSession, getFastifySession } from '#session.js';
 import {
@@ -66,6 +68,7 @@ export function createDashboardDecryptPreflightRoutes(overrides: Partial<Dashboa
       preHandler: canRequestDecrypt,
     }, async (request, reply) => {
       const session = getFastifySession(request)!;
+      const entitlement = getBillingEntitlements(session.sub);
       const projectId = request.body.projectId ?? DEFAULT_PROJECT_ID;
       if (!projectIdentifierPattern.test(projectId)) return sendPreflightError(request.id, reply, 400, 'projectId must be a valid project identifier');
       const project = services.getProject(projectId);
@@ -178,6 +181,7 @@ export function createDashboardDecryptPreflightRoutes(overrides: Partial<Dashboa
         estimatedDurationMs: services.getAverageJobDurationMs(bundleId, projectId),
         queueLength: services.getActiveJobs().filter((job) => (job.projectId ?? DEFAULT_PROJECT_ID) === projectId).length,
         canQueue: checks.some((check) => check.ready),
+        quota: { ...getDecryptQuotaUsage(session.sub, entitlement.dailyDecryptLimit), legacy: entitlement.legacy ?? false, apiRatePerMinute: entitlement.apiRatePerMinute },
         devices: checks,
       };
     });

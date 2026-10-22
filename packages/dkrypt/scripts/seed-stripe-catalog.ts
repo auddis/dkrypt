@@ -5,10 +5,12 @@ const { client: stripe, environment } = createStripeCliClient();
 const taxCode = process.env.STRIPE_TAX_CODE;
 if (!taxCode) throw new Error('STRIPE_TAX_CODE is required and must be eligible for Managed Payments');
 const tiers = [
-  { key: 'regular', name: 'dkrypt Regular', amount: 500 },
-  { key: 'priority', name: 'dkrypt Priority', amount: 1000 },
-  { key: 'api', name: 'dkrypt API', amount: 1500 },
-  { key: 'priority_api', name: 'dkrypt Priority API', amount: 2000 },
+  { key: 'access', name: 'dkrypt Access', amount: 250 },
+  { key: 'standard', name: 'dkrypt Standard', amount: 500 },
+  { key: 'plus', name: 'dkrypt Plus', amount: 1000 },
+  { key: 'developer', name: 'dkrypt Developer', amount: 1500 },
+  { key: 'unlimited', name: 'dkrypt Unlimited', amount: 2000 },
+  { key: 'unlimited_priority', name: 'dkrypt Unlimited Priority', amount: 3000 },
 ] as const;
 
 async function findProduct(key: string): Promise<Stripe.Product | undefined> {

@@ -4,19 +4,21 @@ import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, w
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '#config.js';
+import { getBillingEntitlements } from '#billing.js';
 import { emitJobsChanged } from '#events.js';
 import { scopedLogger } from '#logger.js';
 
 const log = scopedLogger('jobs');
 import { sendMailToUser } from '#mail.js';
 import { sendPushToUser } from '#push.js';
-import { DEFAULT_PROJECT_ID, getAllJobHistory, getApiKeyById, getDevice, getEffectiveDevices, getProject, getTestFlightCatalogCache, getUserPrefs, isBundleWatched, recordDeviceActivity, recordJobHistory, updateDevice, type DeviceRecord } from '#store/state.js';
+import { DEFAULT_PROJECT_ID, getAllJobHistory, getApiKeyById, getDevice, getEffectiveDevices, getProject, getTestFlightCatalogCache, getUserEffectivePermissions, getUserPrefs, isBundleWatched, recordDeviceActivity, recordJobHistory, updateDevice, type DeviceRecord } from '#store/state.js';
+import { hasPermission, PermissionFlag } from '#permissions.js';
 import { uninstallFromDevice } from '#appStoreInstall.js';
 import { getCachedDeviceHealth } from '#deviceHealthCache.js';
 import { runDecrypt } from '#jobs/runner.js';
 import { appendJobTimelineEvent, type Job, type JobSource, type TestFlightJobSource } from '#jobs/types.js';
 import { artifactKeyForJob, buildDashboardArtifactFileUrl, getArtifactById, getArtifactByKey, getArtifactForJob, linkArtifactToProject, migrateLegacyPath, type ArtifactRecord } from '#artifacts.js';
-import { closePersistedJobs, findPersistedActiveJobId, findPersistedReusableCompletedJobIds, loadPersistedJobs, replacePersistedJobs, type JobBuildLookup } from '#jobs/repository.js';
+import { admitQuotaJob, closePersistedJobs, findPersistedActiveJobId, findPersistedReusableCompletedJobIds, loadPersistedJobs, mergeDecryptQuotaOwner, reconcileDecryptQuota, replacePersistedJobs, settleDecryptQuota, type JobBuildLookup } from '#jobs/repository.js';
 import { terminateChildProcess } from '#jobs/process.js';
 import { assessQueueServiceObjective, completedJobDurationP95Ms, projectCompletedJobDurationP95Ms, queueServiceObjectiveBreachDescription, queueServiceObjectiveMs } from '#jobs/slo.js';
 import { classifyJobFailure } from '#util/failureCategory.js';
@@ -221,6 +223,7 @@ if (!loadDatabaseJobs()) {
   loadActiveJobs();
   replacePersistedJobs(jobs.values());
 }
+reconcileDecryptQuota();
 
 const RETRY_BACKOFF_MS = 5_000;
 
@@ -354,6 +357,7 @@ function failExpiredQueuedJob(job: Job, now = Date.now()): void {
   recordJobHistory(toHistoryEntry(job));
   settle(job);
   persistActiveJobs();
+  settleDecryptQuota(job.id, false);
   emitJobsChanged();
 }
 
@@ -407,6 +411,7 @@ export interface EnqueueDecryptJobOptions {
   testflight?: TestFlightJobSource;
   versionLabel?: string;
   queuedBy?: string;
+  billingOwnerId?: string;
   priority?: number;
   preferredDeviceId?: string;
   apiKeyId?: string;
@@ -431,6 +436,16 @@ export class JobsShuttingDownError extends Error {
   }
 }
 
+export class AutomationOwnerUnavailableError extends Error {
+  readonly statusCode = 403;
+  readonly code = 'automation_owner_unavailable';
+
+  constructor() {
+    super('the automation owner no longer has decrypt access');
+    this.name = 'AutomationOwnerUnavailableError';
+  }
+}
+
 function deferScheduledJobIfUnavailable(source: JobSource, job: Job, enabled: boolean | undefined): void {
   if (source !== 'scheduler' || !enabled || job.status !== 'queued' || getJobDispatchableDeviceCount(job) > 0) return;
   throw new ScheduledJobDeferredError(getQueueReason(job) ?? 'No enabled device is available for this job');
@@ -442,6 +457,7 @@ export function enqueueDecryptJob(bundleId: string, source: JobSource, options: 
     testflight,
     versionLabel,
     queuedBy,
+    billingOwnerId = queuedBy,
     priority = 0,
     preferredDeviceId,
     apiKeyId,
@@ -449,6 +465,7 @@ export function enqueueDecryptJob(bundleId: string, source: JobSource, options: 
     minimumOsVersion,
   } = options;
   if (!acceptingJobs) throw new JobsShuttingDownError();
+  if (options.billingOwnerId && options.billingOwnerId !== 'root' && !hasPermission(getUserEffectivePermissions(options.billingOwnerId), PermissionFlag.requestDecrypt)) throw new AutomationOwnerUnavailableError();
   const lookup = { bundleId, externalVersionId, testFlightBuildId: testflight?.build.id, projectId };
   const existing = findActiveJobForBundle(lookup);
   if (existing) {
@@ -459,7 +476,7 @@ export function enqueueDecryptJob(bundleId: string, source: JobSource, options: 
     if (existing.status === 'queued') pumpWorkers();
     return existing;
   }
-  enforceProjectQuotas(projectId);
+  requireProjectAvailable(projectId);
   const artifactKey = artifactKeyForJob({ id: 'lookup', bundleId, externalVersionId, testflight, versionLabel });
   const artifact = getArtifactByKey(artifactKey);
   if (artifact) {
@@ -468,6 +485,7 @@ export function enqueueDecryptJob(bundleId: string, source: JobSource, options: 
   }
   const reusable = findReusableCompletedJob(lookup);
   if (reusable) return reusable;
+  enforceProjectQuotas(projectId);
 
   const resolvedLabel = versionLabel ?? (testflight ? `${testflight.build.cfBundleShortVersion}_${testflight.build.cfBundleVersion}` : 'Current App Store release');
 
@@ -485,6 +503,7 @@ export function enqueueDecryptJob(bundleId: string, source: JobSource, options: 
     minimumOsVersion: minimumOsVersion ?? minimumOsVersionForBuild(testflight?.build),
     source,
     queuedBy,
+    billingOwnerId,
     apiKeyId,
     preferredDeviceId,
     priority,
@@ -499,6 +518,11 @@ export function enqueueDecryptJob(bundleId: string, source: JobSource, options: 
   };
 
   deferScheduledJobIfUnavailable(source, job, options.deferWhenNoDispatchableDevice);
+
+  if (billingOwnerId) {
+    const entitlement = getBillingEntitlements(billingOwnerId);
+    if (entitlement.planId !== 'viewer' && !entitlement.legacy) admitQuotaJob(job, billingOwnerId, entitlement.dailyDecryptLimit);
+  }
 
   jobs.set(job.id, job);
   if (source === 'scheduler') {
@@ -524,13 +548,17 @@ class ProjectQuotaExceededError extends Error {
   }
 }
 
-function enforceProjectQuotas(projectId: string): void {
+function requireProjectAvailable(projectId: string): void {
   const project = getProject(projectId);
   if (!project || project.archivedAt !== undefined) {
     const error = new Error('project is unavailable');
     Object.assign(error, { statusCode: 404 });
     throw error;
   }
+}
+
+function enforceProjectQuotas(projectId: string): void {
+  const project = getProject(projectId)!;
   const active = [...jobs.values()].filter((job) => (job.projectId ?? DEFAULT_PROJECT_ID) === projectId && (job.status === 'queued' || job.status === 'running'));
   if (project.maxConcurrentJobs && active.length >= project.maxConcurrentJobs) {
     throw new ProjectQuotaExceededError('project concurrency limit reached');
@@ -563,8 +591,16 @@ export function mergeActiveJobOwner(targetUserId: string, sourceUserId: string):
       job.queuedBy = targetUserId;
       changed = true;
     }
+    if (job.billingOwnerId === sourceUserId) {
+      job.billingOwnerId = targetUserId;
+      changed = true;
+    }
   }
-  if (changed) emitJobsChanged();
+  mergeDecryptQuotaOwner(targetUserId, sourceUserId);
+  if (changed) {
+    persistActiveJobs();
+    emitJobsChanged();
+  }
 }
 
 export function getQueueInfo(jobId: string): { position: number; total: number } | undefined {
@@ -737,6 +773,7 @@ export function cancelQueuedJob(id: string, cancelledBy: string): boolean {
 
   persistActiveJobs();
   recordJobHistory(toHistoryEntry(job));
+  settleDecryptQuota(job.id, false);
   settle(job);
 
   emitJobsChanged();
@@ -989,6 +1026,7 @@ async function runOneJob(device: DeviceRecord, job: Job): Promise<void> {
     recordDeviceActivity({ deviceId: device.id, kind: 'job', bundleId: job.bundleId, message: 'Decrypt completed' });
     persistDoneJobs();
     persistActiveJobs();
+    settleDecryptQuota(job.id, true);
   } catch (err) {
     let message = job.cancelledBy ? `cancelled by ${job.cancelledBy}` : err instanceof Error ? err.message : String(err);
     if (job.filePath?.startsWith(`${config.artifactDir}/.staging/`)) {
@@ -1031,6 +1069,7 @@ async function runOneJob(device: DeviceRecord, job: Job): Promise<void> {
         log.info('job cancelled during retry backoff', { jobId: job.id, bundleId: job.bundleId, cancelledBy: job.cancelledBy });
         persistActiveJobs();
         recordJobHistory(toHistoryEntry(job));
+        settleDecryptQuota(job.id, false);
         emitJobsChanged();
         settle(job);
         return;
@@ -1059,6 +1098,7 @@ async function runOneJob(device: DeviceRecord, job: Job): Promise<void> {
     log.error('job failed', { jobId: job.id, bundleId: job.bundleId, deviceId: device.id, error: job.error, retried: (job.retryCount ?? 0) > 0 });
     recordDeviceActivity({ deviceId: device.id, kind: 'job', bundleId: job.bundleId, message: 'Decrypt failed' });
     persistActiveJobs();
+    settleDecryptQuota(job.id, false);
   }
 
   const completedArtifact = job.status === 'done' && job.artifactId ? getArtifactById(job.artifactId) : undefined;

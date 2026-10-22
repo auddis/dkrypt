@@ -1,9 +1,10 @@
 import cron, { type ScheduledTask } from 'node-cron';
 import { trackBackgroundWork } from '#backgroundWork.js';
 import { config } from '#config.js';
-import { emitJobsChanged } from '#events.js';
+import { dashboardEvents, emitJobsChanged } from '#events.js';
 import type { Job } from '#jobs/types.js';
 import { enqueueDecryptJob, ScheduledJobDeferredError, waitForJob, type EnqueueDecryptJobOptions } from '#jobs/store.js';
+import { DailyDecryptLimitError } from '#jobs/repository.js';
 import { SCHEDULER_JOB_TIMEOUT_MS } from '#jobs/timeouts.js';
 import { getMaintenanceStatus } from '#maintenance.js';
 import { getDeviceHealth } from '#deviceHealth.js';
@@ -164,7 +165,7 @@ interface DispatchResult {
 
 type ScheduledEnqueueResult = { kind: 'job'; job: Job } | { kind: 'deferred'; reason: string };
 
-async function enqueueScheduledDecryptJob(bundleId: string, options: EnqueueDecryptJobOptions): Promise<ScheduledEnqueueResult> {
+async function enqueueScheduledDecryptJob(watch: AppWatch, options: EnqueueDecryptJobOptions): Promise<ScheduledEnqueueResult> {
   await Promise.all(getEffectiveDevices()
     .filter((device) => device.enabled && !device.draining)
     .map((device) => getDeviceHealth(device.id).catch((error: unknown) => {
@@ -173,11 +174,15 @@ async function enqueueScheduledDecryptJob(bundleId: string, options: EnqueueDecr
   try {
     return {
       kind: 'job',
-      job: enqueueDecryptJob(bundleId, 'scheduler', { ...options, deferWhenNoDispatchableDevice: true }),
+      job: enqueueDecryptJob(watch.bundleId, 'scheduler', { ...options, billingOwnerId: watch.billingOwnerId, deferWhenNoDispatchableDevice: true }),
     };
   } catch (error) {
+    if (error instanceof DailyDecryptLimitError) {
+      scheduleQuotaRetry(watch.id, error.nextAvailableAt);
+      return { kind: 'deferred', reason: 'the billing owner has used their daily decrypt allowance' };
+    }
     if (!(error instanceof ScheduledJobDeferredError)) throw error;
-    log.info('scheduled decrypt deferred because no device can start the job', { bundleId, reason: error.message });
+    log.info('scheduled decrypt deferred because no device can start the job', { bundleId: watch.bundleId, reason: error.message });
     return { kind: 'deferred', reason: error.message };
   }
 }
@@ -526,7 +531,7 @@ async function tickAppStore(watch: AppWatch, retryCount: number): Promise<Dispat
 
   log.info('no matching release found, decrypting', { bundleId: watch.bundleId, version: normalized, externalVersionId });
 
-  const enqueueResult = await enqueueScheduledDecryptJob(watch.bundleId, {
+  const enqueueResult = await enqueueScheduledDecryptJob(watch, {
     externalVersionId,
     versionLabel: normalized,
     projectId: watch.projectId ?? DEFAULT_PROJECT_ID,
@@ -618,7 +623,7 @@ async function tickTestFlight(watch: AppWatch, retryCount: number): Promise<Disp
     tag: check.latestTag,
   });
 
-  const enqueueResult = await enqueueScheduledDecryptJob(watch.bundleId, {
+  const enqueueResult = await enqueueScheduledDecryptJob(watch, {
     testflight: { appId: check.appId as number, build: check.build },
     projectId: watch.projectId ?? DEFAULT_PROJECT_ID,
   });
@@ -654,6 +659,7 @@ async function trackAndUpdate(
 
 const tickInProgress = new Set<string>();
 const budgetRetryTimers = new Map<string, NodeJS.Timeout>();
+const quotaRetryTimers = new Map<string, NodeJS.Timeout>();
 const schedulerJitterTimers = new Set<NodeJS.Timeout>();
 const maintenanceWindowTimers = new Map<string, NodeJS.Timeout>();
 let schedulerStopping = false;
@@ -686,6 +692,21 @@ function scheduleGitHubBudgetRetry(watchId: string, resetAt: number): void {
   }, delayMs);
   timer.unref();
   budgetRetryTimers.set(watchId, timer);
+}
+
+function scheduleQuotaRetry(watchId: string, nextAvailableAt: number): void {
+  if (quotaRetryTimers.has(watchId)) return;
+  const delayMs = Math.max(1_000, nextAvailableAt - Date.now() + 1_000);
+  const timer = setTimeout(() => {
+    quotaRetryTimers.delete(watchId);
+    if (schedulerStopping) return;
+    const watch = getEffectiveWatches().find((candidate) => candidate.id === watchId);
+    if (!watch || !isWatchSchedulable(watch)) return;
+    void trackBackgroundWork('scheduler-tick', () => tick(watch, 'scheduled', true))
+      .catch((error: unknown) => log.error('quota-deferred scheduler tick threw', { watchId, error: String(error) }));
+  }, delayMs);
+  timer.unref();
+  quotaRetryTimers.set(watchId, timer);
 }
 
 function scheduleMaintenanceWindowResume(watchId: string, resumeAt: number): void {
@@ -993,6 +1014,8 @@ async function reconcileStuckSchedulerRuns(): Promise<void> {
 
 export function startScheduler(): void {
   schedulerStopping = false;
+  dashboardEvents.off('billingChanged', applyWatchSchedules);
+  dashboardEvents.on('billingChanged', applyWatchSchedules);
   applyWatchSchedules();
   const now = Date.now();
   for (const watch of getEffectiveWatches().filter(isWatchSchedulable)) {
@@ -1013,6 +1036,7 @@ export function startScheduler(): void {
 
 export function stopScheduler(): void {
   schedulerStopping = true;
+  dashboardEvents.off('billingChanged', applyWatchSchedules);
   for (const scheduled of scheduledTasks.values()) scheduled.task.stop();
   scheduledTasks.clear();
   backupTask?.stop();
@@ -1024,4 +1048,6 @@ export function stopScheduler(): void {
   maintenanceWindowTimers.clear();
   for (const timer of budgetRetryTimers.values()) clearTimeout(timer);
   budgetRetryTimers.clear();
+  for (const timer of quotaRetryTimers.values()) clearTimeout(timer);
+  quotaRetryTimers.clear();
 }

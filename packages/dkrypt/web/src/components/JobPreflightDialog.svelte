@@ -3,7 +3,7 @@
   import type { DecryptPreflight } from '#lib/api';
   import Button from '#lib/components/ui/Button.svelte';
   import Dialog from '#lib/components/ui/Dialog.svelte';
-  import { fmtDurationApprox, fmtSize } from '#lib/format.svelte';
+  import { fmtDateTime, fmtDurationApprox, fmtSize } from '#lib/format.svelte';
 
   interface Props {
     open: boolean;
@@ -37,6 +37,15 @@
       </div>
     </div>
     <p class="mb-3 text-xs text-muted">Jobs are ordered by priority, then queue time. The estimate may change when higher-priority jobs or device issues appear.{preflight.estimatedDurationMs && preflight.devices.some((device) => device.ready) ? ` Approximate wait: ${fmtDurationApprox(preflight.estimatedDurationMs * preflight.queueLength / preflight.devices.filter((device) => device.ready).length)}.` : ''}</p>
+    {#if preflight.quota}
+      <div class="mb-3 rounded-lg border border-border px-3 py-2 text-xs text-muted">
+        {#if preflight.quota.legacy}<span class="font-medium text-foreground">Grandfathered plan.</span> {/if}
+        {preflight.quota.limit === null ? 'Unlimited new decrypts' : `${preflight.quota.remaining ?? 0} of ${preflight.quota.limit} new decrypts available in your rolling 24-hour window`}.
+        Existing jobs and cached results do not use a slot.
+        {#if preflight.quota.nextAvailableAt && preflight.quota.remaining === 0} Next slot: {fmtDateTime(preflight.quota.nextAvailableAt)}.{/if}
+        {#if preflight.quota.apiRatePerMinute} API rate: {preflight.quota.apiRatePerMinute} requests per minute across your keys.{/if}
+      </div>
+    {/if}
 
     <div class="mb-4 flex flex-col gap-2">
       {#each preflight.devices as device (device.id)}

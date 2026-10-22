@@ -3166,7 +3166,7 @@ test('public status degrades for a failed scheduled workflow and recovers after 
     repo: 'owner/repo',
     ghWorkflowFile: 'release.yml',
     pollCron: '0 * * * *',
-  }, 'test').watch;
+  }, 'root').watch;
   if (!watch) throw new Error('test watch was not created');
   const server = await buildTestServer({ includePublicRoutes: false });
 

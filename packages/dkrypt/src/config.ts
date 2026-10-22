@@ -75,6 +75,14 @@ export const config = {
   stripePriorityPriceId: optional('STRIPE_PRIORITY_PRICE_ID', ''),
   stripeApiPriceId: optional('STRIPE_API_PRICE_ID', ''),
   stripePriorityApiPriceId: optional('STRIPE_PRIORITY_API_PRICE_ID', ''),
+  stripeAccessPriceId: optional('STRIPE_ACCESS_PRICE_ID', ''),
+  stripeStandardPriceId: optional('STRIPE_STANDARD_PRICE_ID', ''),
+  stripePlusPriceId: optional('STRIPE_PLUS_PRICE_ID', ''),
+  stripeDeveloperPriceId: optional('STRIPE_DEVELOPER_PRICE_ID', ''),
+  stripeUnlimitedPriceId: optional('STRIPE_UNLIMITED_PRICE_ID', ''),
+  stripeUnlimitedPriorityPriceId: optional('STRIPE_UNLIMITED_PRIORITY_PRICE_ID', ''),
+  billingCatalogRollout: optional('BILLING_CATALOG_ROLLOUT', 'off'),
+  billingCatalogCanaryUserIds: optionalList('BILLING_CATALOG_CANARY_USER_IDS', ''),
 
   cryptoBillingEnabled: optionalBool('CRYPTO_BILLING_ENABLED', false),
   cryptoBillingPollIntervalSeconds: optionalInt('CRYPTO_BILLING_POLL_INTERVAL_SECONDS', 300),
@@ -188,6 +196,17 @@ const stripeRequirements = [
 ] as const;
 export const stripeMissingConfiguration = stripeRequirements.filter(([, value]) => value === '').map(([name]) => name);
 export const stripeEnabled = stripeMissingConfiguration.length === 0;
+export const stripeNewCatalogMissingConfiguration = [
+  ['STRIPE_ACCESS_PRICE_ID', config.stripeAccessPriceId],
+  ['STRIPE_STANDARD_PRICE_ID', config.stripeStandardPriceId],
+  ['STRIPE_PLUS_PRICE_ID', config.stripePlusPriceId],
+  ['STRIPE_DEVELOPER_PRICE_ID', config.stripeDeveloperPriceId],
+  ['STRIPE_UNLIMITED_PRICE_ID', config.stripeUnlimitedPriceId],
+  ['STRIPE_UNLIMITED_PRIORITY_PRICE_ID', config.stripeUnlimitedPriorityPriceId],
+].filter(([, value]) => value === '').map(([name]) => name);
+if (!['off', 'canary', 'all'].includes(config.billingCatalogRollout)) throw new Error(`env var BILLING_CATALOG_ROLLOUT must be off, canary, or all, got ${config.billingCatalogRollout}`);
+if (config.billingCatalogRollout === 'canary' && config.billingCatalogCanaryUserIds.length === 0) throw new Error('BILLING_CATALOG_CANARY_USER_IDS is required when BILLING_CATALOG_ROLLOUT=canary');
+if (config.billingCatalogRollout !== 'off' && stripeNewCatalogMissingConfiguration.length > 0) throw new Error(`new billing catalog requires ${stripeNewCatalogMissingConfiguration.join(', ')}`);
 export const nowpaymentsEnvironment = config.nowpaymentsEnvironment as 'live' | 'test';
 if (config.nowpaymentsEnvironment !== 'live' && config.nowpaymentsEnvironment !== 'test') throw new Error(`env var NOWPAYMENTS_ENVIRONMENT must be live or test, got ${config.nowpaymentsEnvironment}`);
 const nowpaymentsRequirements = [

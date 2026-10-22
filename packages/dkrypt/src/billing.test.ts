@@ -7,8 +7,10 @@ import {
   findStripeCheckoutIdempotencyAttempt,
   getBillingCustomerId,
   getBillingEntitlements,
+  getPlan,
   hasLegacyBillingRecord,
   isBillingSnapshot,
+  listPlans,
   recordStripeCheckoutIdempotencyAttempt,
   replaceBillingSnapshot,
   resolveBillingEntitlements,
@@ -84,6 +86,25 @@ describe('resolveBillingEntitlements', () => {
       api: false,
       priority: 0,
     });
+  });
+
+  test('keeps old priority API benefits while defining the new daily ladder', () => {
+    expect(resolveBillingEntitlements([subscription('priority_api')])).toMatchObject({
+      planId: 'priority_api',
+      decrypt: true,
+      api: true,
+      priority: 5,
+      legacy: true,
+    });
+    expect(resolveBillingEntitlements([subscription('access')])).toMatchObject({ dailyDecryptLimit: 2, apiRatePerMinute: undefined });
+    expect(resolveBillingEntitlements([subscription('standard')])).toMatchObject({ dailyDecryptLimit: 10 });
+    expect(resolveBillingEntitlements([subscription('plus')])).toMatchObject({ dailyDecryptLimit: 25 });
+    expect(resolveBillingEntitlements([subscription('developer')])).toMatchObject({ dailyDecryptLimit: 50, apiRatePerMinute: 30 });
+    expect(resolveBillingEntitlements([subscription('unlimited')])).toMatchObject({ dailyDecryptLimit: undefined, apiRatePerMinute: 60 });
+    expect(resolveBillingEntitlements([subscription('unlimited_priority')])).toMatchObject({ dailyDecryptLimit: undefined, apiRatePerMinute: 120, priority: 5 });
+    expect(getPlan('priority_api')?.amount).toBe(20);
+    expect(getPlan('access')?.amount).toBe(2.5);
+    expect(listPlans().some((plan) => plan.id === 'priority_api')).toBe(true);
   });
 });
 

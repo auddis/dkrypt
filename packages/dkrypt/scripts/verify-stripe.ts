@@ -15,6 +15,14 @@ const expectedPrices = [
   { key: 'STRIPE_PRIORITY_PRICE_ID', amount: 1000 },
   { key: 'STRIPE_API_PRICE_ID', amount: 1500 },
   { key: 'STRIPE_PRIORITY_API_PRICE_ID', amount: 2000 },
+  ...(process.env.BILLING_CATALOG_ROLLOUT === 'off' || !process.env.BILLING_CATALOG_ROLLOUT ? [] : [
+    { key: 'STRIPE_ACCESS_PRICE_ID', amount: 250 },
+    { key: 'STRIPE_STANDARD_PRICE_ID', amount: 500 },
+    { key: 'STRIPE_PLUS_PRICE_ID', amount: 1000 },
+    { key: 'STRIPE_DEVELOPER_PRICE_ID', amount: 1500 },
+    { key: 'STRIPE_UNLIMITED_PRICE_ID', amount: 2000 },
+    { key: 'STRIPE_UNLIMITED_PRIORITY_PRICE_ID', amount: 3000 },
+  ]),
 ] as const;
 
 const { client: stripe, environment } = createStripeCliClient();
@@ -98,7 +106,7 @@ const checks = {
   products: productChecks,
   webhook: endpoint
     ? { id: endpoint.id, url: endpoint.url, missingEvents }
-    : { id: null, url: webhookUrl, missingEvents: requiredEvents },
+    : { id: null, url: webhookUrl, missingEvents: STRIPE_WEBHOOK_EVENTS },
   webhookProbe,
   managedPaymentsProbe,
 };

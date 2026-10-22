@@ -10,7 +10,7 @@
   import type { BadgeVariant } from '#lib/components/ui/variants';
   import { fmtCalendarDate, fmtCurrency } from '#lib/format.svelte';
 
-  type PlanId = 'viewer' | 'regular' | 'priority' | 'api' | 'priority_api';
+  type PlanId = 'viewer' | 'regular' | 'priority' | 'api' | 'priority_api' | 'access' | 'standard' | 'plus' | 'developer' | 'unlimited' | 'unlimited_priority';
   type CheckoutState = 'success' | 'cancelled' | undefined;
   type ActivationStatus = 'idle' | 'checking' | 'active' | 'pending';
   type PaymentProvider = 'stripe' | 'crypto';
@@ -22,6 +22,11 @@
     amount: number;
     currency: string;
     priceId: string;
+    api: boolean;
+    priority: number;
+    legacy: boolean;
+    dailyDecryptLimit?: number;
+    apiRatePerMinute?: number;
   }
 
   interface ProviderStatus {
@@ -30,6 +35,7 @@
     environment: 'test' | 'live';
     settlementCurrency?: string;
     issues?: string[];
+    minimumByAsset?: Record<string, number>;
   }
 
   interface Entitlement {
@@ -43,6 +49,9 @@
     nextBilledAt?: string;
     scheduledChangeAction?: string;
     scheduledChangeAt?: string;
+    dailyDecryptLimit?: number;
+    apiRatePerMinute?: number;
+    legacy?: boolean;
   }
 
   interface BillingData {
@@ -52,10 +61,12 @@
     managedPayments: boolean;
     missingConfiguration: string[];
     plans: Plan[];
+    currentPlan?: Plan;
     customerId?: string;
     customerEmail?: string;
     legacyBilling: boolean;
     entitlement: Entitlement;
+    quota: { limit: number | null; used: number; remaining: number | null; nextAvailableAt?: number };
     providers: {
       stripe: ProviderStatus;
       crypto: ProviderStatus & { provider: 'nowpayments'; assets: string[] };
@@ -82,7 +93,7 @@
     const response = await fetch('/v1/billing');
     if (!response.ok) throw new Error('billing unavailable');
     billing = (await response.json()) as BillingData;
-    if (!billing.providers.stripe.enabled && billing.providers.crypto.enabled) paymentProvider = 'crypto';
+    if (billing.entitlement.provider === 'nowpayments' || (!billing.providers.stripe.enabled && billing.providers.crypto.enabled)) paymentProvider = 'crypto';
   }
 
   async function initializeBilling(): Promise<void> {
@@ -183,17 +194,32 @@
   }
 
   async function changePlan(plan: Plan): Promise<void> {
-    if (billing?.entitlement.provider === 'nowpayments' && billing.entitlement.status === 'past_due') return void startCheckout(plan);
+    if (billing?.entitlement.provider === 'nowpayments' && billing.entitlement.status === 'past_due') {
+      if (plan.id !== billing.entitlement.planId) {
+        showToast('Cancel the current crypto plan before choosing a different tier.', 'error');
+        return;
+      }
+      return void startCheckout(plan);
+    }
     if (billing?.entitlement.provider === 'nowpayments') {
       showToast('Crypto plan changes require cancellation and a new checkout.', 'error');
       return;
+    }
+    if (billing?.entitlement.legacy) {
+      const previousPlan = billing.currentPlan;
+      const previousAllowance = previousPlan?.dailyDecryptLimit === undefined ? 'unlimited new decrypts' : `${previousPlan.dailyDecryptLimit} new decrypts per rolling 24 hours`;
+      const newAllowance = plan.dailyDecryptLimit === undefined ? 'unlimited new decrypts' : `${plan.dailyDecryptLimit} new decrypts per rolling 24 hours`;
+      const currentSummary = `${previousPlan?.name ?? planLabel(billing.entitlement.planId)} · ${previousPlan ? fallbackPrice(previousPlan) : 'current price'}/month · ${previousAllowance}${previousPlan?.api ? ' · API access' : ''}${previousPlan && previousPlan.priority > 0 ? ' · higher priority' : ''}`;
+      const newSummary = `${plan.name} · ${fallbackPrice(plan)}/month · ${newAllowance}${plan.api ? ' · API access' : ''}${plan.priority > 0 ? ' · higher priority' : ''}`;
+      const confirmed = await confirmDialog(`Compare plans before switching:\nCurrent: ${currentSummary}\nNew: ${newSummary}\nThis permanently ends your grandfathered plan. Its price and benefits cannot be reclaimed. Continue?`, { confirmLabel: `Switch to ${plan.name}` });
+      if (!confirmed) return;
     }
     openingPlan = plan.id;
     try {
       const response = await fetch('/v1/billing/subscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planId: plan.id }),
+        body: JSON.stringify({ planId: plan.id, acknowledgeLegacyLoss: billing?.entitlement.legacy === true }),
       });
       const data = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) {
@@ -240,7 +266,12 @@
   }
 
   function cryptoReady(): boolean {
-    return billing?.providers.crypto.ready ?? false;
+    return billing?.providers.crypto.ready === true && billing.providers.crypto.minimumByAsset?.[cryptoAsset] !== undefined;
+  }
+
+  function cryptoReadyForPlan(plan: Plan): boolean {
+    const minimum = billing?.providers.crypto.minimumByAsset?.[cryptoAsset];
+    return cryptoReady() && minimum !== undefined && plan.amount >= minimum;
   }
 
   onMount(() => {
@@ -291,6 +322,14 @@
         </div>
       {/if}
     </div>
+    {#if billing?.entitlement.subscriptionId}
+      <div class="mt-4 rounded-xl border border-border bg-bg/50 px-3 py-3 text-sm">
+        <div class="flex flex-wrap items-center gap-2 font-medium">Your decrypt allowance {#if billing.entitlement.legacy}<Badge variant="secondary">Grandfathered</Badge>{/if}</div>
+        <div class="mt-1 text-muted">{billing.quota.limit === null ? 'Unlimited new decrypts' : `${billing.quota.remaining ?? 0} of ${billing.quota.limit} new decrypts available in the rolling 24-hour window`}. IPA Library downloads do not use this allowance.</div>
+        {#if billing.quota.nextAvailableAt && billing.quota.remaining === 0}<div class="mt-1 text-xs text-muted">Next slot opens {formatDate(new Date(billing.quota.nextAvailableAt).toISOString())}.</div>{/if}
+        {#if billing.entitlement.apiRatePerMinute}<div class="mt-1 text-xs text-muted">API: {billing.entitlement.apiRatePerMinute} requests per minute across your keys.</div>{/if}
+      </div>
+    {/if}
   </Card>
 
   {#if billing?.legacyBilling}
@@ -318,16 +357,19 @@
       </Card>
     {/if}
 
-    <div class="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
       {#each billing.plans as plan (plan.id)}
         {@const current = billing.entitlement.planId === plan.id}
-        {@const highlighted = plan.id === 'priority_api'}
+        {@const cryptoRenewal = billing.entitlement.provider === 'nowpayments' && billing.entitlement.status === 'past_due' && current}
+        {@const blockedCryptoChange = billing.entitlement.provider === 'nowpayments' && billing.entitlement.status === 'past_due' && !current}
+        {@const highlighted = plan.id === 'unlimited_priority' || plan.id === 'priority_api'}
         <Card class={highlighted ? 'border-accent shadow-lg shadow-accent/10' : current ? 'border-ok/50' : ''}>
           <div class="flex h-full min-h-80 flex-col">
-            <div class="mb-4 flex items-start justify-between gap-3"><div><div class="flex flex-wrap items-center gap-2"><h3 class="text-base font-semibold">{plan.name}</h3>{#if highlighted}<Badge>Best value</Badge>{/if}{#if current}<Badge variant="success">Current</Badge>{/if}</div><p class="mt-1 text-sm text-muted">{plan.description}</p></div>{#if plan.id === 'priority' || plan.id === 'priority_api'}<Zap class="h-5 w-5 shrink-0 text-accent" />{:else if plan.id === 'api'}<KeyRound class="h-5 w-5 shrink-0 text-accent" />{:else}<Gauge class="h-5 w-5 shrink-0 text-accent" />{/if}</div>
-            <div class="mb-5"><span class="text-3xl font-semibold">{fallbackPrice(plan)}</span><span class="text-sm text-muted">/30 days</span></div>
-            <div class="mb-6 flex flex-1 flex-col gap-2 text-sm"><div class="flex items-center gap-2"><Check class="h-4 w-4 text-ok" /> Dashboard decrypts</div>{#if plan.id === 'api' || plan.id === 'priority_api'}<div class="flex items-center gap-2"><Check class="h-4 w-4 text-ok" /> Decrypt API + IPA library</div>{:else}<div class="flex items-center gap-2 text-muted"><X class="h-4 w-4" /> Decrypt API + IPA library</div>{/if}{#if plan.id === 'priority' || plan.id === 'priority_api'}<div class="flex items-center gap-2"><Check class="h-4 w-4 text-ok" /> High queue priority</div>{:else}<div class="flex items-center gap-2 text-muted"><X class="h-4 w-4" /> High queue priority</div>{/if}<div class="mt-2 flex items-center gap-2 text-xs text-muted"><ShieldCheck class="h-4 w-4 text-accent" /> {paymentProvider === 'crypto' ? 'Hosted NOWPayments invoice' : 'Hosted Stripe checkout'}</div></div>
-            <Button class="w-full" variant={highlighted ? 'default' : 'secondary'} disabled={current || openingPlan !== undefined || (!billing.enabled && !billing.entitlement.subscriptionId) || (paymentProvider === 'crypto' && !cryptoReady())} loading={openingPlan === plan.id} onclick={() => choosePlan(plan)}>{current ? 'Current plan' : billing.entitlement.subscriptionId ? billing.entitlement.provider === 'nowpayments' ? billing.entitlement.status === 'past_due' ? 'Renew with crypto' : 'Stop crypto renewal first' : `Switch to ${plan.name}` : 'Subscribe'}</Button>
+            <div class="mb-4 flex items-start justify-between gap-3"><div><div class="flex flex-wrap items-center gap-2"><h3 class="text-base font-semibold">{plan.name}</h3>{#if highlighted}<Badge>Highest priority</Badge>{/if}{#if current}<Badge variant="success">Current</Badge>{/if}</div><p class="mt-1 text-sm text-muted">{plan.description}</p></div>{#if plan.priority > 0}<Zap class="h-5 w-5 shrink-0 text-accent" />{:else if plan.api}<KeyRound class="h-5 w-5 shrink-0 text-accent" />{:else}<Gauge class="h-5 w-5 shrink-0 text-accent" />{/if}</div>
+            <div class="mb-5"><span class="text-3xl font-semibold">{fallbackPrice(plan)}</span><span class="text-sm text-muted">{paymentProvider === 'crypto' ? '/30 days' : '/month'}</span></div>
+            <div class="mb-6 flex flex-1 flex-col gap-2 text-sm"><div class="flex items-center gap-2"><Check class="h-4 w-4 text-ok" /> IPA Library access</div><div class="flex items-center gap-2"><Check class="h-4 w-4 text-ok" /> {plan.dailyDecryptLimit === undefined ? 'Unlimited new decrypts' : `${plan.dailyDecryptLimit} new decrypts per rolling 24 hours`}</div>{#if plan.api}<div class="flex items-center gap-2"><Check class="h-4 w-4 text-ok" /> API access{plan.apiRatePerMinute ? ` · ${plan.apiRatePerMinute} requests/min` : ''}</div>{:else}<div class="flex items-center gap-2 text-muted"><X class="h-4 w-4" /> API access</div>{/if}{#if plan.priority > 0}<div class="flex items-center gap-2"><Check class="h-4 w-4 text-ok" /> Higher queue priority</div>{:else}<div class="flex items-center gap-2 text-muted"><X class="h-4 w-4" /> Higher queue priority</div>{/if}<div class="mt-2 flex items-center gap-2 text-xs text-muted"><ShieldCheck class="h-4 w-4 text-accent" /> {paymentProvider === 'crypto' ? 'Hosted NOWPayments invoice' : 'Hosted Stripe checkout'}</div></div>
+            {#if paymentProvider === 'crypto' && !cryptoReadyForPlan(plan)}<div class="mb-2 text-xs text-muted">Crypto is unavailable at this price for {cryptoAsset}. Choose card or bank checkout.</div>{/if}
+            <Button class="w-full" variant={highlighted ? 'default' : 'secondary'} disabled={(current && !cryptoRenewal) || blockedCryptoChange || openingPlan !== undefined || (!billing.enabled && !billing.entitlement.subscriptionId) || (paymentProvider === 'crypto' && !cryptoReadyForPlan(plan))} loading={openingPlan === plan.id} onclick={() => choosePlan(plan)}>{cryptoRenewal ? 'Renew with crypto' : current ? 'Current plan' : blockedCryptoChange ? 'Cancel current plan first' : billing.entitlement.subscriptionId ? billing.entitlement.provider === 'nowpayments' ? 'Stop crypto renewal first' : `Switch to ${plan.name}` : 'Subscribe'}</Button>
           </div>
         </Card>
       {/each}

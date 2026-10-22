@@ -4,6 +4,7 @@
   import Button from '#lib/components/ui/Button.svelte';
   import Input from '#lib/components/ui/Input.svelte';
   import { createSignedTriggerIntegration, fetchSignedTriggerIntegrations, revokeSignedTriggerIntegration, rotateSignedTriggerIntegration, type SignedTriggerIntegration } from '#lib/api';
+  import IntegrationOwnershipControl from '#features/administration/IntegrationOwnershipControl.svelte';
   import { projectSelectionState } from '#lib/projectSelection.svelte';
   import { confirmDialog, showToast } from '#lib/ui.svelte';
 
@@ -70,6 +71,7 @@
           <div><div class="font-medium">{integration.projectId} · {integration.bundleIds.join(', ')}</div><div class="text-muted">{integration.id} · {integration.sources.join(' / ')} · {integration.enabled ? 'Active' : 'Revoked'}</div></div>
           {#if integration.enabled}<div class="flex gap-1"><Button size="sm" variant="secondary" disabled={busy} onclick={() => void rotate(integration.id)}>Rotate</Button><Button size="sm" variant="secondary" disabled={busy} onclick={() => void revoke(integration.id)}>Revoke</Button></div>{/if}
         </div>
+        <IntegrationOwnershipControl integrationId={integration.id} ownerName={integration.billingOwnerDisplayName} transferName={integration.billingOwnerTransferDisplayName} onSaved={load} />
         <AuditRibbon target={integration.id} />
       </div>
     {/each}

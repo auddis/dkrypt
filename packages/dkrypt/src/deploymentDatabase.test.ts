@@ -11,6 +11,8 @@ function rewindToSchemaVersion16(database: ReturnType<typeof openStateDatabase>)
   rewindApiKeySearchMigration(database.db);
   rewindSessionSearchMigration(database.db);
   database.db.exec(`
+    DROP INDEX decrypt_quota_by_owner_time;
+    DROP TABLE decrypt_quota_ledger;
     DROP INDEX billing_events_by_provider_event;
     DROP INDEX billing_events_by_processed_at;
     DROP TABLE billing_customers;
@@ -32,7 +34,7 @@ function rewindToSchemaVersion16(database: ReturnType<typeof openStateDatabase>)
     ALTER TABLE billing_events DROP COLUMN event_id;
     ALTER TABLE billing_events DROP COLUMN occurred_at;
     ALTER TABLE billing_events DROP COLUMN processed_at;
-    DELETE FROM schema_migrations WHERE version IN (17, 18, 19, 20, 21, 22, 23, 24, 25);
+    DELETE FROM schema_migrations WHERE version IN (17, 18, 19, 20, 21, 22, 23, 24, 25, 26);
   `);
 }
 

@@ -37,6 +37,7 @@ export interface Job {
   minimumOsVersion?: string;
   source: JobSource;
   queuedBy?: string;
+  billingOwnerId?: string;
   apiKeyId?: string;
   preferredDeviceId?: string;
   priority: number;

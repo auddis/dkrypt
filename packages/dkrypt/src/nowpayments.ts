@@ -133,6 +133,14 @@ export class NowPaymentsClient {
     throw new NowPaymentsApiError('NOWPayments returned an invalid currency list', 200, false);
   }
 
+  async getMinimumFiatAmount(currency: string, payCurrency: string): Promise<number> {
+    const query = new URLSearchParams({ currency_from: currency.toLowerCase(), currency_to: payCurrency.toLowerCase(), fiat_equivalent: currency.toLowerCase() });
+    const payload = await this.request<{ min_amount?: number | string; fiat_equivalent?: number | string }>(`/min-amount?${query}`);
+    const minimum = Number(payload?.fiat_equivalent);
+    if (!Number.isFinite(minimum) || minimum <= 0) throw new NowPaymentsApiError('NOWPayments did not provide a valid fiat minimum', 200, false);
+    return minimum;
+  }
+
   private async request<T>(path: string, input: { method?: string; body?: unknown } = {}): Promise<T> {
     if (!this.apiKey) throw new NowPaymentsApiError('NOWPayments API key is not configured', 0, false);
     const request = (apiKey: string) => this.fetchFn(`${this.baseUrl}${path}`, {
@@ -169,6 +177,16 @@ export class NowPaymentsClient {
 }
 
 let readinessCache: { expiresAt: number; status: NowPaymentsProviderStatus } | undefined;
+const minimumCache = new Map<string, { value: number; expiresAt: number }>();
+
+export async function getNowPaymentsMinimumFiat(asset: string, currency = config.nowpaymentsPriceCurrency, forceRefresh = false, client = new NowPaymentsClient()): Promise<number> {
+  const key = `${currency.toUpperCase()}:${asset.toUpperCase()}`;
+  const cached = minimumCache.get(key);
+  if (!forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
+  const value = await client.getMinimumFiatAmount(currency, asset);
+  minimumCache.set(key, { value, expiresAt: Date.now() + 60_000 });
+  return value;
+}
 
 export async function getNowPaymentsProviderStatus(client = new NowPaymentsClient()): Promise<NowPaymentsProviderStatus> {
   const now = Date.now();

@@ -25,6 +25,7 @@ import {
 } from '#identity.js';
 import { log } from '#logger.js';
 import type { JobTimelineEvent, TestFlightJobSource } from '#jobs/types.js';
+import { exportDecryptQuotaLedger } from '#jobs/repository.js';
 import { createAccountRepository, isAllowedUserRecord, isRoleRecord, isUserMfaRecord, validateAccountCollections, type AccountCollections } from '#store/accountRepository.js';
 import { createBillingRepository } from '#store/billingRepository.js';
 import { createApiKeyRepository, isApiKeyRecordShape } from '#store/apiKeyRepository.js';
@@ -309,6 +310,8 @@ export interface PersistedSettings extends Partial<SchedulerSettings> {
 
 export interface AppWatch {
   id: string;
+  billingOwnerId?: string;
+  billingOwnerTransfer?: { userId: string; requestedBy: string; requestedAt: number };
   projectId?: string;
   bundleId: string;
   repo: string;
@@ -556,6 +559,8 @@ export type AuditAction =
   | 'watch.update'
   | 'watch.remove'
   | 'watch.import'
+  | 'watch.billing-owner-request'
+  | 'watch.billing-owner-accept'
   | 'device.add'
   | 'device.update'
   | 'device.remove'
@@ -602,6 +607,8 @@ export type AuditAction =
   | 'integration.create'
   | 'integration.rotate'
   | 'integration.revoke'
+  | 'integration.billing-owner-request'
+  | 'integration.billing-owner-accept'
   | 'auth.account.link'
   | 'auth.account.merge';
 
@@ -2325,6 +2332,11 @@ export function mergeUserAccounts(targetUsername: string, sourceUsername: string
   for (const subscription of state.testFlightSubscriptions) {
     if (subscription.requestedBy === sourceId) subscription.requestedBy = targetId;
   }
+  for (const watch of state.watches) {
+    if (watch.billingOwnerId === sourceId) watch.billingOwnerId = targetId;
+    if (watch.billingOwnerTransfer?.userId === sourceId) watch.billingOwnerTransfer.userId = targetId;
+    if (watch.billingOwnerTransfer?.requestedBy === sourceId) watch.billingOwnerTransfer.requestedBy = targetId;
+  }
   const sourcePrefs = state.userPrefs[sourceId];
   const targetPrefs = state.userPrefs[targetId];
   if (sourcePrefs || targetPrefs) state.userPrefs[targetId] = { ...(sourcePrefs ?? {}), ...(targetPrefs ?? {}) };
@@ -3055,6 +3067,7 @@ export function createWatch(input: CreateWatchInput, actor: string): { ok: boole
   const dispatch = normalizedWatchInput(input);
   const watch: AppWatch = {
     id: randomUUID(),
+    billingOwnerId: actor,
     projectId,
     bundleId: input.bundleId,
     ...dispatch,
@@ -3103,6 +3116,44 @@ export function updateWatch(id: string, patch: Partial<CreateWatchInput>, actor:
   return { ok: true, watch };
 }
 
+export function requestWatchBillingOwnerTransfer(id: string, requestedUserId: string, actor: string): { ok: boolean; watch?: AppWatch; error?: string } {
+  materializeWatches();
+  const watch = state.watches.find((candidate) => candidate.id === id);
+  if (!watch) return { ok: false, error: 'watch not found' };
+  const userId = requestedUserId.trim().toLowerCase();
+  if (userId !== 'root' && !state.allowedUsers.some((user) => user.username === userId)) return { ok: false, error: 'recipient account not found' };
+  if (userId !== 'root' && !userCanAccessProject(userId, watch.projectId ?? DEFAULT_PROJECT_ID)) return { ok: false, error: 'recipient cannot access this project' };
+  if (userId !== 'root' && !hasPermission(getUserEffectivePermissions(userId), PermissionFlag.viewAutomation | PermissionFlag.manageAutomation)) return { ok: false, error: 'recipient needs scheduler access to review ownership' };
+  if (userId !== 'root' && !hasPermission(getUserEffectivePermissions(userId), PermissionFlag.requestDecrypt)) return { ok: false, error: 'recipient needs decrypt access before accepting ownership' };
+  const previous = structuredClone(watch);
+  if (userId === actor.toLowerCase()) {
+    watch.billingOwnerId = userId;
+    watch.billingOwnerTransfer = undefined;
+  } else {
+    watch.billingOwnerTransfer = { userId, requestedBy: actor, requestedAt: Date.now() };
+  }
+  watch.updatedAt = Math.max(Date.now(), watch.updatedAt + 1);
+  persistNow([], (database) => { recordWatchRevision(watch, actor, 'updated', previous, database); });
+  recordAudit(actor, 'watch.billing-owner-request', id, userId);
+  return { ok: true, watch };
+}
+
+export function acceptWatchBillingOwnerTransfer(id: string, actor: string): { ok: boolean; watch?: AppWatch; error?: string } {
+  materializeWatches();
+  const watch = state.watches.find((candidate) => candidate.id === id);
+  if (!watch) return { ok: false, error: 'watch not found' };
+  if (watch.billingOwnerTransfer?.userId !== actor.toLowerCase()) return { ok: false, error: 'no ownership request is awaiting this account' };
+  if (actor !== 'root' && !userCanAccessProject(actor, watch.projectId ?? DEFAULT_PROJECT_ID)) return { ok: false, error: 'recipient cannot access this project' };
+  if (actor !== 'root' && !hasPermission(getUserEffectivePermissions(actor), PermissionFlag.requestDecrypt)) return { ok: false, error: 'decrypt access is required to accept ownership' };
+  const previous = structuredClone(watch);
+  watch.billingOwnerId = actor.toLowerCase();
+  watch.billingOwnerTransfer = undefined;
+  watch.updatedAt = Math.max(Date.now(), watch.updatedAt + 1);
+  persistNow([], (database) => { recordWatchRevision(watch, actor, 'updated', previous, database); });
+  recordAudit(actor, 'watch.billing-owner-accept', id, actor);
+  return { ok: true, watch };
+}
+
 export function deleteWatch(id: string, actor: string): boolean {
   materializeWatches();
   const removed = state.watches.find((watch) => watch.id === id);
@@ -3127,7 +3178,8 @@ export function markWatchScheduleRun(id: string, timestamp = Date.now()): boolea
 
 export function isWatchSchedulable(watch: AppWatch): boolean {
   const project = getProject(watch.projectId ?? DEFAULT_PROJECT_ID);
-  return watch.enabled && project !== undefined && project.archivedAt === undefined && watch.bundleId !== '' && getWatchDispatchTargets(watch).length > 0 && config.ghToken !== '';
+  const ownerReady = !watch.billingOwnerId || watch.billingOwnerId === 'root' || hasPermission(getUserEffectivePermissions(watch.billingOwnerId), PermissionFlag.requestDecrypt);
+  return watch.enabled && ownerReady && project !== undefined && project.archivedAt === undefined && watch.bundleId !== '' && getWatchDispatchTargets(watch).length > 0 && config.ghToken !== '';
 }
 
 export function getWatchConfigIssues(watch: AppWatch): string[] {
@@ -3137,6 +3189,7 @@ export function getWatchConfigIssues(watch: AppWatch): string[] {
   const issues: string[] = [];
 
   if (!project || project.archivedAt !== undefined) issues.push('The assigned project is unavailable; restore it or choose an active project.');
+  if (watch.billingOwnerId && watch.billingOwnerId !== 'root' && !hasPermission(getUserEffectivePermissions(watch.billingOwnerId), PermissionFlag.requestDecrypt)) issues.push('The billing owner no longer has decrypt access; restore their access or transfer ownership before this watch can dispatch.');
 
   if (fieldsSet > 0 && fieldsSet < 2) {
     const missing = [!watch.bundleId && 'watch bundle ID', !hasRepo && 'repo'].filter((v): v is string => typeof v === 'string');
@@ -4276,7 +4329,7 @@ export function markNotificationsRead(userId: string, ids?: string[]): number {
   return changed;
 }
 
-const BACKUP_VERSION = 9;
+const BACKUP_VERSION = 10;
 
 type BackupDeviceRecord = Omit<DeviceRecord, 'transport' | 'host' | 'udid'>
   & { transport: DeviceTransport }
@@ -4312,6 +4365,7 @@ export interface BackupPayload {
   passkeys: PasskeyCredential[];
   billing: BillingSnapshot;
   identities: IdentitySnapshot;
+  decryptQuotaLedger: ReturnType<typeof exportDecryptQuotaLedger>;
 }
 
 function exportArtifactProjectLinks(): ArtifactProjectLink[] {
@@ -4402,6 +4456,7 @@ export function exportBackup(): BackupPayload {
     passkeys: state.passkeys.map((credential) => ({ ...credential, transports: credential.transports ? [...credential.transports] : undefined })),
     billing: exportBillingSnapshot(),
     identities: exportIdentitySnapshot(),
+    decryptQuotaLedger: exportDecryptQuotaLedger(),
   };
 }
 
@@ -4812,6 +4867,7 @@ interface ValidatedBackupPayload {
   passkeys: PasskeyCredential[];
   billing: BillingSnapshot;
   identities: IdentitySnapshot;
+  decryptQuotaLedger: ReturnType<typeof exportDecryptQuotaLedger>;
 }
 
 function isArtifactProjectLinkShape(value: unknown): value is ArtifactProjectLink {
@@ -4827,8 +4883,11 @@ function validateBackupPayload(raw: unknown): { ok: true; payload: ValidatedBack
   if (typeof raw !== 'object' || raw === null) return { ok: false, error: 'not a valid backup file' };
   const b = raw as Record<string, unknown>;
 
-  if (b.backupVersion !== 3 && b.backupVersion !== 4 && b.backupVersion !== 5 && b.backupVersion !== 6 && b.backupVersion !== 7 && b.backupVersion !== 8 && b.backupVersion !== BACKUP_VERSION) {
-    return { ok: false, error: `unsupported backup version (expected 3, 4, 5, 6, 7, 8, or ${BACKUP_VERSION})` };
+  if (b.backupVersion !== 3 && b.backupVersion !== 4 && b.backupVersion !== 5 && b.backupVersion !== 6 && b.backupVersion !== 7 && b.backupVersion !== 8 && b.backupVersion !== 9 && b.backupVersion !== BACKUP_VERSION) {
+    return { ok: false, error: `unsupported backup version (expected 3, 4, 5, 6, 7, 8, 9, or ${BACKUP_VERSION})` };
+  }
+  if (b.backupVersion === BACKUP_VERSION && (!Array.isArray(b.decryptQuotaLedger) || !b.decryptQuotaLedger.every((entry) => typeof entry === 'object' && entry !== null && typeof entry.jobId === 'string' && typeof entry.ownerId === 'string' && Number.isFinite(entry.admittedAt) && ['reserved', 'consumed'].includes(entry.state)))) {
+    return { ok: false, error: 'decrypt quota ledger is missing or malformed' };
   }
   if (!Array.isArray(b.allowedUsers) || !b.allowedUsers.every(isAllowedUserRecord)) {
     return { ok: false, error: 'allowedUsers is missing or malformed' };
@@ -4948,6 +5007,7 @@ function validateBackupPayload(raw: unknown): { ok: true; payload: ValidatedBack
         ? b.billing
         : { customers: [], subscriptions: [], cryptoCheckouts: [], cryptoCharges: [], processedEvents: [] },
       identities: isIdentitySnapshot(b.identities) ? b.identities : { profiles: [] },
+      decryptQuotaLedger: Array.isArray(b.decryptQuotaLedger) ? b.decryptQuotaLedger as ReturnType<typeof exportDecryptQuotaLedger> : [],
     },
   };
 }
@@ -5042,6 +5102,7 @@ function backupDatabaseCollections(
     ...identitySnapshotCollections(payload.identities),
     ...accountRepository.collectionReplacements(accounts),
     projectCollectionReplacement(projects),
+    { table: 'decrypt_quota_ledger', rows: payload.decryptQuotaLedger.map((entry) => ({ id: entry.jobId, payload: entry, updatedAt: entry.admittedAt })) },
   ];
 }
 
@@ -5182,6 +5243,12 @@ function temporaryDatabaseRestoreCheck(payload: ValidatedBackupPayload, restored
         return { label: 'Temporary SQLite restore', ok: false, detail: 'Billing records did not survive a database reopen' };
       }
       const billingRepository = createBillingRepository(database.db);
+      const quotaRows = database.db.query('SELECT job_id, owner_id, admitted_at, state FROM decrypt_quota_ledger ORDER BY job_id').all() as Array<{ job_id: string; owner_id: string; admitted_at: number; state: string }>;
+      const expectedQuotaByJobId = new Map(payload.decryptQuotaLedger.map((entry) => [entry.jobId, entry]));
+      if (quotaRows.length !== expectedQuotaByJobId.size || quotaRows.some((row) => {
+        const expected = expectedQuotaByJobId.get(row.job_id);
+        return !expected || row.owner_id !== expected.ownerId || row.admitted_at !== expected.admittedAt || row.state !== expected.state;
+      })) return { label: 'Temporary SQLite restore', ok: false, detail: 'Decrypt quota ledger did not survive a database reopen' };
       const normalizedEntitlementHistory = expectedBilling.entitlementHistory ?? [];
       if (
         !sameRecordsByKey(billingRepository.listCustomers(), expectedBilling.customers, (record) => `${record.provider}:${record.customerId}`) ||

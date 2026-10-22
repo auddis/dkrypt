@@ -46,6 +46,8 @@ export function buildDashboardOverview(permissions: bigint, userId: string, proj
     delete publicWatch.lastScheduledAt;
     return {
       ...publicWatch,
+      billingOwnerDisplayName: watch.billingOwnerId ? getAuthProfile(watch.billingOwnerId)?.displayName ?? (watch.billingOwnerId === 'root' ? 'Operator' : watch.billingOwnerId) : 'System-owned',
+      billingOwnerTransferDisplayName: watch.billingOwnerTransfer ? getAuthProfile(watch.billingOwnerTransfer.userId)?.displayName ?? watch.billingOwnerTransfer.userId : undefined,
       timezone: effectiveTimeZone(watch.timezone),
       missedRunPolicy: watch.missedRunPolicy ?? 'skip',
       nextRunAt: statusWatches[index]?.nextRunAt,

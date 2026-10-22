@@ -61,7 +61,7 @@ import { startNotificationDigestScheduler } from '#notify.js';
 import { closeArtifactDatabase, initializeArtifactStore } from '#artifacts.js';
 import { startTestFlightSubscriptionPoller, stopTestFlightSubscriptionPoller } from '#testflightSubscriptions.js';
 import { startCryptoBillingPoller, stopCryptoBillingPoller } from '#cryptoBilling.js';
-import { closeBillingDatabase } from '#billing.js';
+import { closeBillingDatabase, listPlans } from '#billing.js';
 import { closeIdentityDatabase } from '#identity.js';
 import { closeIdempotencyDatabase } from '#idempotency.js';
 import { closeWebhookInboxDatabase } from '#webhookInbox.js';
@@ -70,6 +70,7 @@ import { stopNotificationDigestScheduler } from '#notify.js';
 import { closeDashboardConnections } from '#events.js';
 import { startSpan, startTelemetry, stopTelemetry, traceContextFromHeader, type SpanHandle } from '#telemetry.js';
 import { FixedWindowRateLimiter } from '#util/rateLimit.js';
+import { DailyDecryptLimitError } from '#jobs/repository.js';
 import { createHttpErrorEnvelope } from '#util/httpResponse.js';
 import { startRustDeviceEventMonitoring } from '#deviceBridgeEvents.js';
 import { createPublicOpenApiDocument } from '#publicApi.js';
@@ -157,6 +158,11 @@ export async function buildServer(options: {
     if (error instanceof JobsShuttingDownError) {
       log.warn('job submission rejected during graceful shutdown', { requestId: request.id });
       sendServiceDraining(reply, request.id);
+      return;
+    }
+    if (error instanceof DailyDecryptLimitError) {
+      reply.header('Retry-After', String(Math.max(1, Math.ceil((error.nextAvailableAt - Date.now()) / 1000))));
+      reply.code(429).send({ error: error.message, code: error.code, message: error.message, requestId: request.id, retryable: true, remediation: { nextAvailableAt: error.nextAvailableAt } });
       return;
     }
     const statusCode = typeof (error as { statusCode?: unknown })?.statusCode === 'number' ? (error as { statusCode: number }).statusCode : 500;
@@ -311,6 +317,8 @@ export async function buildServer(options: {
     for (const route of ['/', '/pricing', '/terms', '/privacy', '/refund-policy', '/contact', '/status']) {
       server.get(route, (request, reply) => reply.type('text/html').send(renderPublicPage(indexHtml, request.url)));
     }
+
+    server.get('/pricing/catalog.json', (_request, reply) => reply.header('Cache-Control', 'no-store').send({ plans: listPlans().map(({ id, name, description, amount, currency, api, priority, dailyDecryptLimit, apiRatePerMinute }) => ({ id, name, description, amount, currency, api, priority, dailyDecryptLimit, apiRatePerMinute })) }));
 
     server.get('/favicon.svg', (_request, reply) => reply.header('Cache-Control', 'public, max-age=86400').type('image/svg+xml').sendFile('favicon.svg', publicDir));
     server.get('/favicon.png', (_request, reply) => reply.header('Cache-Control', 'public, max-age=86400').type('image/png').sendFile('favicon.png', publicDir));

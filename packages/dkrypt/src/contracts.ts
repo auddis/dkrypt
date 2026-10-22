@@ -387,6 +387,7 @@ const BillingProviderResponse = object({
   provider: Type.Optional(Type.Literal('nowpayments')),
   settlementCurrency: Type.Optional(Type.String()),
   assets: Type.Optional(Type.Array(Type.String())),
+  minimumByAsset: Type.Optional(Type.Record(Type.String(), Type.Number())),
   missingConfiguration: Type.Optional(Type.Array(Type.String())),
   issues: Type.Optional(Type.Array(Type.String())),
 });
@@ -397,11 +398,13 @@ const BillingResponse = object({
   managedPayments: Type.Boolean(),
   missingConfiguration: Type.Array(Type.String()),
   providers: object({ stripe: BillingProviderResponse, crypto: BillingProviderResponse }),
-  plans: Type.Array(object({ id: Identifier, name: Type.String(), description: Type.String(), amount: Type.Number(), currency: Type.String(), priceId: Type.String() })),
+  plans: Type.Array(object({ id: Identifier, name: Type.String(), description: Type.String(), amount: Type.Number(), currency: Type.String(), priceId: Type.String(), api: Type.Boolean(), priority: Type.Number(), legacy: Type.Boolean(), dailyDecryptLimit: Type.Optional(Type.Number()), apiRatePerMinute: Type.Optional(Type.Number()) })),
+  currentPlan: Type.Optional(object({ id: Identifier, name: Type.String(), description: Type.String(), amount: Type.Number(), currency: Type.String(), api: Type.Boolean(), priority: Type.Number(), legacy: Type.Boolean(), dailyDecryptLimit: Type.Optional(Type.Number()), apiRatePerMinute: Type.Optional(Type.Number()) })),
   customerId: Type.Optional(Type.String()),
   customerEmail: Type.Optional(Type.String()),
   legacyBilling: Type.Boolean(),
   entitlement: JsonObject,
+  quota: object({ limit: Type.Union([Type.Number(), Type.Null()]), used: Type.Number(), remaining: Type.Union([Type.Number(), Type.Null()]), nextAvailableAt: Type.Optional(Type.Number()), legacy: Type.Optional(Type.Boolean()), apiRatePerMinute: Type.Optional(Type.Number()) }),
 });
 const BillingSubscriptionPage = object({ subscriptions: Type.Array(JsonObject), total: Type.Integer({ minimum: 0 }), nextCursor: PageCursor });
 const ArtifactPage = object({ artifacts: Type.Array(JsonObject), total: Type.Integer({ minimum: 0 }), totalBytes: Type.Number(), maxBytes: Type.Number(), nextCursor: PageCursor });
@@ -489,6 +492,7 @@ const BillingProviderStatusResponse = object({
     enabled: Type.Boolean(),
     environment: ProviderEnvironment,
     missingConfiguration: Type.Array(Type.String()),
+    newCatalogMissingConfiguration: Type.Array(Type.String()),
     webhook: StripeWebhookHealthResponse,
   }),
   crypto: object({

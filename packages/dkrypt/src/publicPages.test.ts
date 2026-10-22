@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { renderPublicPage } from '#publicPages.js';
+import { config } from '#config.js';
 
 const shell = '<html><body><div id="app-root"></div></body></html>';
 const browserShell = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
@@ -35,11 +36,15 @@ describe('renderPublicPage', () => {
   });
 
   test('renders distinct monthly prices for every paid tier', () => {
-    const rendered = renderPublicPage(shell, '/pricing');
-
-    expect(rendered).toContain('Regular — €5/month');
-    expect(rendered).toContain('Priority — €10/month');
-    expect(rendered).toContain('API — €15/month');
-    expect(rendered).toContain('Priority API — €20/month');
+    const previous = config.billingCatalogRollout;
+    config.billingCatalogRollout = 'all';
+    try {
+      const rendered = renderPublicPage(shell, '/pricing');
+      for (const label of ['Access — €2.50/month', 'Standard — €5/month', 'Plus — €10/month', 'Developer — €15/month', 'Unlimited — €20/month', 'Unlimited Priority — €30/month']) expect(rendered).toContain(label);
+      expect(rendered).not.toContain('Regular — €5/month');
+      expect(rendered).toContain('IPA Library access');
+    } finally {
+      config.billingCatalogRollout = previous;
+    }
   });
 });

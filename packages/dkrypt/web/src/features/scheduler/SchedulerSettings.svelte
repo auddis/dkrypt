@@ -10,11 +10,14 @@
 	} from "lucide-svelte";
 	import EmptyState from "#components/EmptyState.svelte";
 	import AuditRibbon from "#components/AuditRibbon.svelte";
+	import PendingIntegrationOwnership from "#features/administration/PendingIntegrationOwnership.svelte";
 	import AppIcon from "#components/AppIcon.svelte";
 	import RelativeTime from "#components/RelativeTime.svelte";
 	import {
 		createWatch,
 		deleteWatch,
+		acceptWatchOwnership,
+		fetchEligibleWatchOwners,
 		fetchSettings,
 		fetchWatches,
 		fetchProjects,
@@ -36,6 +39,7 @@
 		restoreWatchRevision,
 		previewWatchDispatchSource,
 		previewWatchDispatchDraft,
+		requestWatchOwnership,
 		validateWatchDispatchDraft,
 		saveSettings,
 		searchApps,
@@ -317,6 +321,12 @@ import { clearFormDraft, readFormDraft, setFormUnsaved, writeFormDraft } from "#
 	};
 
 	let watchDialogOpen = $state(false);
+	let ownershipDialogOpen = $state(false);
+	let ownershipWatch = $state<AppWatch | null>(null);
+	let ownershipUsers = $state<Array<{ id: string; name: string }>>([]);
+	let ownershipTargetId = $state("");
+	let ownershipLoading = $state(false);
+	let ownershipSaving = $state(false);
 	let watchDraftStorageKey = $state("");
 	let initialWatchDraft = $state("");
 	let maintenanceWindowStart = $state("");
@@ -976,6 +986,40 @@ import { clearFormDraft, readFormDraft, setFormUnsaved, writeFormDraft } from "#
 		}
 	}
 
+	async function openWatchOwnership(watch: AppWatch): Promise<void> {
+		ownershipWatch = watch;
+		ownershipTargetId = watch.billingOwnerId ?? "";
+		ownershipDialogOpen = true;
+		ownershipLoading = true;
+		try {
+			ownershipUsers = (await fetchEligibleWatchOwners(watch.id)).users;
+			const currentUserId = sessionState.sub;
+			if (!ownershipTargetId && currentUserId && ownershipUsers.some((user) => user.id === currentUserId)) ownershipTargetId = currentUserId;
+		} catch (error) {
+			showToast(error instanceof Error ? error.message : "Could not load eligible owners", "error");
+		} finally {
+			ownershipLoading = false;
+		}
+	}
+
+	async function submitWatchOwnership(): Promise<void> {
+		if (!ownershipWatch || !ownershipTargetId) return;
+		ownershipSaving = true;
+		try {
+			const result = await requestWatchOwnership(ownershipWatch.id, ownershipTargetId);
+			ownershipDialogOpen = false;
+			showToast(ownershipTargetId === sessionState.sub ? "Automation ownership assigned to you" : "Ownership request sent; the recipient must accept", "success");
+			ownershipWatch = result.data;
+		} finally {
+			ownershipSaving = false;
+		}
+	}
+
+	async function acceptWatchOwnerTransfer(watch: AppWatch): Promise<void> {
+		const result = await acceptWatchOwnership(watch.id);
+		if (result.ok) showToast("Automation ownership accepted", "success");
+	}
+
   async function toggleWatchEnabled(w: AppWatch): Promise<void> {
     const result = await updateWatch(w.id, { enabled: !w.enabled, expectedUpdatedAt: w.updatedAt }, null);
 		if (!result.ok) return;
@@ -1311,6 +1355,7 @@ import { clearFormDraft, readFormDraft, setFormUnsaved, writeFormDraft } from "#
 </script>
 
 <div class="flex flex-col gap-4">
+	<PendingIntegrationOwnership />
 	<AdvancedSection label="settings.automationDiagnostics">
 	<Card title="Automation health">
 		<div class="flex flex-wrap items-center gap-2 text-sm">
@@ -1424,6 +1469,7 @@ import { clearFormDraft, readFormDraft, setFormUnsaved, writeFormDraft } from "#
 										>Edit</Button
 									>
 									<Button size="sm" variant="secondary" onclick={() => void openWatchRevisions(w)}>History</Button>
+									<Button size="sm" variant="secondary" onclick={() => void openWatchOwnership(w)}>Owner</Button>
 									<Button
 										size="sm"
 										variant="destructive"
@@ -1466,6 +1512,15 @@ import { clearFormDraft, readFormDraft, setFormUnsaved, writeFormDraft } from "#
 								<span class="font-sans">{Math.round((healthForWatch(w.id)?.medianSchedulerJobDurationMs ?? 0) / 60_000)}m median decrypt</span>
 							{/if}
 						</div>
+						<div class="mt-1 text-[11px] text-muted">Quota owner: {w.billingOwnerDisplayName ?? "System-owned"}</div>
+						{#if w.billingOwnerTransfer}
+							<div class="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-warn/40 bg-warn/5 px-2.5 py-2 text-xs">
+								<span class="min-w-0 flex-1">Ownership request pending for {w.billingOwnerTransferDisplayName ?? w.billingOwnerTransfer.userId}.</span>
+								{#if w.billingOwnerTransfer.userId === sessionState.sub}
+									<Button size="sm" loading={ownershipSaving} onclick={() => void acceptWatchOwnerTransfer(w)}>Accept ownership</Button>
+								{/if}
+							</div>
+						{/if}
 						{#if w.configIssues.length > 0}
 							<div class="mt-1.5 text-xs text-warn">
 								{w.configIssues.join(" ")}
@@ -2026,6 +2081,33 @@ import { clearFormDraft, readFormDraft, setFormUnsaved, writeFormDraft } from "#
 				{:else}<div class="mt-1">{revision.changedFields.join(', ') || 'No configuration fields changed'}</div>{/if}
 			</div>
 		{/each}
+	</div>
+</Dialog>
+
+<Dialog open={ownershipDialogOpen} onOpenChange={(open) => (ownershipDialogOpen = open)} class="max-w-md">
+	<h2 class="text-sm font-semibold">Automation billing owner</h2>
+	<p class="mt-1 text-xs text-muted">New decrypts from this watch use the owner’s plan and daily allowance. A transfer to someone else takes effect only after they accept it.</p>
+	{#if ownershipWatch}
+		<div class="mt-3 rounded-md border border-border p-2.5 text-xs">
+			<div class="font-medium">{appDisplayName(ownershipWatch.bundleId)}</div>
+			<div class="text-muted">Current owner: {ownershipWatch.billingOwnerDisplayName ?? "System-owned"}</div>
+		</div>
+	{/if}
+	<label for="watch-owner-target" class="mt-3 mb-1 block text-xs text-muted">Assign or request ownership</label>
+	<select id="watch-owner-target" class="bg-background border-border w-full rounded-md border px-2.5 py-2 text-sm" bind:value={ownershipTargetId} disabled={ownershipLoading || ownershipSaving}>
+		<option value="">Select an eligible member</option>
+		{#each ownershipUsers as user (user.id)}
+			<option value={user.id}>{user.name}{user.id === sessionState.sub ? " (you)" : ""}</option>
+		{/each}
+	</select>
+	{#if ownershipLoading}
+		<p class="mt-2 text-xs text-muted">Loading eligible members…</p>
+	{:else if ownershipUsers.length === 0}
+		<p class="mt-2 text-xs text-muted">No eligible members are available. A recipient needs access to this project, scheduler, and decrypts.</p>
+	{/if}
+	<div class="mt-4 flex justify-end gap-2">
+		<Button variant="secondary" disabled={ownershipSaving} onclick={() => (ownershipDialogOpen = false)}>Cancel</Button>
+		<Button loading={ownershipSaving} disabled={ownershipLoading || !ownershipTargetId} onclick={() => void submitWatchOwnership()}>{ownershipTargetId === sessionState.sub ? "Assign to me" : "Request transfer"}</Button>
 	</div>
 </Dialog>
 

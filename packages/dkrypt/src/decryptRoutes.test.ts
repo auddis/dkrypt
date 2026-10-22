@@ -8,6 +8,7 @@ import Fastify from 'fastify';
 import type { ArtifactRecord } from '#artifacts.js';
 import { config } from '#config.js';
 import { apiIdempotencyRegistry } from '#idempotency.js';
+import { DailyDecryptLimitError } from '#jobs/repository.js';
 import { createArtifactCatalogRoutes, createDecryptRoutes, createTestFlightCatalogRoutes } from '#routes/decrypt.js';
 import type { Job } from '#jobs/types.js';
 import { PermissionFlag, serializeBits } from '#permissions.js';
@@ -343,8 +344,13 @@ test('typed decrypt submission routes preserve API-key scopes and resolved job r
   const resolved: string[] = [];
   const enqueued: unknown[][] = [];
   const usage: unknown[][] = [];
+  let quotaBlocked = false;
   const server = Fastify().withTypeProvider<TypeBoxTypeProvider>();
   server.setErrorHandler((error, request, reply) => {
+    if (error instanceof DailyDecryptLimitError) {
+      reply.header('Retry-After', '60').code(429).send({ error: error.message, code: error.code, message: error.message, requestId: request.id, retryable: true, remediation: { nextAvailableAt: error.nextAvailableAt } });
+      return;
+    }
     const statusCode = (error as { statusCode?: unknown }).statusCode;
     const status = typeof statusCode === 'number' ? statusCode : 500;
     const message = error instanceof Error ? error.message : String(error);
@@ -374,6 +380,7 @@ test('typed decrypt submission routes preserve API-key scopes and resolved job r
         return { bundleId, selector: selector?.replace(/^v/i, ''), channel: 'appstore', externalVersionId: '12345', versionLabel: '2.0', minimumOsVersion: '17.0', artifactKey: 'appstore-artifact' };
       },
       enqueueDecryptJob: (...args) => {
+        if (quotaBlocked) throw new DailyDecryptLimitError(Date.now() + 60_000);
         enqueued.push(args);
         return queuedJob;
       },
@@ -460,6 +467,18 @@ test('typed decrypt submission routes preserve API-key scopes and resolved job r
     expect(conflictingAppStore.json()).toMatchObject({ code: 'request_error' });
     expect(resolved).toHaveLength(resolvedBeforeRetry);
 
+    quotaBlocked = true;
+    const quotaHeaders = {
+      authorization: `Bearer ${allowedKey.key}`,
+      'idempotency-key': `quota-${crypto.randomUUID()}`,
+    };
+    const quotaBlockedResponse = await server.inject({ method: 'POST', url: '/v1/decrypts', headers: quotaHeaders, payload: { bundleId: 'com.example.allowed', version: '2.0' } });
+    expect(quotaBlockedResponse.statusCode).toBe(429);
+    expect(quotaBlockedResponse.headers['retry-after']).toBe('60');
+    expect(quotaBlockedResponse.json()).toMatchObject({ code: 'daily_decrypt_limit', retryable: true });
+    expect(enqueued).toHaveLength(1);
+    quotaBlocked = false;
+
     const invalidIdempotencyKey = await server.inject({
       method: 'POST',
       url: '/v1/decrypts',
@@ -479,7 +498,7 @@ test('typed decrypt submission routes preserve API-key scopes and resolved job r
     expect(concurrentRetries.map((response) => response.statusCode)).toEqual([202, 202]);
     expect(concurrentRetries.map((response) => response.json().id)).toEqual([queuedJob.id, queuedJob.id]);
     expect(enqueued).toHaveLength(2);
-    expect(resolved).toHaveLength(resolvedBeforeRetry + 1);
+    expect(resolved).toHaveLength(resolvedBeforeRetry + 2);
 
     const jobHeaders = { authorization: `Bearer ${allowedKey.key}` };
     const jobDetail = await server.inject({ method: 'GET', url: `/v1/jobs/${queuedJob.id}`, headers: jobHeaders });

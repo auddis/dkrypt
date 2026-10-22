@@ -1,3 +1,5 @@
+import { listPlans } from '#billing.js';
+
 const contactAddress = 'contact<span>@</span>dylib.dev';
 
 const navigation = `
@@ -23,25 +25,8 @@ const pageContent: Record<string, string> = {
     <main>
       <h1>dkrypt</h1>
       <p>dkrypt is a subscription service for authorized iOS application decryption workflows, request tracking, downloadable results, and optional API access.</p>
-      <p>Monthly plans start at €5. Every account begins with viewer access.</p>
+      <p>Every account begins with viewer access. Paid plans include IPA Library access and a rolling 24-hour decrypt allowance.</p>
       <p><a href="/pricing">View pricing</a> or <a href="/#sign-in">sign in</a>.</p>
-    </main>
-  `,
-  '/pricing': `
-    <main>
-      <h1>dkrypt pricing</h1>
-        <p>Stripe renews card or bank payments automatically. Crypto access is purchased for 30 days through a NOWPayments invoice and renewed with another crypto payment.</p>
-      <section>
-        <h2>Regular — €5/month</h2>
-        <p>Dashboard decrypt access with standard queue priority.</p>
-        <h2>Priority — €10/month</h2>
-        <p>Dashboard decrypt access with high queue priority.</p>
-        <h2>API — €15/month</h2>
-        <p>Dashboard decrypts and API key access with standard queue priority.</p>
-        <h2>Priority API — €20/month</h2>
-        <p>Dashboard decrypts and API key access with high queue priority.</p>
-      </section>
-      <p><a href="/#sign-in">Sign in to subscribe</a>.</p>
     </main>
   `,
   '/terms': `
@@ -55,7 +40,7 @@ const pageContent: Record<string, string> = {
         <h2>Accounts and acceptable use</h2>
         <p>You must provide accurate account information, protect your account and API keys, and use dkrypt only for lawful purposes involving software and data you have the rights and authorization to process. You must not infringe third-party rights, distribute malware, commit fraud, bypass security controls, overload the service, or enable unauthorized access.</p>
         <h2>Subscriptions, payments, and taxes</h2>
-        <p>Stripe plans renew every 30 days until canceled and show applicable card or bank taxes in Stripe checkout. Crypto access is granted for 30 days after a verified NOWPayments invoice and requires another payment to renew. Stripe Managed Payments handles eligible card or bank purchases as merchant of record. Crypto purchases are outside Stripe Managed Payments, do not use Stripe, and do not require a billing address in the configured checkout. NOWPayments sends funds to the merchant payout wallet, while dkrypt does not store full card details, crypto custody, or wallet private keys.</p>
+        <p>Stripe plans renew monthly until canceled and show applicable card or bank taxes in Stripe checkout. Crypto access is granted for 30 days after a verified NOWPayments invoice and requires another payment to renew. Stripe Managed Payments handles eligible card or bank purchases as merchant of record. Crypto purchases are outside Stripe Managed Payments, do not use Stripe, and do not require a billing address in the configured checkout. NOWPayments sends funds to the merchant payout wallet, while dkrypt does not store full card details, crypto custody, or wallet private keys.</p>
         <h2>Cancellation and refunds</h2>
         <p>Stripe subscriptions can be canceled through the billing portal and normally end at the current period. Crypto renewal is stopped immediately from dkrypt. Refunds follow the provider-specific refund process, the <a href="/refund-policy">Refund Policy</a>, and mandatory consumer law.</p>
         <h2>Service availability and liability</h2>
@@ -117,8 +102,20 @@ const pageContent: Record<string, string> = {
   `,
 };
 
+function pricingContent(): string {
+  const plans = listPlans();
+  const sections = plans.map((plan) => {
+    const amount = Number.isInteger(plan.amount) ? String(plan.amount) : plan.amount.toFixed(2);
+    const allowance = plan.dailyDecryptLimit === undefined ? 'Unlimited new decrypts' : `${plan.dailyDecryptLimit} new decrypts per rolling 24 hours`;
+    const api = plan.api ? ` API access${plan.apiRatePerMinute ? ` at ${plan.apiRatePerMinute} requests per minute` : ''}.` : '';
+    const priority = plan.priority > 0 ? ' Higher queue priority.' : '';
+    return `<h2>${plan.name} — €${amount}/month</h2><p>IPA Library access. ${allowance}.${api}${priority}</p>`;
+  }).join('');
+  return `<main><h1>dkrypt pricing</h1><p>Stripe renews monthly. Crypto access lasts 30 days after a verified NOWPayments payment, where the selected asset supports the plan price.</p><section>${sections}</section><p><a href="/#sign-in">Sign in to subscribe</a>.</p></main>`;
+}
+
 export function renderPublicPage(indexHtml: string, pathname: string): string {
-  const content = pageContent[pathname] ?? pageContent['/'];
+  const content = pathname === '/pricing' ? pricingContent() : pageContent[pathname] ?? pageContent['/'];
   const fallback = `
     <div data-app-fallback style="max-width: 880px; margin: 0 auto; padding: 48px 24px; font-family: system-ui, sans-serif; line-height: 1.6;">
       <header><a href="/"><strong>dkrypt</strong></a>${navigation}</header>

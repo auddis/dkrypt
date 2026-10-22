@@ -8,7 +8,7 @@ import { hasPermission, PermissionFlag } from '#permissions.js';
 import { emitBillingChanged } from '#events.js';
 
 export type BillingProvider = 'stripe' | 'nowpayments' | 'legacy';
-export type PlanId = 'viewer' | 'regular' | 'priority' | 'api' | 'priority_api';
+export type PlanId = 'viewer' | 'regular' | 'priority' | 'api' | 'priority_api' | 'access' | 'standard' | 'plus' | 'developer' | 'unlimited' | 'unlimited_priority';
 export type BillingChargeStatus = 'pending' | 'succeeded' | 'failed' | 'refunded';
 export type BillingCheckoutStatus = 'pending' | 'completed' | 'expired' | 'cancelled';
 export type BillingTaxStatus = 'not_required' | 'pending' | 'recorded' | 'failed';
@@ -161,9 +161,27 @@ export interface BillingEntitlements {
   nextBilledAt?: string;
   scheduledChangeAction?: string;
   scheduledChangeAt?: string;
+  dailyDecryptLimit?: number;
+  apiRatePerMinute?: number;
+  legacy?: boolean;
 }
 
-const planDefinitions = [
+interface PlanDefinition {
+  id: Exclude<PlanId, 'viewer'>;
+  name: string;
+  description: string;
+  amount: number;
+  currency: 'EUR';
+  priceId: string;
+  decrypt: boolean;
+  api: boolean;
+  priority: number;
+  legacy: boolean;
+  dailyDecryptLimit?: number;
+  apiRatePerMinute?: number;
+}
+
+const planDefinitions: readonly PlanDefinition[] = [
   {
     id: 'regular',
     name: 'Regular',
@@ -174,6 +192,7 @@ const planDefinitions = [
     decrypt: true,
     api: false,
     priority: 0,
+    legacy: true,
   },
   {
     id: 'priority',
@@ -185,6 +204,7 @@ const planDefinitions = [
     decrypt: true,
     api: false,
     priority: 5,
+    legacy: true,
   },
   {
     id: 'api',
@@ -196,6 +216,7 @@ const planDefinitions = [
     decrypt: true,
     api: true,
     priority: 0,
+    legacy: true,
   },
   {
     id: 'priority_api',
@@ -207,8 +228,15 @@ const planDefinitions = [
     decrypt: true,
     api: true,
     priority: 5,
+    legacy: true,
   },
-] as const;
+  { id: 'access', name: 'Access', description: 'IPA Library and two new decrypts per day.', amount: 2.5, currency: 'EUR', priceId: config.stripeAccessPriceId, decrypt: true, api: false, priority: 0, legacy: false, dailyDecryptLimit: 2 },
+  { id: 'standard', name: 'Standard', description: 'IPA Library and ten new decrypts per day.', amount: 5, currency: 'EUR', priceId: config.stripeStandardPriceId, decrypt: true, api: false, priority: 0, legacy: false, dailyDecryptLimit: 10 },
+  { id: 'plus', name: 'Plus', description: 'IPA Library and 25 new decrypts per day.', amount: 10, currency: 'EUR', priceId: config.stripePlusPriceId, decrypt: true, api: false, priority: 0, legacy: false, dailyDecryptLimit: 25 },
+  { id: 'developer', name: 'Developer', description: 'IPA Library, 50 new decrypts per day, and API access.', amount: 15, currency: 'EUR', priceId: config.stripeDeveloperPriceId, decrypt: true, api: true, priority: 0, legacy: false, dailyDecryptLimit: 50, apiRatePerMinute: 30 },
+  { id: 'unlimited', name: 'Unlimited', description: 'IPA Library, unlimited new decrypts, and API access.', amount: 20, currency: 'EUR', priceId: config.stripeUnlimitedPriceId, decrypt: true, api: true, priority: 0, legacy: false, apiRatePerMinute: 60 },
+  { id: 'unlimited_priority', name: 'Unlimited Priority', description: 'Unlimited new decrypts, API access, and higher queue priority.', amount: 30, currency: 'EUR', priceId: config.stripeUnlimitedPriorityPriceId, decrypt: true, api: true, priority: 5, legacy: false, apiRatePerMinute: 120 },
+];
 
 const billingPath = path.join(config.stateDir, 'billing.json');
 const billingDatabase = openStateCollectionDatabase({ stateDir: config.stateDir, filename: config.stateDatabaseFile, busyTimeoutMs: config.stateDbBusyTimeoutMs }, ['billing_records', 'billing_events']);
@@ -267,8 +295,21 @@ export function closeBillingDatabase(): void {
   billingDatabase.close();
 }
 
-export function listPlans() {
-  return planDefinitions.map(({ decrypt: _decrypt, api: _api, priority: _priority, ...plan }) => plan);
+export function newBillingCatalogAvailableTo(userId?: string): boolean {
+  if (config.billingCatalogRollout === 'all') return true;
+  return config.billingCatalogRollout === 'canary' && userId !== undefined && config.billingCatalogCanaryUserIds.includes(userId);
+}
+
+export function listPlans(userId?: string) {
+  const newCatalog = newBillingCatalogAvailableTo(userId);
+  return planDefinitions
+    .filter((plan) => plan.legacy !== newCatalog)
+    .map(({ decrypt: _decrypt, ...plan }) => plan);
+}
+
+export function getPurchasablePlan(planId: string, userId?: string) {
+  const plan = getPlan(planId);
+  return plan && plan.legacy !== newBillingCatalogAvailableTo(userId) ? plan : undefined;
 }
 
 export function getPlan(planId: string) {
@@ -276,6 +317,7 @@ export function getPlan(planId: string) {
 }
 
 export function planForPrice(priceId: string): Exclude<PlanId, 'viewer'> | undefined {
+  if (!priceId) return undefined;
   return planDefinitions.find((plan) => plan.priceId === priceId)?.id;
 }
 
@@ -479,7 +521,7 @@ export function resolveBillingEntitlements(subscriptions: BillingSubscription[])
       subscription,
       definition: planDefinitions.find((plan) => plan.id === subscription.planId),
     }))
-    .filter((entry): entry is { subscription: BillingSubscription; definition: (typeof planDefinitions)[number] } => !!entry.definition);
+    .filter((entry): entry is { subscription: BillingSubscription; definition: PlanDefinition } => !!entry.definition);
 
   const strongest = definitions.sort((a, b) => {
     const capabilityA = Number(a.definition.api) * 10 + a.definition.priority;
@@ -500,6 +542,9 @@ export function resolveBillingEntitlements(subscriptions: BillingSubscription[])
     nextBilledAt: strongest.subscription.nextBilledAt,
     scheduledChangeAction: strongest.subscription.scheduledChangeAction,
     scheduledChangeAt: strongest.subscription.scheduledChangeAt,
+    dailyDecryptLimit: strongest.definition.dailyDecryptLimit,
+    apiRatePerMinute: strongest.definition.apiRatePerMinute,
+    legacy: strongest.definition.legacy,
   };
 }
 

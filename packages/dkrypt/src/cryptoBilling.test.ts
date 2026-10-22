@@ -6,11 +6,12 @@ import {
   getCryptoCheckout,
   listBillingCharges,
   replaceBillingSnapshot,
+  upsertBillingSubscription,
   upsertCryptoCheckout,
   type BillingCheckout,
   type BillingSubscription,
 } from '#billing.js';
-import { listManagerBillingSubscriptions, processNowPaymentsEvent } from '#cryptoBilling.js';
+import { createCryptoCheckout, listManagerBillingSubscriptions, processNowPaymentsEvent } from '#cryptoBilling.js';
 import type { NowPaymentsClient } from '#nowpayments.js';
 
 function checkout(userId: string): BillingCheckout {
@@ -54,6 +55,34 @@ function paymentEvent(localCheckout: BillingCheckout, eventId: string, status = 
 }
 
 describe('crypto billing lifecycle', () => {
+  test('requires cancellation before a past-due crypto subscription changes tiers', async () => {
+    const previousSnapshot = exportBillingSnapshot();
+    const userId = `crypto-tier-switch-${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    replaceBillingSnapshot({ customers: [], subscriptions: [] });
+    upsertBillingSubscription({
+      provider: 'nowpayments',
+      subscriptionId: `nowpayments:${crypto.randomUUID()}`,
+      customerId: `wallet:${crypto.randomUUID()}`,
+      userId,
+      status: 'past_due',
+      planId: 'standard',
+      priceId: 'nowpayments:standard',
+      productId: 'nowpayments:standard',
+      amount: 5,
+      currency: 'EUR',
+      graceUntil: new Date(Date.now() + 60_000).toISOString(),
+      occurredAt: now,
+      updatedAt: now,
+    });
+
+    try {
+      await expect(createCryptoCheckout({ userId, planId: 'plus', idempotencyKey: crypto.randomUUID() })).rejects.toMatchObject({ statusCode: 409 });
+    } finally {
+      replaceBillingSnapshot(previousSnapshot);
+    }
+  });
+
   test('omits renewal dates for refunded subscriptions in the manager ledger', () => {
     const previousSnapshot = exportBillingSnapshot();
     const userId = `refunded-member-${crypto.randomUUID()}`;

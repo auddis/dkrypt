@@ -227,6 +227,10 @@ const BackupV9Fields = {
   ...BackupV8Fields,
   artifactProjectLinks: Type.Array(ArtifactProjectLink),
 };
+const BackupV10Fields = {
+  ...BackupV9Fields,
+  decryptQuotaLedger: Type.Array(Type.Object({ jobId: identifierSchema, ownerId: identifierSchema, admittedAt: Type.Number(), state: Type.Union([Type.Literal('reserved'), Type.Literal('consumed')]) }, { additionalProperties: false })),
+};
 
 const optionalVersionedProperties = {
   projects: Type.Optional(Type.Array(Project)),
@@ -234,9 +238,10 @@ const optionalVersionedProperties = {
   testFlightSubscriptions: Type.Optional(Type.Array(TestFlightSubscription)),
   billing: Type.Optional(JsonObject),
   identities: Type.Optional(JsonObject),
+  decryptQuotaLedger: Type.Optional(Type.Array(JsonObject)),
 };
 
-function backupVersionSchema<const Version extends 3 | 4 | 5 | 6 | 7 | 8 | 9>(version: Version, requiredVersionedProperties: Record<string, TSchema> = {}) {
+function backupVersionSchema<const Version extends 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10>(version: Version, requiredVersionedProperties: Record<string, TSchema> = {}) {
   return Type.Object({
     backupVersion: Type.Literal(version),
     ...commonBackupProperties,
@@ -252,11 +257,12 @@ const BackupV6 = backupVersionSchema(6, BackupV6Fields);
 const BackupV7 = backupVersionSchema(7, BackupV7Fields);
 const BackupV8 = backupVersionSchema(8, BackupV8Fields);
 const BackupV9 = backupVersionSchema(9, BackupV9Fields);
+const BackupV10 = backupVersionSchema(10, BackupV10Fields);
 
-export const backupImportBodySchema = Type.Union([BackupV3, BackupV4, BackupV5, BackupV6, BackupV7, BackupV8, BackupV9]);
+export const backupImportBodySchema = Type.Union([BackupV3, BackupV4, BackupV5, BackupV6, BackupV7, BackupV8, BackupV9, BackupV10]);
 
 export const backupExportResponseSchema = Type.Object({
-  ...BackupV9.properties,
+  ...BackupV10.properties,
   exportedAt: Type.Number(),
 }, { additionalProperties: true });
 

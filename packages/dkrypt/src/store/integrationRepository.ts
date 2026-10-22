@@ -10,6 +10,8 @@ export interface SignedTriggerPolicy {
   sources: Array<'appstore' | 'testflight'>;
   enabled: boolean;
   createdBy: string;
+  billingOwnerId?: string;
+  billingOwnerTransfer?: { userId: string; requestedBy: string; requestedAt: number };
   createdAt: number;
   updatedAt: number;
   secret: string;
@@ -30,6 +32,8 @@ export interface GithubOidcPolicy {
   allowTestFlight: boolean;
   enabled: boolean;
   createdBy: string;
+  billingOwnerId?: string;
+  billingOwnerTransfer?: { userId: string; requestedBy: string; requestedAt: number };
   createdAt: number;
   updatedAt: number;
 }
@@ -65,9 +69,64 @@ function persist(policy: SignedTriggerPolicy): void {
   database.query('INSERT INTO integration_policies (id, payload, updated_at, kind, project_id, enabled) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at, enabled = excluded.enabled').run(policy.id, JSON.stringify(policy), policy.updatedAt, policy.kind, policy.projectId, policy.enabled ? 1 : 0);
 }
 
+function persistOidc(policy: GithubOidcPolicy): void {
+  database.query('INSERT INTO integration_policies (id, payload, updated_at, kind, project_id, enabled) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at, enabled = excluded.enabled').run(policy.id, JSON.stringify(policy), policy.updatedAt, policy.kind, policy.projectId, policy.enabled ? 1 : 0);
+}
+
+export function requestIntegrationBillingOwnerTransfer(id: string, requestedUserId: string, actor: string): SignedTriggerPolicy | GithubOidcPolicy | undefined {
+  const signed = getSignedTriggerPolicy(id);
+  const oidc = signed ? undefined : listGithubOidcPolicies().find((candidate) => candidate.id === id);
+  const policy = signed ?? oidc;
+  if (!policy || !policy.enabled) return undefined;
+  const userId = requestedUserId.trim().toLowerCase();
+  const next = { ...policy, updatedAt: Date.now() };
+  if (userId === actor.toLowerCase()) {
+    next.billingOwnerId = userId;
+    next.billingOwnerTransfer = undefined;
+  } else {
+    next.billingOwnerTransfer = { userId, requestedBy: actor, requestedAt: Date.now() };
+  }
+  if (next.kind === 'signed_decrypt') persist(next);
+  else persistOidc(next);
+  return next;
+}
+
+export function acceptIntegrationBillingOwnerTransfer(id: string, actor: string): SignedTriggerPolicy | GithubOidcPolicy | undefined {
+  const signed = getSignedTriggerPolicy(id);
+  const oidc = signed ? undefined : listGithubOidcPolicies().find((candidate) => candidate.id === id);
+  const policy = signed ?? oidc;
+  if (!policy?.enabled || policy.billingOwnerTransfer?.userId !== actor.toLowerCase()) return undefined;
+  const next = { ...policy, billingOwnerId: actor.toLowerCase(), billingOwnerTransfer: undefined, updatedAt: Date.now() };
+  if (next.kind === 'signed_decrypt') persist(next);
+  else persistOidc(next);
+  return next;
+}
+
+export function mergeIntegrationBillingOwner(targetUserId: string, sourceUserId: string): void {
+  const targetId = targetUserId.trim().toLowerCase();
+  const sourceId = sourceUserId.trim().toLowerCase();
+  for (const policy of listSignedTriggerPolicies()) {
+    if (policy.billingOwnerId !== sourceId && policy.billingOwnerTransfer?.userId !== sourceId && policy.billingOwnerTransfer?.requestedBy !== sourceId) continue;
+    const next = getSignedTriggerPolicy(policy.id)!;
+    if (next.billingOwnerId === sourceId) next.billingOwnerId = targetId;
+    if (next.billingOwnerTransfer?.userId === sourceId) next.billingOwnerTransfer.userId = targetId;
+    if (next.billingOwnerTransfer?.requestedBy === sourceId) next.billingOwnerTransfer.requestedBy = targetId;
+    next.updatedAt = Date.now();
+    persist(next);
+  }
+  for (const policy of listGithubOidcPolicies()) {
+    if (policy.billingOwnerId !== sourceId && policy.billingOwnerTransfer?.userId !== sourceId && policy.billingOwnerTransfer?.requestedBy !== sourceId) continue;
+    if (policy.billingOwnerId === sourceId) policy.billingOwnerId = targetId;
+    if (policy.billingOwnerTransfer?.userId === sourceId) policy.billingOwnerTransfer.userId = targetId;
+    if (policy.billingOwnerTransfer?.requestedBy === sourceId) policy.billingOwnerTransfer.requestedBy = targetId;
+    policy.updatedAt = Date.now();
+    persistOidc(policy);
+  }
+}
+
 export function createSignedTriggerPolicy(input: Pick<SignedTriggerPolicy, 'projectId' | 'bundleIds' | 'sources' | 'createdBy'>): SignedTriggerPolicy {
   const now = Date.now();
-  const policy: SignedTriggerPolicy = { ...input, kind: 'signed_decrypt', id: randomUUID(), enabled: true, secret: randomBytes(32).toString('hex'), createdAt: now, updatedAt: now };
+  const policy: SignedTriggerPolicy = { ...input, billingOwnerId: input.createdBy, kind: 'signed_decrypt', id: randomUUID(), enabled: true, secret: randomBytes(32).toString('hex'), createdAt: now, updatedAt: now };
   persist(policy);
   return policy;
 }
@@ -117,6 +176,10 @@ export function finishIntegrationDelivery(delivery: IntegrationDelivery, status:
   database.query('UPDATE integration_deliveries SET payload = ?, updated_at = ? WHERE id = ? AND payload = ?').run(JSON.stringify(updated), Date.now(), delivery.id, JSON.stringify(delivery));
 }
 
+export function releaseIntegrationDelivery(delivery: IntegrationDelivery): void {
+	database.query('DELETE FROM integration_deliveries WHERE id = ? AND integration_id = ? AND event_id = ? AND payload = ?').run(delivery.id, delivery.integrationId, delivery.eventId, JSON.stringify(delivery));
+}
+
 export function closeIntegrationRepository(): void {
   database.close();
 }
@@ -128,8 +191,8 @@ export function listGithubOidcPolicies(): GithubOidcPolicy[] {
 
 export function createGithubOidcPolicy(input: Omit<GithubOidcPolicy, 'id' | 'kind' | 'enabled' | 'createdAt' | 'updatedAt'>): GithubOidcPolicy {
   const at = Date.now();
-  const policy: GithubOidcPolicy = { ...input, id: randomUUID(), kind: 'github_oidc', enabled: true, createdAt: at, updatedAt: at };
-  database.query('INSERT INTO integration_policies (id, payload, updated_at, kind, project_id, enabled) VALUES (?, ?, ?, ?, ?, ?)').run(policy.id, JSON.stringify(policy), at, policy.kind, policy.projectId, 1);
+  const policy: GithubOidcPolicy = { ...input, billingOwnerId: input.billingOwnerId ?? input.createdBy, id: randomUUID(), kind: 'github_oidc', enabled: true, createdAt: at, updatedAt: at };
+  persistOidc(policy);
   return policy;
 }
 

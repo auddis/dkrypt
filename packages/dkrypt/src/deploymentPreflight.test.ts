@@ -23,6 +23,8 @@ test('deployment preflight dry-runs and restores a database without changing the
     rewindApiKeySearchMigration(database.db);
     rewindSessionSearchMigration(database.db);
     database.db.exec(`
+      DROP INDEX decrypt_quota_by_owner_time;
+      DROP TABLE decrypt_quota_ledger;
       DROP TABLE billing_customers;
       DROP TABLE billing_subscriptions;
       DROP TABLE billing_checkouts;
@@ -44,7 +46,7 @@ test('deployment preflight dry-runs and restores a database without changing the
       ALTER TABLE billing_events DROP COLUMN event_id;
       ALTER TABLE billing_events DROP COLUMN occurred_at;
       ALTER TABLE billing_events DROP COLUMN processed_at;
-      DELETE FROM schema_migrations WHERE version IN (17, 18, 19, 20, 21, 22, 23, 24, 25);
+      DELETE FROM schema_migrations WHERE version IN (17, 18, 19, 20, 21, 22, 23, 24, 25, 26);
     `);
 
     const result = runDeploymentPreflight(path.join(stateDir, 'dkrypt.sqlite'), root);

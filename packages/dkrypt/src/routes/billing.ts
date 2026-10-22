@@ -22,6 +22,7 @@ import {
   getBillingSubscription,
   getBillingUserId,
   getPlan,
+  getPurchasablePlan,
   isBillingSubscriptionActive,
   findCryptoCheckout,
   findStripeCheckoutIdempotencyAttempt,
@@ -36,7 +37,7 @@ import {
   releaseBillingCheckoutLock,
   recordStripeCheckoutIdempotencyAttempt,
 } from '#billing.js';
-import { config, stripeEnabled, stripeEnvironment, stripeMissingConfiguration } from '#config.js';
+import { config, stripeEnabled, stripeEnvironment, stripeMissingConfiguration, stripeNewCatalogMissingConfiguration } from '#config.js';
 import {
   cancelCryptoSubscription,
   createCryptoCheckout,
@@ -45,7 +46,8 @@ import {
   processNowPaymentsEvent,
   verifyNowPaymentsEvent,
 } from '#cryptoBilling.js';
-import { getNowPaymentsProviderStatus } from '#nowpayments.js';
+import { getNowPaymentsMinimumFiat, getNowPaymentsProviderStatus } from '#nowpayments.js';
+import { getDecryptQuotaUsage } from '#jobs/repository.js';
 import { getAuthProfile, resolveAuthUserId } from '#identity.js';
 import { log } from '#logger.js';
 import { fastifyRequirePermission, fastifyRequireSession, getFastifySession } from '#session.js';
@@ -458,6 +460,10 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{
     const profile = getAuthProfile(userId);
     const entitlement = getBillingEntitlements(userId);
     const crypto = await getNowPaymentsProviderStatus();
+    const minimumResults = crypto.enabled && crypto.ready
+      ? await Promise.allSettled(crypto.supportedAssets.map((asset) => getNowPaymentsMinimumFiat(asset)))
+      : [];
+    const minimumByAsset = Object.fromEntries(minimumResults.flatMap((result, index) => result.status === 'fulfilled' ? [[crypto.supportedAssets[index], result.value]] : []));
     return reply.send({
       enabled: stripeEnabled || crypto.enabled,
       provider: entitlement.provider ?? 'stripe',
@@ -466,13 +472,15 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{
       missingConfiguration: stripeEnabled ? [] : stripeMissingConfiguration,
       providers: {
         stripe: { enabled: stripeEnabled, environment: stripeEnvironment, managedPayments: true, missingConfiguration: stripeMissingConfiguration },
-        crypto: { provider: 'nowpayments', enabled: crypto.enabled, ready: crypto.enabled && crypto.ready, environment: crypto.environment, settlementCurrency: crypto.settlementCurrency, assets: crypto.supportedAssets },
+        crypto: { provider: 'nowpayments', enabled: crypto.enabled, ready: crypto.enabled && crypto.ready, environment: crypto.environment, settlementCurrency: crypto.settlementCurrency, assets: crypto.supportedAssets, minimumByAsset },
       },
-      plans: listPlans(),
+      plans: listPlans(userId),
+      currentPlan: getPlan(entitlement.planId),
       customerId: getBillingCustomerId(userId),
       customerEmail: profile?.email,
       legacyBilling: hasLegacyBillingRecord(userId),
       entitlement,
+      quota: getDecryptQuotaUsage(userId, entitlement.dailyDecryptLimit),
     });
   });
 
@@ -496,7 +504,7 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{
 
   server.post<BillingCheckoutRoute>('/v1/billing/checkout', { schema: getRouteContract('POST', '/v1/billing/checkout'), preHandler: fastifyRequireSession }, async (request, reply) => {
     const userId = getFastifySession(request)!.sub;
-    const target = getPlan(request.body.planId);
+    const target = getPurchasablePlan(request.body.planId, userId);
     if (!target) return sendBillingError(request, reply, 400, 'unknown plan');
     const provider = request.body.provider ?? 'stripe';
     const idempotencyKey = getBillingIdempotencyKey(request, reply, userId, `checkout-${provider}`);
@@ -639,7 +647,7 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{
   server.get<BillingProviderStatusRoute>('/v1/billing/provider-status', { schema: getRouteContract('GET', '/v1/billing/provider-status'), preHandler: requireBillingManager }, async (request, reply) => {
     const forceRefresh = request.query.refresh === 'true';
     const stripeWebhook = await (options.stripeWebhookHealth ?? ((refresh) => inspectStripeWebhookHealth(config.stripeSecretKey ? options.stripeClient?.() : undefined, undefined, refresh)))(forceRefresh);
-    return reply.send({ checkoutsPaused: areNewBillingCheckoutsPaused(), stripe: { enabled: stripeEnabled, environment: stripeEnvironment, missingConfiguration: stripeMissingConfiguration, webhook: stripeWebhook }, crypto: await getNowPaymentsProviderStatus() });
+    return reply.send({ checkoutsPaused: areNewBillingCheckoutsPaused(), stripe: { enabled: stripeEnabled, environment: stripeEnvironment, missingConfiguration: stripeMissingConfiguration, newCatalogMissingConfiguration: stripeNewCatalogMissingConfiguration, webhook: stripeWebhook }, crypto: await getNowPaymentsProviderStatus() });
   });
 
   server.post('/v1/billing/stripe-webhook/sync', { schema: getRouteContract('POST', '/v1/billing/stripe-webhook/sync'), preHandler: requireBillingManager }, async (request, reply) => {
@@ -742,7 +750,7 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{
 
   server.post<BillingSubscriptionRoute>('/v1/billing/subscription', { schema: getRouteContract('POST', '/v1/billing/subscription'), preHandler: fastifyRequireSession }, async (request, reply) => {
     const userId = getFastifySession(request)!.sub;
-    const target = getPlan(request.body.planId);
+    const target = getPurchasablePlan(request.body.planId, userId);
     if (!target) return sendBillingError(request, reply, 400, 'unknown plan');
     if (!requireStripeBilling(request, reply)) return;
 
@@ -752,6 +760,7 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{
     if (!subscription) return sendBillingError(request, reply, 403, 'subscription does not belong to this account');
     if (subscription.provider !== 'stripe') return sendBillingError(request, reply, 409, 'crypto plan changes require cancellation and a new checkout');
     const current = getPlan(subscription.planId);
+    if (current?.legacy && request.body.acknowledgeLegacyLoss !== true) return sendBillingError(request, reply, 409, 'confirm that switching will permanently end your legacy plan', 'legacy_plan_confirmation_required');
 
     try {
       const stripeSubscription = await callStripe((client) => client.subscriptions.retrieve(subscription.subscriptionId));

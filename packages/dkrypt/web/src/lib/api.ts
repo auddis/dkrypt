@@ -92,6 +92,7 @@ export async function apiAction<T = Record<string, unknown>>(
   path: string,
   opts: RequestInit,
   successMsg?: string,
+  suppressErrorToast = false,
 ): Promise<{ ok: boolean; data: T }> {
   const method = String(opts.method ?? 'GET').toUpperCase();
 
@@ -101,7 +102,7 @@ export async function apiAction<T = Record<string, unknown>>(
     data = (await res.json()) as T;
   } catch {}
   if (!res.ok) {
-    showToast((data as { error?: string }).error ?? `Request failed (${res.status})`, 'error');
+    if (!suppressErrorToast) showToast((data as { error?: string }).error ?? `Request failed (${res.status})`, 'error');
     return { ok: false, data };
   }
   if (method !== 'GET') invalidateQueriesForMutation(path);
@@ -231,6 +232,11 @@ export type MissedRunPolicy = 'skip' | 'runOnce';
 
 export interface AppWatch {
   id: string;
+  billingOwnerId?: string;
+  billingOwnerDisplayName?: string;
+  billingOwnerTransfer?: { userId: string; requestedBy: string; requestedAt: number };
+  billingOwnerTransferDisplayName?: string;
+  billingOwnerTransferRequestorDisplayName?: string;
   projectId?: string;
   bundleId: string;
   repo: string;
@@ -593,6 +599,7 @@ export interface DecryptPreflight {
   estimatedDurationMs?: number;
   queueLength: number;
   canQueue: boolean;
+  quota?: { limit: number | null; used: number; remaining: number | null; nextAvailableAt?: number; legacy?: boolean; apiRatePerMinute?: number };
   devices: DecryptPreflightDevice[];
 }
 
@@ -696,7 +703,7 @@ export interface AllowedUser {
   };
 }
 
-export type BillingPlanId = 'regular' | 'priority' | 'api' | 'priority_api';
+export type BillingPlanId = 'regular' | 'priority' | 'api' | 'priority_api' | 'access' | 'standard' | 'plus' | 'developer' | 'unlimited' | 'unlimited_priority';
 
 export interface ProjectRecord {
   id: string;
@@ -1114,6 +1121,18 @@ export function createWatch(input: WatchInput): Promise<{ ok: boolean; data: App
 
 export function updateWatch(id: string, patch: Partial<WatchInput> & { expectedUpdatedAt?: number }, successMessage: string | null = 'Watch updated'): Promise<{ ok: boolean; data: AppWatch }> {
   return apiAction(`/v1/dashboard/watches/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }, successMessage ?? undefined);
+}
+
+export function requestWatchOwnership(id: string, userId: string): Promise<{ ok: boolean; data: AppWatch }> {
+  return apiAction(`/v1/dashboard/watches/${encodeURIComponent(id)}/ownership/request`, { method: 'POST', body: JSON.stringify({ userId }) });
+}
+
+export function fetchEligibleWatchOwners(id: string): Promise<{ users: Array<{ id: string; name: string }> }> {
+  return apiJson(`/v1/dashboard/watches/${encodeURIComponent(id)}/ownership/eligible`);
+}
+
+export function acceptWatchOwnership(id: string): Promise<{ ok: boolean; data: AppWatch }> {
+  return apiAction(`/v1/dashboard/watches/${encodeURIComponent(id)}/ownership/accept`, { method: 'POST' });
 }
 
 export function deleteWatch(id: string): Promise<{ ok: boolean }> {
@@ -1648,6 +1667,11 @@ export interface SignedTriggerIntegration {
   sources: Array<'appstore' | 'testflight'>;
   enabled: boolean;
   createdBy: string;
+  billingOwnerId?: string;
+  billingOwnerDisplayName?: string;
+  billingOwnerTransfer?: { userId: string; requestedBy: string; requestedAt: number };
+  billingOwnerTransferDisplayName?: string;
+  billingOwnerTransferRequestorDisplayName?: string;
   createdAt: number;
   updatedAt: number;
   previousSecretExpiresAt?: number;
@@ -1680,13 +1704,47 @@ export interface GithubOidcTrustPolicy {
   bundleIds: string[];
   allowTestFlight: boolean;
   enabled: boolean;
+  createdBy: string;
+  billingOwnerId?: string;
+  billingOwnerDisplayName?: string;
+  billingOwnerTransfer?: { userId: string; requestedBy: string; requestedAt: number };
+  billingOwnerTransferDisplayName?: string;
+}
+
+export interface IntegrationOwnershipRequest {
+  id: string;
+  kind: 'signed_decrypt' | 'github_oidc';
+  projectId: string;
+  bundleIds: string[];
+  billingOwnerId?: string;
+  billingOwnerDisplayName: string;
+  billingOwnerTransfer: { userId: string; requestedBy: string; requestedAt: number };
+  billingOwnerTransferDisplayName?: string;
+  billingOwnerTransferRequestorDisplayName?: string;
+  label: string;
+}
+
+export function fetchEligibleIntegrationOwners(id: string): Promise<{ users: Array<{ id: string; name: string }> }> {
+  return apiJson(`/v1/dashboard/integrations/${encodeURIComponent(id)}/ownership/eligible`);
+}
+
+export function requestIntegrationOwnership(id: string, userId: string): Promise<{ policy: SignedTriggerIntegration | GithubOidcTrustPolicy }> {
+  return apiJson(`/v1/dashboard/integrations/${encodeURIComponent(id)}/ownership/request`, { method: 'POST', body: JSON.stringify({ userId }) });
+}
+
+export function fetchPendingIntegrationOwnership(): Promise<{ requests: IntegrationOwnershipRequest[] }> {
+  return apiJson('/v1/dashboard/integrations/ownership/pending');
+}
+
+export function acceptIntegrationOwnership(id: string): Promise<{ policy: SignedTriggerIntegration | GithubOidcTrustPolicy }> {
+  return apiJson(`/v1/dashboard/integrations/${encodeURIComponent(id)}/ownership/accept`, { method: 'POST' });
 }
 
 export function fetchGithubOidcPolicies(): Promise<{ policies: GithubOidcTrustPolicy[] }> {
   return apiJson('/v1/dashboard/integrations/github-oidc');
 }
 
-export function createGithubOidcTrust(input: Omit<GithubOidcTrustPolicy, 'id' | 'enabled'>): Promise<{ policy: GithubOidcTrustPolicy }> {
+export function createGithubOidcTrust(input: Omit<GithubOidcTrustPolicy, 'id' | 'enabled' | 'createdBy' | 'billingOwnerId' | 'billingOwnerDisplayName' | 'billingOwnerTransfer' | 'billingOwnerTransferDisplayName'>): Promise<{ policy: GithubOidcTrustPolicy }> {
   return apiJson('/v1/dashboard/integrations/github-oidc', { method: 'POST', body: JSON.stringify(input) });
 }
 
@@ -1836,11 +1894,12 @@ export function queueDecrypt(
   versionLabel?: string,
   preferPrimary = false,
   minimumOsVersion?: string,
+  suppressErrorToast = false,
 ): Promise<{ ok: boolean; data: JobSummary }> {
   return apiAction('/v1/dashboard/decrypt', {
     method: 'POST',
     body: JSON.stringify({ bundleId, externalVersionId, versionLabel, preferPrimary, minimumOsVersion, projectId: projectSelectionState.id }),
-  });
+  }, undefined, suppressErrorToast);
 }
 
 export function fetchDecryptPreflight(input: { bundleId: string; versionLabel?: string; testflight?: boolean; installSizeBytes?: number; deviceId?: string }): Promise<DecryptPreflight> {
@@ -1973,8 +2032,9 @@ export function queueTestFlightDecrypt(
   build: TFBuild,
   preferPrimary = false,
   deviceId?: string,
+  suppressErrorToast = false,
 ): Promise<{ ok: boolean; data: JobSummary }> {
-  return apiAction('/v1/dashboard/testflight/decrypt', { method: 'POST', body: JSON.stringify({ bundleId, appId, build, preferPrimary, deviceId, projectId: projectSelectionState.id }) });
+  return apiAction('/v1/dashboard/testflight/decrypt', { method: 'POST', body: JSON.stringify({ bundleId, appId, build, preferPrimary, deviceId, projectId: projectSelectionState.id }) }, undefined, suppressErrorToast);
 }
 
 export function fetchTestFlightSubscriptions(cursor?: string, limit = 50): Promise<{ subscriptions: TestFlightSubscription[]; total: number } & CursorPage> {

@@ -751,6 +751,18 @@ const migrations = [
       CREATE INDEX IF NOT EXISTS device_setup_operations_by_owner ON device_setup_operations(json_extract(payload, '$.ownerId'), updated_at DESC);
     `,
   },
+  {
+    version: 26,
+    sql: `
+      CREATE TABLE IF NOT EXISTS decrypt_quota_ledger (
+        job_id TEXT PRIMARY KEY NOT NULL,
+        owner_id TEXT NOT NULL,
+        admitted_at INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('reserved', 'consumed'))
+      );
+      CREATE INDEX IF NOT EXISTS decrypt_quota_by_owner_time ON decrypt_quota_ledger(owner_id, admitted_at);
+    `,
+  },
 ] as const;
 
 export const LATEST_SQLITE_SCHEMA_VERSION = migrations.at(-1)?.version ?? 0;
@@ -806,6 +818,7 @@ const collectionTables = new Set([
   'integration_deliveries',
   'pending_oauth_links',
   'device_setup_operations',
+  'decrypt_quota_ledger',
 ]);
 
 function assertCollectionTable(table: string): void {
@@ -991,6 +1004,14 @@ function deviceHealthRows(value: unknown): DomainRow[] {
 
 function replaceCollectionRows(database: Database, replacement: StateCollectionReplacement): void {
   database.exec(`DELETE FROM ${replacement.table};`);
+  if (replacement.table === 'decrypt_quota_ledger') {
+    const statement = database.query('INSERT INTO decrypt_quota_ledger (job_id, owner_id, admitted_at, state) VALUES (?, ?, ?, ?)');
+    for (const row of replacement.rows) {
+      const entry = asRecord(row.payload);
+      statement.run(stringField(entry, 'jobId'), stringField(entry, 'ownerId'), numberField(entry, 'admittedAt'), stringField(entry, 'state'));
+    }
+    return;
+  }
   if (replacement.table === 'sessions') {
     const statement = database.query('INSERT INTO sessions (id, payload, updated_at, user_id, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?);');
     for (const row of replacement.rows) {

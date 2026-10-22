@@ -7,6 +7,7 @@ import {
   upsertAuthIdentity,
 } from '#identity.js';
 import { mergeActiveJobOwner } from '#jobs/store.js';
+import { mergeIntegrationBillingOwner } from '#store/integrationRepository.js';
 import { mergeUserAccounts } from '#store/state.js';
 
 export interface ResolveOauthAccountInput {
@@ -20,6 +21,7 @@ function mergeProfileData(targetUserId: string, sourceUserId: string, actor: str
   mergeUserAccounts(targetUserId, sourceUserId, actor);
   mergeBillingAccounts(targetUserId, sourceUserId);
   mergeActiveJobOwner(targetUserId, sourceUserId);
+  mergeIntegrationBillingOwner(targetUserId, sourceUserId);
   mergeAuthProfiles(targetUserId, sourceUserId);
 }
 

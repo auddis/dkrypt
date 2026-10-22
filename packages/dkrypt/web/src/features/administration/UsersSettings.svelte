@@ -82,7 +82,7 @@
   }
 
   function billingPlanName(planId: BillingPlanId): string {
-    return ({ regular: 'Regular', priority: 'Priority', api: 'API', priority_api: 'Priority API' })[planId];
+    return ({ regular: 'Regular', priority: 'Priority', api: 'API', priority_api: 'Priority API', access: 'Access', standard: 'Standard', plus: 'Plus', developer: 'Developer', unlimited: 'Unlimited', unlimited_priority: 'Unlimited Priority' })[planId];
   }
 
   function billingAccessDescription(entitlements: NonNullable<AllowedUser['billingEntitlements']>): string {

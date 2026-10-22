@@ -4,6 +4,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { config } from '#config.js';
+import { exportBillingSnapshot, replaceBillingSnapshot } from '#billing.js';
 import { SCHEDULER_JOB_TIMEOUT_MS } from '#jobs/timeouts.js';
 import { artifactKeyForJob, promoteArtifact } from '#artifacts.js';
 import { currentCorrelation, withCorrelation } from '#correlation.js';
@@ -152,6 +153,28 @@ describe('recoverPersistedActiveJobs', () => {
 });
 
 describe('enqueueDecryptJob', () => {
+  test('reserves only new jobs against the account allowance and releases cancelled work', async () => {
+    await clearActiveTestJobs();
+    const previous = exportBillingSnapshot();
+    const ownerId = `quota-${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    replaceBillingSnapshot({
+      ...previous,
+      subscriptions: [...previous.subscriptions, { provider: 'stripe', subscriptionId: `sub_${ownerId}`, customerId: `cus_${ownerId}`, userId: ownerId, status: 'active', planId: 'access', priceId: 'price_access', productId: 'prod_access', occurredAt: now, updatedAt: now }],
+    });
+    const first = enqueueDecryptJob(`com.test.quota.first.${crypto.randomUUID()}`, 'manual', { queuedBy: ownerId, preferredDeviceId: 'missing-device' });
+    enqueueDecryptJob(`com.test.quota.second.${crypto.randomUUID()}`, 'manual', { queuedBy: ownerId, preferredDeviceId: 'missing-device' });
+    try {
+      expect(enqueueDecryptJob(first.bundleId, 'manual', { queuedBy: ownerId }).id).toBe(first.id);
+      expect(() => enqueueDecryptJob(`com.test.quota.third.${crypto.randomUUID()}`, 'manual', { queuedBy: ownerId, preferredDeviceId: 'missing-device' })).toThrow('daily decrypt allowance exhausted');
+      expect(cancelQueuedJob(first.id, 'test')).toBe(true);
+      expect(enqueueDecryptJob(`com.test.quota.replacement.${crypto.randomUUID()}`, 'manual', { queuedBy: ownerId, preferredDeviceId: 'missing-device' }).status).toBe('queued');
+    } finally {
+      await clearActiveTestJobs();
+      replaceBillingSnapshot(previous);
+    }
+  });
+
   test('allows unpinned jobs on any enabled device when no blocker is known', () => {
     const job = { preferredDeviceId: undefined } as Job;
 

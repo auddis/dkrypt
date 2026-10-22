@@ -26,6 +26,7 @@ import {
 import {
   checkoutFromResponse,
   getNowPaymentsProviderStatus,
+  getNowPaymentsMinimumFiat,
   isSupportedNowPaymentsPayment,
   NowPaymentsApiError,
   NowPaymentsClient,
@@ -66,12 +67,11 @@ export async function createCryptoCheckout(input: {
 }): Promise<CryptoCheckoutResult> {
   const existing = findCryptoCheckout(input.userId, input.idempotencyKey);
   if (existing) return { checkout: existing, reused: true };
-  if (!cryptoBillingEnabled) throw new CryptoBillingError('crypto billing is not enabled', 503);
-
   const activeSubscriptions = getBillingSubscriptionsForUser(input.userId).filter((subscription) => isBillingSubscriptionActive(subscription));
-  if (activeSubscriptions.some((subscription) => subscription.provider !== 'nowpayments' || subscription.status !== 'past_due')) {
+  if (activeSubscriptions.some((subscription) => subscription.provider !== 'nowpayments' || subscription.status !== 'past_due' || subscription.planId !== input.planId)) {
     throw new CryptoBillingError('this account already has a subscription', 409);
   }
+  if (!cryptoBillingEnabled) throw new CryptoBillingError('crypto billing is not enabled', 503);
 
   const plan = getPlan(input.planId);
   if (!plan) throw new CryptoBillingError('unknown plan', 400);
@@ -81,6 +81,13 @@ export async function createCryptoCheckout(input: {
 
   const providerStatus = await getNowPaymentsProviderStatus();
   if (!providerStatus.ready) throw new CryptoBillingError(`crypto billing is not ready: ${providerStatus.issues.join(', ')}`, 503);
+  try {
+    const minimum = await getNowPaymentsMinimumFiat(asset, plan.currency, true);
+    if (plan.amount < minimum) throw new CryptoBillingError('crypto checkout is unavailable at this plan price for the selected currency', 409);
+  } catch (error) {
+    if (error instanceof CryptoBillingError) throw error;
+    throw new CryptoBillingError('could not verify the crypto payment minimum', 503);
+  }
 
   const orderId = `dkrypt_${randomUUID()}`;
   const client = new NowPaymentsClient();

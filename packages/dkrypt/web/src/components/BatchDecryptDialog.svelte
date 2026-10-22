@@ -8,6 +8,7 @@
 		queueDecrypt,
 		queueTestFlightDecrypt,
 		submitTestFlightSubscription,
+		type JobSummary,
 		type TFBuild,
 	} from "#lib/api";
 	import {
@@ -51,7 +52,7 @@
 
 	const BUNDLE_ID_RE = /^[A-Za-z0-9.-]{3,200}$/;
 	type BatchResult = BatchQueueEntry & {
-		state: "pending" | "ok" | "error";
+		state: "pending" | "ok" | "error" | "quota";
 		jobId?: string;
 		error?: string;
 	};
@@ -174,7 +175,7 @@
 			...results.map((result) => [
 				result.bundleId,
 				result.selector,
-				result.state === "ok" ? "queued" : result.state === "error" ? "failed" : "pending",
+				result.state === "ok" ? "queued" : result.state === "quota" ? "quota-blocked" : result.state === "error" ? "failed" : "pending",
 				result.jobId,
 				result.error,
 			]),
@@ -298,13 +299,14 @@
 					trackName = app.displayName;
 					versionLabel = `TestFlight ${selector}`;
 					testflight = { appId: app.appId, build };
-					response = await queueTestFlightDecrypt(bundleId, app.appId, build, false, selectedDeviceId);
+					response = await queueTestFlightDecrypt(bundleId, app.appId, build, false, selectedDeviceId, true);
 				} else {
-					response = await queueDecrypt(bundleId, selector);
+					response = await queueDecrypt(bundleId, selector, undefined, false, undefined, true);
 				}
 				const { ok: queuedOk, data } = response;
 				if (!queuedOk) {
-					updateResult(entry, { state: "error", error: "rejected" });
+					const problem = data as JobSummary & { code?: string; error?: string; remediation?: { nextAvailableAt?: number } };
+					updateResult(entry, { state: problem.code === 'daily_decrypt_limit' ? 'quota' : 'error', error: problem.code === 'daily_decrypt_limit' && problem.remediation?.nextAvailableAt ? `Daily allowance used; next slot ${new Date(problem.remediation.nextAvailableAt).toLocaleString()}` : problem.error ?? 'rejected' });
 					continue;
 				}
 				addDecrypt({
@@ -329,8 +331,9 @@
 		}
 
 		submitting = false;
+		const quotaBlocked = results.filter((result) => result.state === 'quota').length;
 		showToast(
-			`Queued ${ok} of ${entries.length}${ok < entries.length ? ` - ${entries.length - ok} failed` : ""}`,
+			`Queued ${ok} of ${entries.length}${quotaBlocked ? ` · ${quotaBlocked} blocked by daily allowance` : ''}${ok + quotaBlocked < entries.length ? ` · ${entries.length - ok - quotaBlocked} failed` : ""}`,
 			ok === entries.length ? "success" : "error",
 		);
 	}
@@ -344,12 +347,12 @@
 	}
 
 	const failedCount = $derived(
-		results.filter((r) => r.state === "error").length,
+		results.filter((r) => r.state === "error" || r.state === "quota").length,
 	);
 
 	async function retryFailed(): Promise<void> {
 		const failed = results
-			.filter((r) => r.state === "error")
+			.filter((r) => r.state === "error" || r.state === "quota")
 			.map(({ bundleId, selector }) => ({ bundleId, selector }));
 		if (failed.length === 0) return;
 		results = results.map((r) =>
@@ -503,6 +506,8 @@
 					{:else if r.state === "ok"}
 						<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-ok"
 						></span>
+					{:else if r.state === "quota"}
+						<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"></span>
 					{:else}
 						<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-err"
 						></span>

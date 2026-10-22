@@ -12,6 +12,8 @@ const auditActionSchema = Type.Union([
   Type.Literal('watch.update'),
   Type.Literal('watch.remove'),
   Type.Literal('watch.import'),
+  Type.Literal('watch.billing-owner-request'),
+  Type.Literal('watch.billing-owner-accept'),
   Type.Literal('device.add'),
   Type.Literal('device.update'),
   Type.Literal('device.remove'),
@@ -58,6 +60,8 @@ const auditActionSchema = Type.Union([
   Type.Literal('integration.create'),
   Type.Literal('integration.rotate'),
   Type.Literal('integration.revoke'),
+  Type.Literal('integration.billing-owner-request'),
+  Type.Literal('integration.billing-owner-accept'),
   Type.Literal('auth.account.link'),
   Type.Literal('auth.account.merge'),
 ]);

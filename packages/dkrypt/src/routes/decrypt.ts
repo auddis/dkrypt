@@ -6,6 +6,7 @@ import { fastifyRequireApiKey, fastifyRequireTestFlightScope, getFastifyApiKeyCo
 import { fastifyBlockDuringMaintenance } from '#maintenance.js';
 import { jobFileAvailable, jobSummary, streamFilePath, streamJobFile } from '#jobs/http.js';
 import { enqueueDecryptJob, getJob, waitForJob } from '#jobs/store.js';
+import { DailyDecryptLimitError } from '#jobs/repository.js';
 import { DEFAULT_PROJECT_ID, getProject, recordApiKeyBundleUsage } from '#store/state.js';
 import { apiKeyCanAccessProject, isBundleIdAllowed } from '#apiKeyAccess.js';
 import { listBuilds, listTrains, type TFBuild } from '#testflight.js';
@@ -428,6 +429,7 @@ export function createDecryptRoutes(
             reply.code(error.statusCode);
             return apiErrorEnvelope(error.message, 'request_error', request.id);
           }
+          if (error instanceof DailyDecryptLimitError) throw error;
           const message = error instanceof Error ? error.message : String(error);
           const status = message.includes('version') || message.includes('build') || message.includes('train') ? 404 : 502;
           reply.code(status);

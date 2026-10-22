@@ -52,6 +52,40 @@ export class FixedWindowRateLimiter {
   }
 }
 
+export class SlidingWindowRateLimiter {
+  private readonly requests = new Map<string, number[]>();
+
+  constructor(readonly windowMs: number) {
+    setInterval(() => this.removeExpiredRequests(Date.now()), windowMs).unref();
+  }
+
+  private removeExpiredRequests(now: number): void {
+    const cutoff = now - this.windowMs;
+    for (const [key, timestamps] of this.requests) {
+      const active = timestamps.filter((timestamp) => timestamp > cutoff);
+      if (active.length > 0) this.requests.set(key, active);
+      else this.requests.delete(key);
+    }
+  }
+
+  consume(key: string, limit: number, now = Date.now()): RateLimitDecision {
+    const previous = this.requests.get(key) ?? [];
+    const active = previous.filter((timestamp) => timestamp > now - this.windowMs);
+    const allowed = active.length < limit;
+    if (allowed) active.push(now);
+    if (active.length > 0) this.requests.set(key, active);
+    else this.requests.delete(key);
+    const resetAt = (active[0] ?? now) + this.windowMs;
+    return {
+      allowed,
+      limit,
+      remaining: Math.max(0, limit - active.length),
+      resetAt,
+      retryAfterSeconds: allowed ? 0 : Math.max(1, Math.ceil((resetAt - now) / 1000)),
+    };
+  }
+}
+
 export const externalRequestRateLimiter = new FixedWindowRateLimiter(10, 60_000);
 
 export function fastifyRateLimitPerUser(

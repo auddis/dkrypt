@@ -1,10 +1,27 @@
 import type { NextFunction, Request, Response } from '#http.js';
 import type { FastifyReply, FastifyRequest, HookHandlerDoneFunction } from 'fastify';
-import { isGeneratedApiKey, recordApiKeyOutcome, verifyApiKey, type ApiKeyAuthResult } from '#store/state.js';
+import { getUserEffectivePermissions, isGeneratedApiKey, recordApiKeyOutcome, verifyApiKey, type ApiKeyAuthResult } from '#store/state.js';
+import { hasPermission, PermissionFlag } from '#permissions.js';
 import { isPublicApiKeyRoute } from '#publicApi.js';
 import { authenticateGithubOidc } from '#githubOidc.js';
+import { getBillingEntitlements } from '#billing.js';
+import { SlidingWindowRateLimiter } from '#util/rateLimit.js';
 
 const fastifyApiKeyContext = new WeakMap<FastifyRequest, ApiKeyAuthResult>();
+const accountApiRateLimiter = new SlidingWindowRateLimiter(60_000);
+
+function permitAccountApiRequest(ownerId: string, request: FastifyRequest, reply: FastifyReply): boolean {
+  const limit = getBillingEntitlements(ownerId).apiRatePerMinute;
+  if (limit === undefined) return true;
+  const decision = accountApiRateLimiter.consume(ownerId.toLowerCase(), limit);
+  reply.header('X-RateLimit-Limit', String(decision.limit));
+  reply.header('X-RateLimit-Remaining', String(decision.remaining));
+  reply.header('X-RateLimit-Reset', String(Math.ceil(decision.resetAt / 1000)));
+  if (decision.allowed) return true;
+  reply.header('Retry-After', String(decision.retryAfterSeconds));
+  reply.code(429).send({ error: 'account API rate limit exceeded', code: 'api_rate_limited', message: 'account API rate limit exceeded', requestId: request.id, retryable: true });
+  return false;
+}
 
 export function getFastifyApiKeyContext(request: FastifyRequest): ApiKeyAuthResult | undefined {
   return fastifyApiKeyContext.get(request);
@@ -66,7 +83,13 @@ export function fastifyRequireApiKey(request: FastifyRequest, reply: FastifyRepl
           reply.code(401).send({ error: 'unauthorized', code: 'unauthorized', message: 'unauthorized', requestId: request.id, retryable: false });
           return;
         }
-        fastifyApiKeyContext.set(request, { ownerId: 'root', projectId: policy.projectId, allowedBundleIds: policy.bundleIds, allowTestFlight: policy.allowTestFlight });
+        const ownerId = policy.billingOwnerId ?? 'root';
+        if (policy.billingOwnerId && ownerId !== 'root' && !hasPermission(getUserEffectivePermissions(ownerId), PermissionFlag.requestDecrypt)) {
+          reply.code(403).send({ error: 'the automation owner no longer has decrypt access', code: 'automation_owner_unavailable', message: 'the automation owner no longer has decrypt access', requestId: request.id, retryable: false });
+          return;
+        }
+        if (!permitAccountApiRequest(ownerId, request, reply)) return;
+        fastifyApiKeyContext.set(request, { ownerId, projectId: policy.projectId, allowedBundleIds: policy.bundleIds, allowTestFlight: policy.allowTestFlight });
         done();
       }, () => {
         reply.code(401).send({ error: 'unauthorized', code: 'unauthorized', message: 'unauthorized', requestId: request.id, retryable: false });
@@ -81,6 +104,7 @@ export function fastifyRequireApiKey(request: FastifyRequest, reply: FastifyRepl
     rejectOutOfScopeApiKey(request, reply, keyId);
     return;
   }
+  if (result.ownerId && !permitAccountApiRequest(result.ownerId, request, reply)) return;
   fastifyApiKeyContext.set(request, result);
   if (keyId) {
     reply.raw.once('finish', () => recordApiKeyOutcome(keyId, request.method, request.routeOptions.url ?? request.url.split('?')[0], reply.raw.statusCode));

@@ -31,6 +31,18 @@ describe('NOWPayments adapter', () => {
     expect(requestBody).toMatchObject({ price_amount: 10, price_currency: 'eur', pay_currency: 'usdt', order_id: 'dkrypt_order' });
   });
 
+  test('reads the provider minimum in EUR before offering a low-price tier', async () => {
+    let requestedUrl = '';
+    const fetchFn = (async (input: string | URL | Request) => {
+      requestedUrl = String(input);
+      return new Response(JSON.stringify({ min_amount: 3.2, fiat_equivalent: 3.2 }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const client = new NowPaymentsClient({ baseUrl: 'https://api.example/v1', apiKey: 'api_test', fetchFn });
+
+    expect(await client.getMinimumFiatAmount('EUR', 'USDC')).toBe(3.2);
+    expect(requestedUrl).toBe('https://api.example/v1/min-amount?currency_from=eur&currency_to=usdc&fiat_equivalent=eur');
+  });
+
   test('uses the previous API key after NOWPayments rejects the current key', async () => {
     const usedKeys: string[] = [];
     const fetchFn = (async (_input: string | URL | Request, init?: RequestInit) => {

@@ -97,6 +97,10 @@ export const dashboardMaintenanceWindowSchema = Type.Object({
 
 export const dashboardWatchResponseSchema = Type.Object({
   id: identifierSchema,
+  billingOwnerId: Type.Optional(Type.String()),
+  billingOwnerDisplayName: Type.Optional(Type.String()),
+  billingOwnerTransfer: Type.Optional(Type.Object({ userId: Type.String(), requestedBy: Type.String(), requestedAt: Type.Number() })),
+  billingOwnerTransferDisplayName: Type.Optional(Type.String()),
   projectId: Type.Optional(projectIdentifierSchema),
   bundleId: bundleIdSchema,
   repo: Type.String(),

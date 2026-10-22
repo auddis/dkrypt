@@ -1,6 +1,14 @@
 import { expect, test } from 'bun:test';
 import Fastify from 'fastify';
-import { fastifyRateLimitPerUser, FixedWindowRateLimiter } from '#util/rateLimit.js';
+import { fastifyRateLimitPerUser, FixedWindowRateLimiter, SlidingWindowRateLimiter } from '#util/rateLimit.js';
+
+test('sliding account limit cannot be bypassed by using another key', () => {
+  const limiter = new SlidingWindowRateLimiter(60_000);
+  expect(limiter.consume('owner', 2, 1_000).allowed).toBe(true);
+  expect(limiter.consume('owner', 2, 2_000).allowed).toBe(true);
+  expect(limiter.consume('owner', 2, 3_000)).toMatchObject({ allowed: false, retryAfterSeconds: 58 });
+  expect(limiter.consume('owner', 2, 61_001).allowed).toBe(true);
+});
 
 test('fixed-window rate limiter exposes bounded retry metadata', () => {
   const limiter = new FixedWindowRateLimiter(2, 60_000);

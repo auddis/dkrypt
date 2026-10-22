@@ -53,7 +53,7 @@ test('budget-deferred runOnce checks remain recoverable after scheduler restart'
     pollCron: '0 * * * *',
     timezone: 'UTC',
     missedRunPolicy: 'runOnce',
-  }, 'scheduler recovery test');
+  }, 'root');
   expect(created.watch).toBeDefined();
   const watch = created.watch!;
   const missedCheckpoint = Date.now() - 3 * 60 * 60 * 1000;
