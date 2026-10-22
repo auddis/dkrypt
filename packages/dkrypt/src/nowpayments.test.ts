@@ -18,7 +18,7 @@ describe('NOWPayments adapter', () => {
     const result = await client.createInvoice({
       amount: 10,
       currency: 'EUR',
-      payCurrency: 'USDT',
+      payCurrency: 'USDC',
       orderId: 'dkrypt_order',
       orderDescription: 'dkrypt Priority plan',
       ipnCallbackUrl: 'https://dkrypt.test/v1/nowpayments/webhook',
@@ -28,7 +28,7 @@ describe('NOWPayments adapter', () => {
 
     expect(result.invoice_url).toBe('https://nowpayments.test/invoice_test');
     expect(requestHeaders?.get('x-api-key')).toBe('api_test');
-    expect(requestBody).toMatchObject({ price_amount: 10, price_currency: 'eur', pay_currency: 'usdt', order_id: 'dkrypt_order' });
+    expect(requestBody).toMatchObject({ price_amount: 10, price_currency: 'eur', pay_currency: 'usdc', order_id: 'dkrypt_order' });
   });
 
   test('reads the provider minimum in EUR before offering a low-price tier', async () => {
@@ -39,8 +39,20 @@ describe('NOWPayments adapter', () => {
     }) as unknown as typeof fetch;
     const client = new NowPaymentsClient({ baseUrl: 'https://api.example/v1', apiKey: 'api_test', fetchFn });
 
-    expect(await client.getMinimumFiatAmount('EUR', 'USDC')).toBe(3.2);
-    expect(requestedUrl).toBe('https://api.example/v1/min-amount?currency_from=eur&currency_to=usdc&fiat_equivalent=eur');
+    expect(await client.getMinimumFiatAmount('USDC', 'USDCBASE', 'EUR')).toBe(3.2);
+    expect(requestedUrl).toBe('https://api.example/v1/min-amount?currency_from=usdc&currency_to=usdcbase&fiat_equivalent=eur');
+  });
+
+  test('reads merchant currencies without exposing wallet details', async () => {
+    let requestedUrl = '';
+    const fetchFn = (async (input: string | URL | Request) => {
+      requestedUrl = String(input);
+      return new Response(JSON.stringify({ selectedCurrencies: ['usdcbase'] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const client = new NowPaymentsClient({ baseUrl: 'https://api.example/v1', apiKey: 'api_test', fetchFn });
+
+    await expect(client.getSelectedCurrencies()).resolves.toEqual(['USDCBASE']);
+    expect(requestedUrl).toBe('https://api.example/v1/merchant/coins');
   });
 
   test('uses the previous API key after NOWPayments rejects the current key', async () => {

@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-async function loadDefaultRetention(): Promise<{ jobRetentionMinutes: number }> {
+async function loadDefaultRetention(): Promise<{ jobRetentionMinutes: number; nowpaymentsSupportedAssets: string[]; nowpaymentsDefaultAsset: string; nowpaymentsOutcomeCurrency: string }> {
   const child = Bun.spawn(
     [
       process.execPath,
       '-e',
-      "const { config } = await import('./src/config.ts'); console.log(JSON.stringify({ jobRetentionMinutes: config.jobRetentionMinutes }));",
+      "const { config } = await import('./src/config.ts'); console.log(JSON.stringify({ jobRetentionMinutes: config.jobRetentionMinutes, nowpaymentsSupportedAssets: config.nowpaymentsSupportedAssets, nowpaymentsDefaultAsset: config.nowpaymentsDefaultAsset, nowpaymentsOutcomeCurrency: config.nowpaymentsOutcomeCurrency }));",
     ],
     {
       cwd: process.cwd(),
@@ -24,7 +24,7 @@ async function loadDefaultRetention(): Promise<{ jobRetentionMinutes: number }> 
     child.exited,
   ]);
   if (exitCode !== 0) throw new Error(`config defaults lookup failed: ${stderr}`);
-  return JSON.parse(stdout) as { jobRetentionMinutes: number };
+  return JSON.parse(stdout) as { jobRetentionMinutes: number; nowpaymentsSupportedAssets: string[]; nowpaymentsDefaultAsset: string; nowpaymentsOutcomeCurrency: string };
 }
 
 async function loadStripeMissingConfiguration(): Promise<string[]> {
@@ -110,7 +110,12 @@ async function loadInvalidCanaryConfiguration(): Promise<string> {
 
 describe('config defaults', () => {
   test('keeps completed job history for 24 hours by default', async () => {
-    await expect(loadDefaultRetention()).resolves.toEqual({ jobRetentionMinutes: 1440 });
+    await expect(loadDefaultRetention()).resolves.toEqual({
+      jobRetentionMinutes: 1440,
+      nowpaymentsSupportedAssets: ['USDC', 'USDT'],
+      nowpaymentsDefaultAsset: 'USDC',
+      nowpaymentsOutcomeCurrency: 'USDC',
+    });
   });
 
   test('reports every missing Stripe runtime prerequisite', async () => {

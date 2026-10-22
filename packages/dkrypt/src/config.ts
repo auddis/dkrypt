@@ -95,6 +95,7 @@ export const config = {
   nowpaymentsEnvironment: optional('NOWPAYMENTS_ENVIRONMENT', 'live'),
   nowpaymentsSupportedAssets: optionalList('NOWPAYMENTS_SUPPORTED_ASSETS', 'USDC,USDT').map((value) => value.toUpperCase()),
   nowpaymentsDefaultAsset: optional('NOWPAYMENTS_DEFAULT_ASSET', 'USDC').toUpperCase(),
+  nowpaymentsOutcomeCurrency: optional('NOWPAYMENTS_OUTCOME_CURRENCY', 'USDC').toUpperCase(),
   nowpaymentsPriceCurrency: optional('NOWPAYMENTS_PRICE_CURRENCY', 'EUR').toUpperCase(),
 
   ipadecryptBin: optional('IPADECRYPT_BIN', 'ipadecrypt'),
@@ -213,6 +214,7 @@ const nowpaymentsRequirements = [
   ['NOWPAYMENTS_API_KEY', config.nowpaymentsApiKey],
   ['NOWPAYMENTS_IPN_SECRET', config.nowpaymentsIpnSecret],
   ['NOWPAYMENTS_API_BASE_URL', config.nowpaymentsApiBaseUrl],
+  ['NOWPAYMENTS_OUTCOME_CURRENCY', config.nowpaymentsOutcomeCurrency],
   ['NOWPAYMENTS_PRICE_CURRENCY', config.nowpaymentsPriceCurrency],
 ] as const;
 export const nowpaymentsMissingConfiguration = nowpaymentsRequirements

@@ -152,12 +152,13 @@ NOWPAYMENTS_API_KEY=...
 NOWPAYMENTS_IPN_SECRET=...
 NOWPAYMENTS_API_BASE_URL=https://api.nowpayments.io/v1
 NOWPAYMENTS_ENVIRONMENT=live
-NOWPAYMENTS_SUPPORTED_ASSETS=USDC,USDT
+NOWPAYMENTS_SUPPORTED_ASSETS=USDC
 NOWPAYMENTS_DEFAULT_ASSET=USDC
+NOWPAYMENTS_OUTCOME_CURRENCY=USDCBASE
 NOWPAYMENTS_PRICE_CURRENCY=EUR
 ```
 
-Set the IPN destination to `https://<your-host>/v1/nowpayments/webhook`. The provider webhook is durable, deduplicated, and replayable by managers. Crypto payments have provider-specific refund and tax handling; they do not inherit Stripe Managed Payments or Stripe merchant-of-record treatment.
+Set the supported and default assets to exact currency codes enabled in your NOWPayments account, and set the outcome currency to the wallet currency configured there. The example accepts USDC and settles to USDC on Base. Set the IPN destination to `https://<your-host>/v1/nowpayments/webhook`. The provider webhook is durable, deduplicated, and replayable by managers. Crypto payments have provider-specific refund and tax handling; they do not inherit Stripe Managed Payments or Stripe merchant-of-record treatment.
 
 </details>
 

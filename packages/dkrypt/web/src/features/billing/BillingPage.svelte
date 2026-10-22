@@ -274,6 +274,10 @@
     return cryptoReady() && minimum !== undefined && plan.amount >= minimum;
   }
 
+  function cryptoAssetLabel(asset: string): string {
+    return asset.toUpperCase() === 'USDCBASE' ? 'USDC · Base' : asset;
+  }
+
   onMount(() => {
     void initializeBilling().then(() => {
       if (checkoutState === 'success') void waitForActivation();
@@ -351,7 +355,7 @@
           <button class={paymentProvider === 'crypto' ? 'rounded-xl border border-accent bg-accent/5 px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50' : 'rounded-xl border px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50'} disabled={!cryptoReady()} onclick={() => (paymentProvider = 'crypto')}><div class="flex items-center justify-between gap-2 font-medium"><span>Crypto</span><Badge variant="secondary">{billing.providers.crypto.assets.join(' / ')}</Badge></div><div class="mt-1 text-xs text-muted">Hosted NOWPayments invoice priced in EUR. Renew with a new crypto payment every 30 days.</div></button>
         </div>
         {#if paymentProvider === 'crypto'}
-          <div class="mt-4 border-t border-border pt-4"><label class="block max-w-xs text-xs text-muted">Crypto currency<select class="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text" bind:value={cryptoAsset}>{#each billing.providers.crypto.assets as asset}<option value={asset}>{asset}</option>{/each}</select></label><p class="mt-3 text-xs text-muted">Crypto checkout is separate from Stripe and does not collect billing information.</p></div>
+          <div class="mt-4 border-t border-border pt-4"><label class="block max-w-xs text-xs text-muted">Crypto currency<select class="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text" bind:value={cryptoAsset}>{#each billing.providers.crypto.assets as asset}<option value={asset}>{cryptoAssetLabel(asset)}</option>{/each}</select></label><p class="mt-3 text-xs text-muted">Crypto checkout is separate from Stripe and does not collect billing information.</p></div>
           {#if !cryptoReady()}<div class="mt-3 text-xs text-muted">Crypto checkout is not available until NOWPayments and the selected currency are ready.</div>{/if}
         {/if}
       </Card>
