@@ -13,11 +13,18 @@ interface DashboardOfflineAppStoreServices {
   readiness: typeof getOfflineAppStoreReadiness;
   saveAccount: typeof saveAppleAccountCredentials;
   saveCredential: typeof saveAppleAccountFairPlayCredential;
-  authenticate: typeof authenticateAppleAccount;
+  authenticate: (verificationCode?: string, signal?: AbortSignal) => Promise<void>;
   getCredentialRetrievalStatus: typeof getFairPlayCredentialRetrievalStatus;
   retrieveCredential: typeof startFairPlayCredentialRetrieval;
   clear: typeof clearAppleAccountCredentials;
 }
+
+interface DashboardOfflineAppStoreRouteOptions {
+  authenticationTimeoutMs?: number;
+}
+
+const DEFAULT_AUTHENTICATION_TIMEOUT_MS = 45_000;
+const AUTHENTICATION_TIMEOUT_MESSAGE = 'Apple Account verification timed out. Try again after checking Apple Account status.';
 
 const defaultServices: DashboardOfflineAppStoreServices = {
   readiness: getOfflineAppStoreReadiness,
@@ -29,8 +36,12 @@ const defaultServices: DashboardOfflineAppStoreServices = {
   clear: clearAppleAccountCredentials,
 };
 
-export function createDashboardOfflineAppStoreRoutes(overrides: Partial<DashboardOfflineAppStoreServices> = {}): FastifyPluginAsyncTypebox {
+export function createDashboardOfflineAppStoreRoutes(
+  overrides: Partial<DashboardOfflineAppStoreServices> = {},
+  options: DashboardOfflineAppStoreRouteOptions = {},
+): FastifyPluginAsyncTypebox {
   const services = { ...defaultServices, ...overrides };
+  const authenticationTimeoutMs = options.authenticationTimeoutMs ?? DEFAULT_AUTHENTICATION_TIMEOUT_MS;
   return async (server) => {
     server.addHook('preHandler', fastifyRequireSession);
     const administrator = fastifyRequirePermission(PermissionFlag.administrator);
@@ -74,11 +85,34 @@ export function createDashboardOfflineAppStoreRoutes(overrides: Partial<Dashboar
       schema: { hide: true, body: Type.Object({ verificationCode: Type.Optional(Type.String({ pattern: '^\\d{6}$' })) }, { additionalProperties: false }) },
       preHandler: reauthenticatedAdministrator,
     }, async (request, reply) => {
+      const controller = new AbortController();
+      let timedOut = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        await services.authenticate(request.body.verificationCode);
+        const authentication = services.authenticate(request.body.verificationCode, controller.signal);
+        await Promise.race([
+          authentication,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              timedOut = true;
+              const error = new Error(AUTHENTICATION_TIMEOUT_MESSAGE);
+              controller.abort(error);
+              reject(error);
+            }, authenticationTimeoutMs);
+          }),
+        ]);
         recordAudit(getFastifySession(request)!.sub, 'settings.update', 'appstore-offline-account', 'Apple Account session verified');
         return services.readiness();
       } catch (error) {
+        if (timedOut) {
+          return reply.code(504).send({
+            error: AUTHENTICATION_TIMEOUT_MESSAGE,
+            code: 'apple_account_authentication_timeout',
+            message: AUTHENTICATION_TIMEOUT_MESSAGE,
+            requestId: request.id,
+            retryable: true,
+          });
+        }
         if (error instanceof OfflineAppStoreAuthenticationError) {
           const message = error.code === 'two_factor_required'
             ? 'Apple requires a verification code. Approve the sign-in on the trusted iPad, then submit its six-digit code.'
@@ -86,6 +120,8 @@ export function createDashboardOfflineAppStoreRoutes(overrides: Partial<Dashboar
           return reply.code(409).send({ ...createHttpErrorEnvelope(request.id, 409, message), code: error.code });
         }
         return reply.code(409).send(createHttpErrorEnvelope(request.id, 409, error instanceof Error ? error.message : 'Apple Account authentication failed'));
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     });
 

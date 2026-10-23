@@ -6,6 +6,7 @@ import { projectSelectionState } from '#lib/projectSelection.svelte';
 import { serverStateCache, type ServerQueryListener } from '#lib/serverStateCache.svelte';
 import { isUnauthenticatedResponse } from '#lib/apiAuthResponse.js';
 import { saveOfflineAppStoreAccountRequest } from '#lib/offlineAppStoreAccountSave.js';
+import { authenticateOfflineAppStoreAccountRequest } from '#lib/offlineAppStoreAuthentication.js';
 
 export type { Role };
 export { rateLimitState, type RateLimitInfo } from '#lib/rateLimit.svelte';
@@ -1749,7 +1750,7 @@ export function saveOfflineAppStoreAccount(appleId: string, password: string): P
 }
 
 export function authenticateOfflineAppStoreAccount(verificationCode?: string): Promise<OfflineAppStoreStatus> {
-  return apiJson('/v1/dashboard/appstore-offline/authenticate', { method: 'POST', body: JSON.stringify(verificationCode ? { verificationCode } : {}) });
+  return authenticateOfflineAppStoreAccountRequest(apiJson, verificationCode);
 }
 
 export function saveOfflineAppStoreCredential(credential: string): Promise<OfflineAppStoreStatus> {

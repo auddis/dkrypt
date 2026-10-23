@@ -110,6 +110,7 @@ function runTerminalCommand(
   let handling = Promise.resolve();
   const responded = new Set<string>();
   let closed = false;
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
 
   const onOutput = (chunk: Buffer | string) => {
     outputTail = `${outputTail}${chunk.toString()}`.slice(-8192);
@@ -136,6 +137,10 @@ function runTerminalCommand(
   const abort = () => {
     if (closed) return;
     terminateChildProcess(child, 'SIGTERM');
+    forceKillTimer = setTimeout(() => {
+      if (!closed) terminateChildProcess(child, 'SIGKILL');
+    }, 5_000);
+    forceKillTimer.unref?.();
   };
   signal?.addEventListener('abort', abort, { once: true });
   if (signal?.aborted) abort();
@@ -145,11 +150,13 @@ function runTerminalCommand(
   return new Promise((resolve, reject) => {
     child.once('error', (error) => {
       closed = true;
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       signal?.removeEventListener('abort', abort);
       reject(error);
     });
     child.once('close', (code) => {
       closed = true;
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       signal?.removeEventListener('abort', abort);
       void handling.then(() => resolve({ output: outputTail, code }), reject);
     });
@@ -344,15 +351,38 @@ async function saveSessionWorkspace(root: string): Promise<void> {
   }
 }
 
-async function withSessionWorkspace<T>(operation: (homeDirectory: string) => Promise<T>): Promise<T> {
+async function waitForSessionOperation(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    await previous;
+    return;
+  }
+  throwIfAborted(signal);
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason instanceof Error ? signal.reason : new Error('App Store session operation was aborted'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try {
+    await Promise.race([previous, aborted]);
+    throwIfAborted(signal);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}
+
+async function withSessionWorkspace<T>(operation: (homeDirectory: string) => Promise<T>, signal?: AbortSignal): Promise<T> {
   const previous = sessionOperation;
   let release: () => void = () => {};
   sessionOperation = new Promise<void>((resolve) => { release = resolve; });
-  await previous;
+  let acquired = false;
   let homeDirectory: string | undefined;
   let result: T | undefined;
   let operationError: unknown;
   try {
+    await waitForSessionOperation(previous, signal);
+    acquired = true;
+    throwIfAborted(signal);
     homeDirectory = await mkdtemp(path.join(SESSION_WORKSPACE_ROOT, 'dkrypt-appstore-session-'));
     await chmod(homeDirectory, 0o700);
     await restoreSessionWorkspace(homeDirectory);
@@ -368,7 +398,8 @@ async function withSessionWorkspace<T>(operation: (homeDirectory: string) => Pro
     try {
       if (homeDirectory) await rm(homeDirectory, { recursive: true, force: true });
     } finally {
-      release();
+      if (acquired) release();
+      else void previous.then(release);
     }
   }
   if (operationError !== undefined) throw operationError;
@@ -402,7 +433,7 @@ async function runDefaultDownload(job: Job, secrets: AppleAccountSecrets, output
         }
         return undefined;
       },
-    )).finally(() => { job.childProcess = undefined; });
+    ), signal).finally(() => { job.childProcess = undefined; });
   if (result.code !== 0) {
     const twoFactorRequired = /2fa code|verification code|two-factor/i.test(result.output);
     if (twoFactorRequired) {
@@ -467,7 +498,7 @@ async function runDefaultDecrypt(job: Job, secrets: AppleAccountSecrets, inputPa
   }
 }
 
-export async function authenticateAppleAccount(authCode?: string): Promise<void> {
+export async function authenticateAppleAccount(authCode?: string, signal?: AbortSignal): Promise<void> {
   if (authCode !== undefined && !/^\d{6}$/.test(authCode)) throw new Error('enter the six-digit Apple verification code');
   const secrets = readAppleAccountSecrets();
   if (!secrets) throw new OfflineAppStoreUnavailableError('Apple Account credentials are not configured');
@@ -478,7 +509,7 @@ export async function authenticateAppleAccount(authCode?: string): Promise<void>
       config.appStoreOfflineDownloaderBin,
       args,
       homeDirectory,
-      undefined,
+      signal,
       () => {},
       async (prompt) => {
         if (/2fa code|verification code/i.test(prompt)) {
@@ -491,7 +522,7 @@ export async function authenticateAppleAccount(authCode?: string): Promise<void>
         if (/apple id|apple account/i.test(prompt)) return secrets.appleId;
         return undefined;
       },
-    ));
+    ), signal);
   if (result.code !== 0) {
     const twoFactorRequired = /2fa code|verification code|two-factor/i.test(result.output) && !usedAuthCode;
     const code = twoFactorRequired ? 'two_factor_required' : 'authentication_failed';

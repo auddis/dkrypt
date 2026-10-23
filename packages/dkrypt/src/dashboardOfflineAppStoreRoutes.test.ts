@@ -100,6 +100,46 @@ test('offline App Store authentication accepts only a six-digit one-time code', 
   }
 });
 
+test('Apple Account authentication aborts and returns a timeout when the provider never responds', async () => {
+  let receivedSignal: AbortSignal | undefined;
+  let releaseProvider: () => void = () => {};
+  let abortObserved = false;
+  const server = Fastify().withTypeProvider<TypeBoxTypeProvider>();
+  await server.register(createDashboardOfflineAppStoreRoutes({
+    readiness,
+    authenticate: ((_code?: string, signal?: AbortSignal) => {
+      receivedSignal = signal;
+      return new Promise<void>((resolve, reject) => {
+        releaseProvider = resolve;
+        signal?.addEventListener('abort', () => {
+          abortObserved = true;
+          reject(signal.reason);
+        }, { once: true });
+      });
+    }),
+  }, { authenticationTimeoutMs: 10 }));
+
+  try {
+    const result = await Promise.race([
+      server.inject({
+        method: 'POST',
+        url: '/v1/dashboard/appstore-offline/authenticate',
+        headers: { cookie: sessionCookie(PermissionFlag.administrator, true) },
+        payload: {},
+      }).then((response) => response),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 50)),
+    ]);
+
+    expect(result?.statusCode).toBe(504);
+    expect(result?.json()).toMatchObject({ error: 'Apple Account verification timed out. Try again after checking Apple Account status.' });
+    expect(receivedSignal?.aborted).toBe(true);
+    expect(abortObserved).toBe(true);
+  } finally {
+    releaseProvider();
+    await server.close();
+  }
+});
+
 test('FairPlay credential retrieval requires recent manager authentication and targets only the requested device', async () => {
   const targets: string[] = [];
   let retrievalStatus: CredentialRetrievalStatus = { state: 'idle' };
