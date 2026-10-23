@@ -2,6 +2,9 @@ import { afterEach, expect, test } from 'bun:test';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createAppleAccountVault } from '#appleAccountVault.js';
+import { createAppleAccountRepository } from '#store/appleAccountRepository.js';
+import { openStateCollectionDatabase } from '#store/sqlite.js';
 import { createOfflineAppStoreProcessor, OfflineAppStoreUnavailableError, type OfflineAppStoreDependencies } from '#offlineAppStore.js';
 import type { AppleAccountSecrets } from '#appleAccountVault.js';
 import type { Job } from '#jobs/types.js';
@@ -133,4 +136,31 @@ test('offline App Store processor rejects a package for another app or release',
 
   const wrongVersion = await createDependencies();
   await expect(createOfflineAppStoreProcessor(wrongVersion).run(job({ versionLabel: '2.0', externalVersionId: 'version-2' }))).rejects.toThrow('does not match requested 2.0');
+});
+
+test('offline decryption receives the account credential only from the encrypted vault', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dkrypt-offline-vault-'));
+  directories.push(root);
+  const database = openStateCollectionDatabase({ stateDir: root, filename: 'state.sqlite' }, ['appstore_offline_account']);
+  const vault = createAppleAccountVault(createAppleAccountRepository(database), Buffer.alloc(32, 18).toString('base64url'));
+  const credential = Buffer.alloc(16, 12).toString('base64');
+  vault.saveAccount('account@example.test', 'account-password');
+  vault.saveCredential(credential);
+  vault.markAuthenticated(1);
+  let receivedCredential: string | undefined;
+
+  try {
+    const dependencies = await createDependencies({
+      getSecrets: vault.read,
+      getVaultStatus: vault.status,
+      async runDecrypt(_job, secrets, _inputPath, outputPath) {
+        receivedCredential = secrets.fairPlayCredential;
+        await writeFile(outputPath, 'decrypted ipa');
+      },
+    });
+    await createOfflineAppStoreProcessor(dependencies).run(job());
+    expect(receivedCredential).toBe(credential);
+  } finally {
+    vault.close();
+  }
 });

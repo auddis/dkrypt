@@ -80,7 +80,7 @@ jobs:
 
   image:
     name: Build immutable image
-    needs: ci
+    needs: [ci, fairplay-credential-bundle]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -95,6 +95,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Download FairPlay credential helper bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: fairplay-credential-bundle-${{ github.sha }}
+          path: packages/dkrypt/fairplay-credential-bundle
       - name: Read runtime Bun version
         id: bun_version
         run: |
@@ -166,6 +171,7 @@ jobs:
           docker tag "${IMAGE}:${IMAGE_TAG}" "${IMAGE}:main"
           docker push "${IMAGE}:main"
           printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
       - name: Upload image SBOM
         uses: actions/upload-artifact@v7
         with:
@@ -187,6 +193,35 @@ jobs:
         run: |
           cosign sign --yes "$IMAGE"
           cosign attest --yes --predicate dkrypt-sbom.spdx.json --type https://spdx.dev/Document "$IMAGE"
+
+  fairplay-credential-bundle:
+    name: Build signed iOS FairPlay credential helper
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out dkrypt
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - name: Build the pinned upstream helper
+        run: |
+          set -euo pipefail
+          brew install ldid
+          git clone --filter=blob:none https://github.com/EthanArbuckle/fairplay-decrypt.git "$RUNNER_TEMP/fairplay-decrypt"
+          git -C "$RUNNER_TEMP/fairplay-decrypt" checkout --detach 1bad106ee1698c6d9c483f67d898183ffa4c6eb3
+          make -C "$RUNNER_TEMP/fairplay-decrypt/credential-retrieval"
+          for item in credential.ios driver.ios trigger.ios static-key-table.bin core4-word-table.bin; do
+            test -s "$RUNNER_TEMP/fairplay-decrypt/credential-retrieval/build/bundle/$item"
+          done
+      - name: Upload FairPlay credential helper bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: fairplay-credential-bundle-${{ github.sha }}
+          path: ${{ runner.temp }}/fairplay-decrypt/credential-retrieval/build/bundle/
+          if-no-files-found: error
+          retention-days: 1
 
   deploy:
     name: Deploy to homelab

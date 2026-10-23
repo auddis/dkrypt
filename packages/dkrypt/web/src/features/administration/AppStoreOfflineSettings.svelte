@@ -5,19 +5,19 @@
   import Card from '#lib/components/ui/Card.svelte';
   import Input from '#lib/components/ui/Input.svelte';
   import Label from '#lib/components/ui/Label.svelte';
-  import Textarea from '#lib/components/ui/Textarea.svelte';
-  import { authenticateOfflineAppStoreAccount, fetchOfflineAppStoreStatus, saveOfflineAppStoreAccount, saveOfflineAppStoreCredential, type OfflineAppStoreStatus } from '#lib/api';
+  import { authenticateOfflineAppStoreAccount, fetchDevices, fetchOfflineAppStoreStatus, retrieveOfflineAppStoreCredential, saveOfflineAppStoreAccount, type DeviceRecord, type OfflineAppStoreStatus } from '#lib/api';
 
   let status = $state<OfflineAppStoreStatus | null>(null);
   let appleId = $state('');
   let password = $state('');
   let verificationCode = $state('');
-  let fairPlayCredential = $state('');
+  let devices = $state<DeviceRecord[]>([]);
+  let selectedDeviceId = $state('');
   let verificationRequested = $state(false);
   let loading = $state(false);
   let savingAccount = $state(false);
   let authenticating = $state(false);
-  let savingCredential = $state(false);
+  let retrievingCredential = $state(false);
   let error = $state('');
   let notice = $state('');
 
@@ -25,7 +25,11 @@
     loading = true;
     error = '';
     try {
-      status = await fetchOfflineAppStoreStatus();
+      const [nextStatus, deviceResponse] = await Promise.all([fetchOfflineAppStoreStatus(), fetchDevices()]);
+      status = nextStatus;
+      devices = deviceResponse.devices;
+      const availableIpads = devices.filter((device) => device.enabled && !device.draining && device.transport === 'usb' && device.productType?.startsWith('iPad'));
+      if (!availableIpads.some((device) => device.id === selectedDeviceId)) selectedDeviceId = availableIpads[0]?.id ?? '';
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Could not load App Store processing status.';
     } finally {
@@ -68,23 +72,26 @@
     }
   }
 
-  async function saveCredential(): Promise<void> {
-    savingCredential = true;
+  async function retrieveCredential(): Promise<void> {
+    retrievingCredential = true;
     error = '';
     notice = '';
     try {
-      status = await saveOfflineAppStoreCredential(fairPlayCredential);
-      fairPlayCredential = '';
-      notice = 'The device-derived credential was encrypted and saved.';
+      status = await retrieveOfflineAppStoreCredential(selectedDeviceId);
+      notice = 'Credential retrieval started. The selected iPad is temporarily reserved while Apple’s FairPlay service restarts.';
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Could not save the FairPlay credential.';
+      error = cause instanceof Error ? cause.message : 'Could not retrieve the FairPlay credential.';
     } finally {
-      savingCredential = false;
+      retrievingCredential = false;
     }
   }
 
   onMount(() => {
     void refresh();
+    const timer = setInterval(() => {
+      if (status?.credentialRetrieval.state === 'running') void refresh();
+    }, 3000);
+    return () => clearInterval(timer);
   });
 </script>
 
@@ -110,6 +117,13 @@
       <div class="rounded-lg border border-border/70 bg-muted/20 p-3 text-xs"><div class="text-muted">Account session</div><div class="mt-1 font-medium">{status.vault.authenticatedAt ? `Verified ${new Date(status.vault.authenticatedAt).toLocaleString()}` : status.vault.authenticationError ?? 'Not verified'}</div></div>
       <div class="rounded-lg border border-border/70 bg-muted/20 p-3 text-xs"><div class="text-muted">FairPlay credential</div><div class="mt-1 font-medium">{status.vault.credentialConfigured ? 'Stored for this account' : 'Not configured'}</div></div>
     </div>
+    {#if status.credentialRetrieval.state !== 'idle'}
+      <div class="mt-3 rounded-lg border border-border/70 bg-muted/20 p-3 text-sm" role={['failed', 'interrupted'].includes(status.credentialRetrieval.state) ? 'alert' : 'status'}>
+        <div class="font-medium">{status.credentialRetrieval.state === 'running' ? 'Retrieving from iPad' : status.credentialRetrieval.state === 'succeeded' ? 'Credential stored securely' : status.credentialRetrieval.state === 'interrupted' ? 'Credential retrieval interrupted' : 'Credential retrieval failed'}</div>
+        {#if status.credentialRetrieval.state === 'running' && status.credentialRetrieval.startedAt}<p class="mt-1 text-xs text-muted">Started {new Date(status.credentialRetrieval.startedAt).toLocaleTimeString()}. This can take a few minutes.</p>{/if}
+        {#if status.credentialRetrieval.error}<p class="mt-1 text-xs text-muted">{status.credentialRetrieval.error}</p>{/if}
+      </div>
+    {/if}
     {#if status.blockers.length > 0}
       <ul class="mt-3 list-disc space-y-1 pl-5 text-xs text-muted" aria-label="Setup requirements">
         {#each status.blockers as blocker (blocker)}<li>{blocker}</li>{/each}
@@ -132,11 +146,11 @@
       {/if}
     </form>
 
-    <form class="space-y-3" onsubmit={(event) => { event.preventDefault(); void saveCredential(); }}>
-      <div><h4 class="text-sm font-medium">Device-derived FairPlay credential</h4><p class="mt-1 text-xs text-muted">Use only a credential retrieved from an installed App Store app signed into this same account on the paired jailbroken device. It is encrypted before storage and never shown again.</p></div>
-      <div class="space-y-1.5"><Label for="offline-fairplay-credential">16-byte credential</Label><Textarea id="offline-fairplay-credential" bind:value={fairPlayCredential} autocomplete="off" spellcheck="false" rows={3} required maxlength={128} /></div>
-      <Button size="sm" loading={savingCredential} disabled={!status?.vault.accountConfigured || !fairPlayCredential}>Save credential</Button>
-      <p class="text-xs text-muted">The FairPlay decryptor is not bundled. Written permission and license clearance are required before enabling production use; configure an approved external binary and the authorization flag only after that gate is cleared.</p>
-    </form>
+    <section class="space-y-3">
+      <div><h4 class="text-sm font-medium">Device-derived FairPlay credential</h4><p class="mt-1 text-xs text-muted">dkrypt retrieves the 16-byte credential from an App Store app installed under this Apple Account, then stores it directly in the encrypted vault. The value is never sent to the browser or returned by the API.</p></div>
+      <div class="space-y-1.5"><Label for="offline-credential-device">Connected iPad</Label><select id="offline-credential-device" class="min-h-9 w-full rounded-md border border-border bg-background px-2 text-sm" bind:value={selectedDeviceId} disabled={retrievingCredential || status?.credentialRetrieval.state === 'running'}><option value="">Select an enabled USB iPad</option>{#each devices.filter((device) => device.enabled && !device.draining && device.transport === 'usb' && device.productType?.startsWith('iPad')) as device (device.id)}<option value={device.id}>{device.name} · {device.productType}</option>{/each}</select></div>
+      <Button size="sm" loading={retrievingCredential || status?.credentialRetrieval.state === 'running'} disabled={!status?.vault.accountConfigured || !status.vault.authenticatedAt || !selectedDeviceId || status.vault.credentialConfigured} onclick={() => void retrieveCredential()}>Retrieve and store credential</Button>
+      <p class="text-xs text-muted">This briefly restarts Apple’s FairPlay service. dkrypt drains the selected iPad so no decrypt job starts at the same time. The iPad must have an App Store app from the same Apple Account installed.</p>
+    </section>
   </div>
 </Card>

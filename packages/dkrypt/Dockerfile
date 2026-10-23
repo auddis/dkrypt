@@ -50,6 +50,22 @@ RUN set -eu; \
   cp "/usr/local/bin/bin/${binary}" /usr/local/bin/ipatool; \
   chmod 0755 /usr/local/bin/ipatool
 
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS fairplay-decrypt
+ARG FAIRPLAY_DECRYPT_REV=1bad106ee1698c6d9c483f67d898183ffa4c6eb3
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gcc make python3 python3-venv tar && rm -rf /var/lib/apt/lists/*
+RUN set -eu; \
+  mkdir -p /opt/fairplay-decrypt; \
+  curl --fail --silent --show-error --location "https://codeload.github.com/EthanArbuckle/fairplay-decrypt/tar.gz/${FAIRPLAY_DECRYPT_REV}" --output /tmp/fairplay-decrypt.tar.gz; \
+  echo "730b3911b0a316b7e3fec9ec80c69dea86521fb3840c118e61d96f204c90f1d1  /tmp/fairplay-decrypt.tar.gz" | sha256sum --check; \
+  tar --extract --gzip --file /tmp/fairplay-decrypt.tar.gz --directory /opt/fairplay-decrypt --strip-components=1; \
+  python3 -m venv /opt/fairplay-decrypt/.venv; \
+  /opt/fairplay-decrypt/.venv/bin/pip install --no-cache-dir --disable-pip-version-check cryptography==44.0.2; \
+  make -C /opt/fairplay-decrypt transform
+COPY packages/dkrypt/fairplay-credential-bundle/ /opt/fairplay-decrypt/credential-retrieval/build/bundle/
+RUN set -eu; \
+  for item in credential.ios driver.ios trigger.ios static-key-table.bin core4-word-table.bin; do test -s "/opt/fairplay-decrypt/credential-retrieval/build/bundle/${item}"; done; \
+  chmod 0755 /opt/fairplay-decrypt/credential-retrieval/build/bundle/*.ios
+
 FROM oven/bun:1.4.3-slim@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52a3288 AS web
 WORKDIR /web
 COPY packages/dkrypt/web/package.json packages/dkrypt/web/bun.lock ./
@@ -64,7 +80,7 @@ WORKDIR /app
 ARG BUILD_REF=development
 ARG DEPLOYMENT_ID=local
 
-RUN apt-get update && apt-get upgrade -y --no-install-recommends && apt-get install -y --no-install-recommends ca-certificates findutils libusb-1.0-0 openssh-client passwd util-linux \
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && apt-get install -y --no-install-recommends ca-certificates findutils libusb-1.0-0 openssh-client passwd python3 util-linux \
   && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 10001 dkrypt && useradd --system --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin dkrypt
@@ -73,12 +89,15 @@ COPY --from=ipadecrypt /go/bin/ipadecrypt /usr/local/bin/ipadecrypt
 COPY --from=device-bridge /bridge/target/release/dkrypt-device-bridge /usr/local/bin/dkrypt-device-bridge
 COPY --from=netmuxd /usr/local/bin/netmuxd /usr/local/bin/netmuxd
 COPY --from=appstore-downloader /usr/local/bin/ipatool /usr/local/bin/ipatool
+COPY --from=fairplay-decrypt /opt/fairplay-decrypt /opt/fairplay-decrypt
 COPY packages/dkrypt/package.json packages/dkrypt/bun.lock packages/dkrypt/tsconfig.json ./
 RUN bun install --production --frozen-lockfile
 COPY packages/dkrypt/src ./src
 COPY packages/dkrypt/entrypoint.sh /usr/local/bin/dkrypt-entrypoint
 COPY --from=web /public ./public
 RUN chmod 0755 /usr/local/bin/dkrypt-entrypoint
+RUN printf '%s\n' '#!/bin/sh' 'exec /opt/fairplay-decrypt/.venv/bin/python /opt/fairplay-decrypt/decrypt.py "$@"' > /usr/local/bin/fairplay-decrypt \
+  && chmod 0755 /usr/local/bin/fairplay-decrypt
 
 ENV NODE_ENV=production BUILD_REF=$BUILD_REF DEPLOYMENT_ID=$DEPLOYMENT_ID
 EXPOSE 8080

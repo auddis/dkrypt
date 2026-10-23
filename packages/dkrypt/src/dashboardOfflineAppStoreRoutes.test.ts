@@ -6,6 +6,7 @@ import { setSessionCookie } from '#session.js';
 import type { Response } from '#http.js';
 import { createDashboardOfflineAppStoreRoutes } from '#routes/dashboardOfflineAppStoreRoutes.js';
 import type { OfflineAppStoreReadiness } from '#offlineAppStore.js';
+import type { CredentialRetrievalStatus } from '#offlineAppStoreCredential.js';
 
 function sessionCookie(permissions: bigint, reauthenticated = false): string {
   let value = '';
@@ -93,6 +94,51 @@ test('offline App Store authentication accepts only a six-digit one-time code', 
     expect(valid.statusCode).toBe(200);
     expect(submitted).toEqual(['123456']);
     expect(valid.body).not.toContain('123456');
+  } finally {
+    await server.close();
+  }
+});
+
+test('FairPlay credential retrieval requires recent manager authentication and targets only the requested device', async () => {
+  const targets: string[] = [];
+  let retrievalStatus: CredentialRetrievalStatus = { state: 'idle' };
+  const server = Fastify().withTypeProvider<TypeBoxTypeProvider>();
+  await server.register(createDashboardOfflineAppStoreRoutes({
+    readiness,
+    getCredentialRetrievalStatus: () => retrievalStatus,
+    retrieveCredential: (deviceId) => {
+      targets.push(deviceId);
+      retrievalStatus = { state: 'running', deviceId };
+      return retrievalStatus;
+    },
+  }));
+  const manager = { cookie: sessionCookie(PermissionFlag.administrator) };
+  const reauthenticatedManager = { cookie: sessionCookie(PermissionFlag.administrator, true) };
+
+  try {
+    const unauthorized = await server.inject({
+      method: 'POST',
+      url: '/v1/dashboard/appstore-offline/credential/retrieve',
+      headers: manager,
+      payload: { deviceId: 'ipad-exact-id' },
+    });
+    const started = await server.inject({
+      method: 'POST',
+      url: '/v1/dashboard/appstore-offline/credential/retrieve',
+      headers: reauthenticatedManager,
+      payload: { deviceId: 'ipad-exact-id' },
+    });
+    const status = await server.inject({
+      method: 'GET',
+      url: '/v1/dashboard/appstore-offline/status',
+      headers: manager,
+    });
+
+    expect(unauthorized.statusCode).toBe(401);
+    expect(started.statusCode).toBe(202);
+    expect(targets).toEqual(['ipad-exact-id']);
+    expect(status.json().credentialRetrieval).toEqual({ state: 'running', deviceId: 'ipad-exact-id' });
+    expect(status.body).not.toMatch(/credentialValue|ciphertext|password|fairPlayCredential/i);
   } finally {
     await server.close();
   }

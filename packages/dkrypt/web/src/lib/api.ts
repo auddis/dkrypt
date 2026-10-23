@@ -2026,6 +2026,7 @@ export interface OfflineAppStoreStatus {
   fairPlayAuthorized: boolean;
   vault: { encryptionReady: boolean; accountConfigured: boolean; credentialConfigured: boolean; authenticatedAt?: number; accountHint?: string; authenticationError?: string };
   blockers: string[];
+  credentialRetrieval: { state: 'idle' | 'running' | 'succeeded' | 'failed' | 'interrupted'; operationId?: string; deviceId?: string; startedAt?: number; completedAt?: number; error?: string };
 }
 
 export function fetchOfflineAppStoreStatus(): Promise<OfflineAppStoreStatus> {
@@ -2042,6 +2043,10 @@ export function authenticateOfflineAppStoreAccount(verificationCode?: string): P
 
 export function saveOfflineAppStoreCredential(credential: string): Promise<OfflineAppStoreStatus> {
   return apiJson('/v1/dashboard/appstore-offline/credential', { method: 'PUT', body: JSON.stringify({ credential }) });
+}
+
+export function retrieveOfflineAppStoreCredential(deviceId: string): Promise<OfflineAppStoreStatus> {
+  return apiJson('/v1/dashboard/appstore-offline/credential/retrieve', { method: 'POST', body: JSON.stringify({ deviceId }) });
 }
 
 export function clearOfflineAppStoreAccount(): Promise<OfflineAppStoreStatus> {

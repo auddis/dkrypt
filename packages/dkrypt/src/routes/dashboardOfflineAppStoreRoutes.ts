@@ -6,12 +6,16 @@ import { PermissionFlag } from '#permissions.js';
 import { fastifyRequirePermission, fastifyRequireRecentAuthentication, fastifyRequireSession, getFastifySession } from '#session.js';
 import { recordAudit } from '#store/state.js';
 import { createHttpErrorEnvelope } from '#util/httpResponse.js';
+import { getFairPlayCredentialRetrievalStatus, startFairPlayCredentialRetrieval } from '#offlineAppStoreCredential.js';
+import type { CredentialRetrievalStatus } from '#offlineAppStoreCredential.js';
 
 interface DashboardOfflineAppStoreServices {
   readiness: typeof getOfflineAppStoreReadiness;
   saveAccount: typeof saveAppleAccountCredentials;
   saveCredential: typeof saveAppleAccountFairPlayCredential;
   authenticate: typeof authenticateAppleAccount;
+  getCredentialRetrievalStatus: typeof getFairPlayCredentialRetrievalStatus;
+  retrieveCredential: typeof startFairPlayCredentialRetrieval;
   clear: typeof clearAppleAccountCredentials;
 }
 
@@ -20,6 +24,8 @@ const defaultServices: DashboardOfflineAppStoreServices = {
   saveAccount: saveAppleAccountCredentials,
   saveCredential: saveAppleAccountFairPlayCredential,
   authenticate: authenticateAppleAccount,
+  getCredentialRetrievalStatus: getFairPlayCredentialRetrievalStatus,
+  retrieveCredential: startFairPlayCredentialRetrieval,
   clear: clearAppleAccountCredentials,
 };
 
@@ -33,7 +39,23 @@ export function createDashboardOfflineAppStoreRoutes(overrides: Partial<Dashboar
     server.get('/v1/dashboard/appstore-offline/status', {
       schema: { hide: true },
       preHandler: administrator,
-    }, () => services.readiness());
+    }, () => ({ ...services.readiness(), credentialRetrieval: services.getCredentialRetrievalStatus() }));
+
+    server.post('/v1/dashboard/appstore-offline/credential/retrieve', {
+      schema: { hide: true, body: Type.Object({ deviceId: Type.String({ minLength: 1, maxLength: 128 }) }, { additionalProperties: false }) },
+      preHandler: reauthenticatedAdministrator,
+    }, (request, reply) => {
+      try {
+        const previousOperationId = services.getCredentialRetrievalStatus().operationId;
+        const retrieval = services.retrieveCredential(request.body.deviceId);
+        if (retrieval.state === 'running' && retrieval.operationId !== previousOperationId) {
+          recordAudit(getFastifySession(request)!.sub, 'settings.update', 'appstore-offline-credential', `FairPlay credential retrieval started for device ${request.body.deviceId}`);
+        }
+        return reply.code(202).send({ ...services.readiness(), credentialRetrieval: retrieval as CredentialRetrievalStatus });
+      } catch (error) {
+        return reply.code(409).send(createHttpErrorEnvelope(request.id, 409, error instanceof Error ? error.message : 'Could not start FairPlay credential retrieval'));
+      }
+    });
 
     server.put('/v1/dashboard/appstore-offline/account', {
       schema: { hide: true, body: Type.Object({ appleId: Type.String({ minLength: 3, maxLength: 320, format: 'email' }), password: Type.String({ minLength: 1, maxLength: 1024 }) }, { additionalProperties: false }) },

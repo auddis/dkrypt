@@ -769,6 +769,12 @@ const migrations = [
       CREATE TABLE IF NOT EXISTS appstore_offline_account (id TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL, updated_at INTEGER NOT NULL);
     `,
   },
+  {
+    version: 28,
+    sql: `
+      CREATE TABLE IF NOT EXISTS appstore_offline_credential_operations (id TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL, updated_at INTEGER NOT NULL);
+    `,
+  },
 ] as const;
 
 export const LATEST_SQLITE_SCHEMA_VERSION = migrations.at(-1)?.version ?? 0;
@@ -826,6 +832,7 @@ const collectionTables = new Set([
   'device_setup_operations',
   'decrypt_quota_ledger',
   'appstore_offline_account',
+  'appstore_offline_credential_operations',
 ]);
 
 function assertCollectionTable(table: string): void {
