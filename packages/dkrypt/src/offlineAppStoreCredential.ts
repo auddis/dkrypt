@@ -139,10 +139,13 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
         throw new Error('The managed device tunnel configuration is invalid');
       }
       const binDirectory = path.join(temporaryRoot, 'bin');
+      const sshHomeDirectory = path.join(temporaryRoot, '.ssh');
       const outputDirectory = path.join(temporaryRoot, 'result');
       await mkdir(binDirectory, { mode: 0o700 });
+      await mkdir(sshHomeDirectory, { mode: 0o700 });
       await writeFile(path.join(binDirectory, 'ssh'), sshWrapper(), { mode: 0o700 });
       await chmod(path.join(binDirectory, 'ssh'), 0o700);
+      await chmod(sshHomeDirectory, 0o700);
       const environment = {
         PATH: `${binDirectory}:/usr/local/bin:/usr/bin:/bin`,
         HOME: temporaryRoot,
