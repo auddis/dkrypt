@@ -209,7 +209,7 @@ test('inactive billing waits for selection and stays mounted after first visit',
   expect(billingRequests).toBe(billingRequestsAfterFirstVisit);
 });
 
-test('billing revenue provider breakdown stays inside narrow desktop content', async ({ page }) => {
+test('billing revenue provider breakdown stays readable at wide and narrow desktop widths', async ({ page }) => {
   await page.setViewportSize({ width: 840, height: 900 });
   await mockAuthenticatedDashboard(page, '137438953472');
   await page.route('**/v1/billing/revenue*', async (route) => {
@@ -248,17 +248,23 @@ test('billing revenue provider breakdown stays inside narrow desktop content', a
   await page.goto('/?tab=settings&stab=billing');
   const breakdown = page.getByTestId('billing-revenue-provider-breakdown');
   await expect(breakdown).toBeVisible();
-  const dimensions = await breakdown.evaluate((element) => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-    right: element.getBoundingClientRect().right,
-    viewportWidth: window.innerWidth,
-    children: Array.from(element.children).map((child) => ({ clientWidth: child.clientWidth, scrollWidth: child.scrollWidth, top: child.getBoundingClientRect().top })),
-  }));
-  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
-  expect(dimensions.right).toBeLessThanOrEqual(dimensions.viewportWidth);
-  expect(dimensions.children.every((child) => child.scrollWidth <= child.clientWidth)).toBe(true);
-  expect(dimensions.children[1]!.top).toBeGreaterThan(dimensions.children[0]!.top);
+  for (const width of [840, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const dimensions = await breakdown.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      gridTemplateColumns: getComputedStyle(element).gridTemplateColumns,
+      right: element.getBoundingClientRect().right,
+      viewportWidth: window.innerWidth,
+      children: Array.from(element.children).map((child) => ({ clientWidth: child.clientWidth, scrollWidth: child.scrollWidth, top: child.getBoundingClientRect().top })),
+    }));
+    expect(dimensions.viewportWidth).toBe(width);
+    expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+    expect(dimensions.right).toBeLessThanOrEqual(dimensions.viewportWidth);
+    expect(dimensions.gridTemplateColumns.trim().split(/\s+/)).toHaveLength(1);
+    expect(dimensions.children.every((child) => child.scrollWidth <= child.clientWidth)).toBe(true);
+    expect(dimensions.children[1]!.top).toBeGreaterThan(dimensions.children[0]!.top);
+  }
 });
 
 test('command palette searches dkrypt data without triggering live App Store search', async ({ page }) => {
