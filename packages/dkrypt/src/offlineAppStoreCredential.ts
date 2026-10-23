@@ -89,6 +89,7 @@ function safeCredentialRetrievalDiagnostic(error: unknown): string {
     .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, '[email]')
     .replace(/\/(?:private\/)?var\/containers\/Bundle\/Application\/[^\s:]+/g, '[app path]')
     .replace(/\/(?:dev\/shm|tmp)\/[^\s:]+/g, '[temporary path]')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{16}\b/gi, '[device id]')
     .replace(/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi, '[device id]')
     .replace(/\b[0-9a-f]{40}\b/gi, '[device id]')
     .replace(/\b[A-Za-z0-9+/_=-]{64,}\b/g, '[redacted value]')

@@ -101,7 +101,7 @@ test('failed credential retrieval retains a redacted helper diagnostic and relea
     },
     saveCredential: vault.saveCredential,
     runRetriever: async () => {
-      throw new Error(`device command failed: no installed App Store app for admin@icloud.com at /var/containers/Bundle/Application/12345678-1234-1234-1234-123456789abc/Example.app/${'a'.repeat(40)}`);
+      throw new Error(`device command failed: no installed App Store app for admin@icloud.com on 00008030-001624583AF9402E at /var/containers/Bundle/Application/12345678-1234-1234-1234-123456789abc/Example.app/${'a'.repeat(40)}`);
     },
     operationRepository,
   });
@@ -115,6 +115,7 @@ test('failed credential retrieval retains a redacted helper diagnostic and relea
     expect(status.state).toBe('failed');
     expect(status.error).toContain('no installed App Store app');
     expect(status.error).not.toContain('admin@icloud.com');
+    expect(status.error).not.toContain('00008030-001624583AF9402E');
     expect(status.error).not.toContain('/var/containers/Bundle/Application');
     expect(status.error).not.toContain('Example.app');
     expect(status.error).not.toContain('12345678-1234-1234-1234-123456789abc');
