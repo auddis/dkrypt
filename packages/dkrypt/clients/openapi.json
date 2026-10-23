@@ -222,6 +222,34 @@
                         }
                       ]
                     },
+                    "executionPath": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "appstore_offline"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "device"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "device_fallback"
+                          ]
+                        }
+                      ]
+                    },
+                    "offlineAttemptedAt": {
+                      "type": "number"
+                    },
+                    "offlineFailureReason": {
+                      "type": "string"
+                    },
                     "attempt": {
                       "type": "number"
                     },
@@ -693,6 +721,34 @@
                             }
                           ]
                         },
+                        "executionPath": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "appstore_offline"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "device"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "device_fallback"
+                              ]
+                            }
+                          ]
+                        },
+                        "offlineAttemptedAt": {
+                          "type": "number"
+                        },
+                        "offlineFailureReason": {
+                          "type": "string"
+                        },
                         "attempt": {
                           "type": "number"
                         },
@@ -1119,6 +1175,34 @@
                             }
                           ]
                         },
+                        "executionPath": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "appstore_offline"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "device"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "device_fallback"
+                              ]
+                            }
+                          ]
+                        },
+                        "offlineAttemptedAt": {
+                          "type": "number"
+                        },
+                        "offlineFailureReason": {
+                          "type": "string"
+                        },
                         "attempt": {
                           "type": "number"
                         },
@@ -1524,6 +1608,34 @@
                           ]
                         }
                       ]
+                    },
+                    "executionPath": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "appstore_offline"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "device"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "device_fallback"
+                          ]
+                        }
+                      ]
+                    },
+                    "offlineAttemptedAt": {
+                      "type": "number"
+                    },
+                    "offlineFailureReason": {
+                      "type": "string"
                     },
                     "attempt": {
                       "type": "number"
@@ -2210,6 +2322,34 @@
                         }
                       ]
                     },
+                    "executionPath": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "appstore_offline"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "device"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "device_fallback"
+                          ]
+                        }
+                      ]
+                    },
+                    "offlineAttemptedAt": {
+                      "type": "number"
+                    },
+                    "offlineFailureReason": {
+                      "type": "string"
+                    },
                     "attempt": {
                       "type": "number"
                     },
@@ -2605,6 +2745,34 @@
                           ]
                         }
                       ]
+                    },
+                    "executionPath": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "appstore_offline"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "device"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "device_fallback"
+                          ]
+                        }
+                      ]
+                    },
+                    "offlineAttemptedAt": {
+                      "type": "number"
+                    },
+                    "offlineFailureReason": {
+                      "type": "string"
                     },
                     "attempt": {
                       "type": "number"
@@ -3515,6 +3683,34 @@
                           ]
                         }
                       ]
+                    },
+                    "executionPath": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "appstore_offline"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "device"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "device_fallback"
+                          ]
+                        }
+                      ]
+                    },
+                    "offlineAttemptedAt": {
+                      "type": "number"
+                    },
+                    "offlineFailureReason": {
+                      "type": "string"
                     },
                     "attempt": {
                       "type": "number"
