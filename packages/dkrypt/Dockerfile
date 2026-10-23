@@ -34,21 +34,17 @@ RUN set -eu; \
   tar --extract --file /tmp/netmuxd.tar.gz --directory /usr/local/bin; \
   chmod 0755 /usr/local/bin/netmuxd
 
-FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS appstore-downloader
+FROM golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS appstore-downloader
 ARG IPTATOOL_VERSION=2.6.0
-ARG TARGETARCH=amd64
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tar && rm -rf /var/lib/apt/lists/*
+WORKDIR /src/ipatool
 RUN set -eu; \
-  case "${TARGETARCH}" in \
-    amd64) asset=ipatool-${IPTATOOL_VERSION}-linux-amd64.tar.gz; checksum=a8bbd8a5a6515d0b858c6cfe6c2baf70943a4235b7fa65d5bd01a42a7d5bedbb; binary=ipatool-${IPTATOOL_VERSION}-linux-amd64 ;; \
-    arm64) asset=ipatool-${IPTATOOL_VERSION}-linux-arm64.tar.gz; checksum=7c7ce6c54379683d77b99d39f1d1a766fd8de3ae09ae8c4c64f5d04232e6ae80; binary=ipatool-${IPTATOOL_VERSION}-linux-arm64 ;; \
-    *) echo "unsupported target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
-  esac; \
-  curl --fail --silent --show-error --location "https://github.com/majd/ipatool/releases/download/v${IPTATOOL_VERSION}/${asset}" --output /tmp/ipatool.tar.gz; \
-  echo "${checksum}  /tmp/ipatool.tar.gz" | sha256sum --check; \
-  tar --extract --file /tmp/ipatool.tar.gz --directory /usr/local/bin; \
-  cp "/usr/local/bin/bin/${binary}" /usr/local/bin/ipatool; \
-  chmod 0755 /usr/local/bin/ipatool
+  go mod download "github.com/majd/ipatool/v2@v${IPTATOOL_VERSION}"; \
+  source="$(go env GOMODCACHE)/github.com/majd/ipatool/v2@v${IPTATOOL_VERSION}"; \
+  cp -R "${source}"/. /src/ipatool/; \
+  go mod edit -require=github.com/klauspost/compress@v1.18.7 -require=golang.org/x/net@v0.60.0; \
+  go mod tidy; \
+  go test ./...; \
+  go build -trimpath -ldflags "-X github.com/majd/ipatool/v2/cmd.version=v${IPTATOOL_VERSION}" -o /go/bin/ipatool .
 
 FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS fairplay-decrypt
 ARG FAIRPLAY_DECRYPT_REV=1bad106ee1698c6d9c483f67d898183ffa4c6eb3
@@ -59,7 +55,7 @@ RUN set -eu; \
   echo "730b3911b0a316b7e3fec9ec80c69dea86521fb3840c118e61d96f204c90f1d1  /tmp/fairplay-decrypt.tar.gz" | sha256sum --check; \
   tar --extract --gzip --file /tmp/fairplay-decrypt.tar.gz --directory /opt/fairplay-decrypt --strip-components=1; \
   python3 -m venv /opt/fairplay-decrypt/.venv; \
-  /opt/fairplay-decrypt/.venv/bin/pip install --no-cache-dir --disable-pip-version-check cryptography==44.0.2; \
+  /opt/fairplay-decrypt/.venv/bin/pip install --no-cache-dir --disable-pip-version-check --upgrade cryptography==50.0.2 setuptools==84.0.0; \
   make -C /opt/fairplay-decrypt transform
 COPY packages/dkrypt/fairplay-credential-bundle/ /opt/fairplay-decrypt/credential-retrieval/build/bundle/
 RUN set -eu; \
