@@ -33,9 +33,19 @@ test('credential retrieval targets the requested paired USB iPad, drains it, and
     createdAt: 1,
     updatedAt: 1,
   };
+  const otherDevice: DeviceRecord = {
+    id: 'other-ipad',
+    name: 'Other iPad',
+    transport: 'usb',
+    udid: 'e'.repeat(40),
+    productType: 'iPad14,3',
+    enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
+  };
   const received: string[] = [];
   const retriever = createFairPlayCredentialRetriever({
-    getDevice: (id) => id === device.id ? device : undefined,
+    getDevice: (id) => id === device.id ? device : id === otherDevice.id ? otherDevice : undefined,
     getActiveJobs: () => [],
     getVaultStatus: vault.status,
     updateDevice: (id, patch) => {
@@ -64,6 +74,8 @@ test('credential retrieval targets the requested paired USB iPad, drains it, and
     }
     expect(retriever.status()).toMatchObject({ state: 'succeeded', deviceId: 'selected-ipad' });
     expect(device.draining).toBe(false);
+    expect(otherDevice.draining).toBeUndefined();
+    expect(otherDevice.enabled).toBe(true);
     expect(vault.status().credentialConfigured).toBe(true);
     expect(Buffer.from(received[0]!, 'base64')).toEqual(Buffer.alloc(16, 11));
   } finally {
@@ -81,13 +93,6 @@ test('failed credential retrieval retains a redacted helper diagnostic and relea
   vault.saveAccount('admin@icloud.com', 'account-password');
   vault.markAuthenticated(1234);
   const fairPlayCredential = Buffer.alloc(16, 0x7b);
-  const sensitiveValues = [
-    'admin@icloud.com',
-    'account-password',
-    'keychain-passphrase',
-    fairPlayCredential.toString('base64'),
-    fairPlayCredential.toString('hex'),
-  ];
   let device: DeviceRecord = {
     id: 'diagnostic-ipad',
     name: 'Diagnostic iPad',
@@ -102,7 +107,7 @@ test('failed credential retrieval retains a redacted helper diagnostic and relea
     getDevice: (id) => id === device.id ? device : undefined,
     getActiveJobs: () => [],
     getVaultStatus: vault.status,
-    getSensitiveValues: () => sensitiveValues,
+    getSecrets: vault.read,
     updateDevice: (id, patch) => {
       if (id !== device.id) return { ok: false, error: 'device not found' };
       device = { ...device, ...patch };
@@ -110,7 +115,7 @@ test('failed credential retrieval retains a redacted helper diagnostic and relea
     },
     saveCredential: vault.saveCredential,
     runRetriever: async () => {
-      throw new Error(`device command failed: no installed App Store app for admin@icloud.com password=account-password keychain=keychain-passphrase credential=${fairPlayCredential.toString('base64')} credentialHex=${fairPlayCredential.toString('hex')} on 00008030-001624583AF9402E at /var/containers/Bundle/Application/12345678-1234-1234-1234-123456789abc/Example.app/${'a'.repeat(40)}`);
+      throw new Error(`device command failed: no installed App Store app for admin@icloud.com password=account-password credential=${fairPlayCredential.toString('base64')} credentialHex=0x${fairPlayCredential.toString('hex')} on 00008030-001624583AF9402E at /var/containers/Bundle/Application/12345678-1234-1234-1234-123456789abc/Example.app/${'a'.repeat(40)} helper=/opt/fairplay-decrypt/credential-retrieval/retrieve.py key=/run/secrets/id_ed25519`);
     },
     operationRepository,
   });
@@ -130,9 +135,11 @@ test('failed credential retrieval retains a redacted helper diagnostic and relea
     expect(status.error).not.toContain('12345678-1234-1234-1234-123456789abc');
     expect(status.error).not.toContain('a'.repeat(40));
     expect(status.error).not.toContain('account-password');
-    expect(status.error).not.toContain('keychain-passphrase');
     expect(status.error).not.toContain(fairPlayCredential.toString('base64'));
     expect(status.error).not.toContain(fairPlayCredential.toString('hex'));
+    expect(status.error).not.toContain('/opt/fairplay-decrypt');
+    expect(status.error).not.toContain('/run/secrets/id_ed25519');
+    expect(operationRepository.read()?.error).toBe(status.error);
     expect(device.draining).toBe(false);
   } finally {
     operationRepository.close();

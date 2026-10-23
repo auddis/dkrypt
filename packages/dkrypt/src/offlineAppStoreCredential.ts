@@ -7,6 +7,7 @@ import path from 'node:path';
 import { config } from '#config.js';
 import { scopedLogger } from '#logger.js';
 import { getAppleAccountVaultStatus, readAppleAccountSecrets, saveAppleAccountFairPlayCredential } from '#appleAccountVault.js';
+import type { AppleAccountSecrets } from '#appleAccountVault.js';
 import { getActiveJobs } from '#jobs/store.js';
 import type { Job } from '#jobs/types.js';
 import { getDevice, updateDevice } from '#store/state.js';
@@ -34,7 +35,7 @@ export interface FairPlayCredentialRetrieverDependencies {
   getDevice: typeof getDevice;
   getActiveJobs: typeof getActiveJobs;
   getVaultStatus: typeof getAppleAccountVaultStatus;
-  getSensitiveValues(): string[];
+  getSecrets(): AppleAccountSecrets | undefined;
   updateDevice: typeof updateDevice;
   saveCredential: typeof saveAppleAccountFairPlayCredential;
   runRetriever(device: DeviceRecord): Promise<Buffer>;
@@ -84,8 +85,7 @@ function sshWrapper(): string {
   ].join('\n');
 }
 
-function configuredSensitiveValues(): string[] {
-  const secrets = readAppleAccountSecrets();
+function sensitiveValues(secrets: AppleAccountSecrets | undefined): string[] {
   if (!secrets) return [];
   const values = [secrets.appleId, secrets.password, secrets.keychainPassphrase, secrets.fairPlayCredential ?? ''];
   if (secrets.fairPlayCredential) {
@@ -115,7 +115,10 @@ function safeCredentialRetrievalDiagnostic(error: unknown, sensitiveValues: stri
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{16}\b/gi, '[device id]')
     .replace(/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi, '[device id]')
     .replace(/\b[0-9a-f]{40}\b/gi, '[device id]')
+    .replace(/(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])/gi, '[redacted value]')
+    .replace(/(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{22}={0,2}(?![A-Za-z0-9+/_-])/g, '[redacted value]')
     .replace(/\b[A-Za-z0-9+/_=-]{64,}\b/g, '[redacted value]')
+    .replace(/(?<![A-Za-z0-9:/])\/(?:[^/\s:]+\/)*[^/\s:]+/g, '[path]')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, MAX_HELPER_DIAGNOSTIC_LENGTH);
@@ -216,7 +219,7 @@ export function createFairPlayCredentialRetriever(overrides: Partial<FairPlayCre
     getDevice,
     getActiveJobs,
     getVaultStatus: getAppleAccountVaultStatus,
-    getSensitiveValues: configuredSensitiveValues,
+    getSecrets: readAppleAccountSecrets,
     updateDevice,
     saveCredential: saveAppleAccountFairPlayCredential,
     runRetriever: runCredentialHelper,
@@ -295,11 +298,11 @@ export function createFairPlayCredentialRetriever(overrides: Partial<FairPlayCre
         } catch (error) {
           let diagnostic: string;
           try {
-            diagnostic = safeCredentialRetrievalDiagnostic(error, dependencies.getSensitiveValues());
+            diagnostic = safeCredentialRetrievalDiagnostic(error, sensitiveValues(dependencies.getSecrets()));
           } catch {
             diagnostic = 'The credential helper failed; detailed output was hidden because stored account data could not be read safely.';
           }
-          log.error('FairPlay credential retrieval failed', { operationId: started.operationId, deviceId: device.id, diagnostic });
+          log.error('FairPlay credential retrieval failed', { operationId: started.operationId, diagnostic });
           setStatus({ ...started, state: 'failed', completedAt: Date.now(), error: diagnostic });
         } finally {
           credential?.fill(0);
