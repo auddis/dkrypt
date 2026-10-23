@@ -41,8 +41,10 @@ RUN set -eu; \
   go mod download "github.com/majd/ipatool/v2@v${IPTATOOL_VERSION}"; \
   source="$(go env GOMODCACHE)/github.com/majd/ipatool/v2@v${IPTATOOL_VERSION}"; \
   cp -R "${source}"/. /src/ipatool/; \
+  chmod -R u+w /src/ipatool; \
   go mod edit -require=github.com/klauspost/compress@v1.18.7 -require=golang.org/x/net@v0.60.0; \
   go mod tidy; \
+  go generate ./...; \
   go test ./...; \
   go build -trimpath -ldflags "-X github.com/majd/ipatool/v2/cmd.version=v${IPTATOOL_VERSION}" -o /go/bin/ipatool .
 
