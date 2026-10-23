@@ -80,6 +80,14 @@ test('failed credential retrieval retains a redacted helper diagnostic and relea
   const operationRepository = createOfflineCredentialRetrievalRepository(openStateCollectionDatabase({ stateDir, filename: 'state.sqlite' }, ['appstore_offline_credential_operations']));
   vault.saveAccount('admin@icloud.com', 'account-password');
   vault.markAuthenticated(1234);
+  const fairPlayCredential = Buffer.alloc(16, 0x7b);
+  const sensitiveValues = [
+    'admin@icloud.com',
+    'account-password',
+    'keychain-passphrase',
+    fairPlayCredential.toString('base64'),
+    fairPlayCredential.toString('hex'),
+  ];
   let device: DeviceRecord = {
     id: 'diagnostic-ipad',
     name: 'Diagnostic iPad',
@@ -94,6 +102,7 @@ test('failed credential retrieval retains a redacted helper diagnostic and relea
     getDevice: (id) => id === device.id ? device : undefined,
     getActiveJobs: () => [],
     getVaultStatus: vault.status,
+    getSensitiveValues: () => sensitiveValues,
     updateDevice: (id, patch) => {
       if (id !== device.id) return { ok: false, error: 'device not found' };
       device = { ...device, ...patch };
@@ -101,7 +110,7 @@ test('failed credential retrieval retains a redacted helper diagnostic and relea
     },
     saveCredential: vault.saveCredential,
     runRetriever: async () => {
-      throw new Error(`device command failed: no installed App Store app for admin@icloud.com on 00008030-001624583AF9402E at /var/containers/Bundle/Application/12345678-1234-1234-1234-123456789abc/Example.app/${'a'.repeat(40)}`);
+      throw new Error(`device command failed: no installed App Store app for admin@icloud.com password=account-password keychain=keychain-passphrase credential=${fairPlayCredential.toString('base64')} credentialHex=${fairPlayCredential.toString('hex')} on 00008030-001624583AF9402E at /var/containers/Bundle/Application/12345678-1234-1234-1234-123456789abc/Example.app/${'a'.repeat(40)}`);
     },
     operationRepository,
   });
@@ -120,6 +129,10 @@ test('failed credential retrieval retains a redacted helper diagnostic and relea
     expect(status.error).not.toContain('Example.app');
     expect(status.error).not.toContain('12345678-1234-1234-1234-123456789abc');
     expect(status.error).not.toContain('a'.repeat(40));
+    expect(status.error).not.toContain('account-password');
+    expect(status.error).not.toContain('keychain-passphrase');
+    expect(status.error).not.toContain(fairPlayCredential.toString('base64'));
+    expect(status.error).not.toContain(fairPlayCredential.toString('hex'));
     expect(device.draining).toBe(false);
   } finally {
     operationRepository.close();

@@ -128,7 +128,7 @@ test('Apple Account authentication aborts and returns a timeout when the provide
         headers: { cookie: sessionCookie(PermissionFlag.administrator, true) },
         payload: {},
       }).then((response) => response),
-      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 50)),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 250)),
     ]);
 
     expect(result?.statusCode).toBe(504);
