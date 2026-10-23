@@ -209,6 +209,58 @@ test('inactive billing waits for selection and stays mounted after first visit',
   expect(billingRequests).toBe(billingRequestsAfterFirstVisit);
 });
 
+test('billing revenue provider breakdown stays inside narrow desktop content', async ({ page }) => {
+  await page.setViewportSize({ width: 840, height: 900 });
+  await mockAuthenticatedDashboard(page, '137438953472');
+  await page.route('**/v1/billing/revenue*', async (route) => {
+    const total = { currency: 'EUR', gross: 25, refunded: 5, net: 20 };
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        updatedAt: new Date().toISOString(),
+        complete: true,
+        totals: [total],
+        providers: {
+          stripe: { state: 'ready', totals: [total], paymentCount: 2 },
+          nowpayments: { state: 'ready', totals: [], paymentCount: 0 },
+        },
+        warnings: [],
+      }),
+    });
+  });
+  await page.route('**/v1/billing/provider-status*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        checkoutsPaused: false,
+        stripe: { enabled: true, environment: 'live', missingConfiguration: [], webhook: { state: 'ready', endpointUrl: '', requiredEvents: [], missingEvents: [] } },
+        crypto: { enabled: true, configured: true, ready: true, environment: 'live', settlementCurrency: 'EUR', supportedChains: ['Base'], supportedAssets: ['USDC'], missingConfiguration: [], issues: [] },
+      }),
+    });
+  });
+  await page.route('**/v1/billing/subscriptions*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ subscriptions: [], total: 0 }) });
+  });
+  await page.route('**/v1/billing/webhooks/inbox*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ inbox: [], total: 0 }) });
+  });
+
+  await page.goto('/?tab=settings&stab=billing');
+  const breakdown = page.getByTestId('billing-revenue-provider-breakdown');
+  await expect(breakdown).toBeVisible();
+  const dimensions = await breakdown.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    right: element.getBoundingClientRect().right,
+    viewportWidth: window.innerWidth,
+    children: Array.from(element.children).map((child) => ({ clientWidth: child.clientWidth, scrollWidth: child.scrollWidth, top: child.getBoundingClientRect().top })),
+  }));
+  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+  expect(dimensions.right).toBeLessThanOrEqual(dimensions.viewportWidth);
+  expect(dimensions.children.every((child) => child.scrollWidth <= child.clientWidth)).toBe(true);
+  expect(dimensions.children[1]!.top).toBeGreaterThan(dimensions.children[0]!.top);
+});
+
 test('command palette searches dkrypt data without triggering live App Store search', async ({ page }) => {
   await mockAuthenticatedDashboard(page, '1');
   const quickSearchQueries: Array<{ q: string | null; projectId: string | null }> = [];
