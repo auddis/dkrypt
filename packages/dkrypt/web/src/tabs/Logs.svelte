@@ -310,7 +310,7 @@
   }
 </script>
 
-<Card title="Scheduler &amp; job logs" class="log-surface">
+<Card title="System &amp; job logs" class="log-surface">
   <div class="log-toolbar mb-4 flex flex-wrap items-center gap-2.5 rounded-xl p-2.5">
     <div class="flex flex-wrap gap-1">
       <Button variant={scopeFilter === 'all' ? 'default' : 'secondary'} onclick={() => (scopeFilter = 'all')}>All</Button>

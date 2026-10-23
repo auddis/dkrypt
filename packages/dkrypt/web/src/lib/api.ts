@@ -80,10 +80,6 @@ function invalidateQueriesForMutation(path: string): void {
     prefixes.add('/v1/dashboard/artifacts');
     prefixes.add('/v1/dashboard/overview');
   }
-  if (endpoint.startsWith('/v1/dashboard/watches')) {
-    prefixes.add('/v1/dashboard/watches');
-    prefixes.add('/v1/dashboard/overview');
-  }
   if (endpoint.startsWith('/v1/billing/')) prefixes.add('/v1/billing');
   for (const prefix of prefixes) serverStateCache.invalidatePrefix(prefix);
 }
@@ -193,7 +189,7 @@ export interface ActiveJob {
   queueReason?: string;
 }
 
-export interface SchedulerSettings {
+export interface DashboardSettings {
   notifyWebhookUrl: string;
   notifyFormat: 'embed' | 'plain';
   notifySuccessMode: 'instant' | 'daily' | 'weekly';
@@ -211,7 +207,6 @@ export interface SchedulerSettings {
   notifyOnTestFlightBridgeDown: boolean;
   notifyOnJobCompleted: boolean;
   notifyOnQueueSloBreach: boolean;
-  schedulerRetryCount: number;
   deviceOfflineAlertMinutes: number;
   batteryHotAlertC: number;
   batteryLowAlertPercent: number;
@@ -227,48 +222,6 @@ export interface MaintenanceStatus {
   manual: boolean;
   auto: boolean;
   reason?: string;
-}
-
-export interface MaintenanceWindow {
-  start: string;
-  end: string;
-}
-
-export type MissedRunPolicy = 'skip' | 'runOnce';
-
-export interface AppWatch {
-  id: string;
-  billingOwnerId?: string;
-  billingOwnerDisplayName?: string;
-  billingOwnerTransfer?: { userId: string; requestedBy: string; requestedAt: number };
-  billingOwnerTransferDisplayName?: string;
-  billingOwnerTransferRequestorDisplayName?: string;
-  projectId?: string;
-  bundleId: string;
-  repo: string;
-  ghWorkflowFile: string;
-  dispatchTargets?: DispatchTarget[];
-  pollCron: string;
-  timezone?: string;
-  maintenanceWindow?: MaintenanceWindow;
-  missedRunPolicy?: MissedRunPolicy;
-  enabled: boolean;
-  webhookUrl?: string;
-  testFlightPolicy?: 'latest' | 'latestNonExpired' | 'train';
-  testFlightTrain?: string;
-  createdAt: number;
-  updatedAt: number;
-  nextRunAt?: number;
-  schedulable: boolean;
-  configIssues: string[];
-}
-
-export interface DispatchTarget {
-  repo: string;
-  ghWorkflowFile: string;
-  mode?: 'repository_dispatch' | 'workflow_dispatch';
-  ref?: string;
-  inputs?: Record<string, string>;
 }
 
 interface DeviceTransportStatus {
@@ -362,31 +315,6 @@ export interface DeviceSetupOperation {
   completedAt?: number;
 }
 
-export type SchedulerRunStatus = 'dispatched' | 'succeeded' | 'failed' | 'timed_out';
-
-export interface SchedulerRunOutcome {
-  ok: boolean;
-  triggered: boolean;
-  reason: string;
-  failureClass?: 'device_transport' | 'app_store' | 'testflight' | 'network' | 'storage' | 'decrypt' | 'queue' | 'cancelled' | 'unknown';
-  retryable?: boolean;
-  runUrl?: string;
-  failureSummary?: string;
-  destinationFailureSummary?: string;
-  runStatus?: SchedulerRunStatus;
-  observedVersion?: string;
-  installMode?: 'pinned' | 'current';
-}
-
-export interface SchedulerRunEntry {
-  id: string;
-  ts: number;
-  watchId?: string;
-  bundleId?: string;
-  appStore: SchedulerRunOutcome;
-  testflight: SchedulerRunOutcome;
-}
-
 export interface DiskUsage {
   totalBytes: number;
   freeBytes: number;
@@ -396,15 +324,10 @@ export interface DiskUsage {
 
 export interface OverviewPayload {
   projectId?: string;
-  schedulerEnabled: boolean;
-  settings: SchedulerSettings;
-  watches: AppWatch[];
-  statusWatches?: Array<{ id: string; bundleId: string; schedulable: boolean; nextRunAt?: number }>;
+  settings: DashboardSettings;
   devices: DeviceRecord[];
   statusDevices?: Array<{ id: string; name: string; enabled: boolean; draining?: boolean; isPrimary?: boolean; reachable?: boolean }>;
   deviceStatus?: { configured: number; enabled: number; online: number; ready: number; attention: number; checking: number; unavailable: number; freshUntil?: number };
-  lastSchedulerRunAt?: number;
-  schedulerRunHistory: SchedulerRunEntry[];
   disk?: DiskUsage;
   isPaidPlan?: boolean;
   maintenance?: MaintenanceStatus;
@@ -490,7 +413,7 @@ export interface ArtifactRecord {
 }
 
 export interface DashboardQuickSearchResult {
-  kind: 'app' | 'job' | 'artifact' | 'device' | 'watch' | 'user' | 'settings';
+  kind: 'app' | 'job' | 'artifact' | 'device' | 'user' | 'settings';
   id: string;
   title: string;
   subtitle?: string;
@@ -1015,7 +938,7 @@ export function updateDevice(id: string, patch: Partial<Pick<DeviceRecord, 'name
   return apiAction(`/v1/dashboard/devices/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }, 'Device updated');
 }
 
-export async function fetchDeviceDisableImpact(id: string): Promise<{ queuedJobCount: number; watchCount: number; runningJobCount: number }> {
+export async function fetchDeviceDisableImpact(id: string): Promise<{ queuedJobCount: number; runningJobCount: number }> {
   return apiJson(`/v1/dashboard/devices/${encodeURIComponent(id)}/disable-impact`);
 }
 
@@ -1039,164 +962,10 @@ export function recoverDevice(id: string): Promise<{ ok: boolean; data?: DeviceH
   return apiAction(`/v1/dashboard/devices/${encodeURIComponent(id)}/recover`, { method: 'POST' });
 }
 
-export function fetchWatches(): Promise<{ watches: AppWatch[] }> {
-  return apiJson('/v1/dashboard/watches');
-}
-
-export interface WatchInput {
-  projectId?: string;
-  bundleId: string;
-  repo: string;
-  ghWorkflowFile: string;
-  dispatchTargets?: DispatchTarget[];
-  pollCron: string;
-  timezone?: string;
-  maintenanceWindow?: MaintenanceWindow | null;
-  missedRunPolicy?: MissedRunPolicy;
-  enabled?: boolean;
-  acknowledgeConflicts?: boolean;
-  webhookUrl?: string;
-  testFlightPolicy?: 'latest' | 'latestNonExpired' | 'train';
-  testFlightTrain?: string;
-}
-
-export interface WatchDraft {
-  id: string;
-  ownerId: string;
-  projectId: string;
-  input: Partial<WatchInput>;
-  updatedAt: number;
-  expiresAt: number;
-}
-
-export interface WatchRevision {
-  id: string;
-  watchId: string;
-  actor: string;
-  actorDisplayName?: string;
-  at: number;
-  action: 'created' | 'updated' | 'restored' | 'deleted';
-  changedFields: string[];
-  changes?: Array<{ field: string; before?: string; after?: string }>;
-  snapshot: WatchInput & { webhookConfigured: boolean };
-}
-
-export interface WatchConflict {
-  watchId: string;
-  bundleId: string;
-  target: string;
-  nextOverlapAt: number;
-}
-
-export function fetchWatchDrafts(projectId: string): Promise<{ drafts: WatchDraft[] }> {
-  return apiJson(`/v1/dashboard/watches/drafts?projectId=${encodeURIComponent(projectId)}`);
-}
-
-export function saveWatchDraft(id: string | undefined, projectId: string, input: Partial<WatchInput>): Promise<WatchDraft> {
-  return apiJson('/v1/dashboard/watches/drafts', { method: 'POST', body: JSON.stringify({ id, projectId, input }) });
-}
-
-export function deleteWatchDraft(id: string): Promise<{ deleted: boolean }> {
-  return apiJson(`/v1/dashboard/watches/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
-export function previewWatchConflicts(watch: WatchInput, excludeWatchId?: string): Promise<{ conflicts: WatchConflict[] }> {
-  return apiJson('/v1/dashboard/watches/conflicts', { method: 'POST', body: JSON.stringify({ watch, excludeWatchId }) });
-}
-
-export function fetchWatchRevisions(id: string): Promise<{ revisions: WatchRevision[] }> {
-  return apiJson(`/v1/dashboard/watches/${encodeURIComponent(id)}/revisions`);
-}
-
-export function restoreWatchRevision(watchId: string, revisionId: string, expectedUpdatedAt: number, webhookUrl?: string, acknowledgeConflicts = false): Promise<AppWatch> {
-  return apiJson(`/v1/dashboard/watches/${encodeURIComponent(watchId)}/revisions/${encodeURIComponent(revisionId)}/restore`, { method: 'POST', body: JSON.stringify({ expectedUpdatedAt, webhookUrl, acknowledgeConflicts }) });
-}
-
-export interface GithubRepoOption {
-  fullName: string;
-  isPrivate: boolean;
-  defaultBranch: string;
-}
-
-export interface GithubWorkflowOption {
-  id: number;
-  name: string;
-  path: string;
-  state: string;
-}
-
-export function createWatch(input: WatchInput): Promise<{ ok: boolean; data: AppWatch }> {
-  return apiAction('/v1/dashboard/watches', { method: 'POST', body: JSON.stringify(input) }, 'Watch added');
-}
-
-export function updateWatch(id: string, patch: Partial<WatchInput> & { expectedUpdatedAt?: number }, successMessage: string | null = 'Watch updated'): Promise<{ ok: boolean; data: AppWatch }> {
-  return apiAction(`/v1/dashboard/watches/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }, successMessage ?? undefined);
-}
-
-export function requestWatchOwnership(id: string, userId: string): Promise<{ ok: boolean; data: AppWatch }> {
-  return apiAction(`/v1/dashboard/watches/${encodeURIComponent(id)}/ownership/request`, { method: 'POST', body: JSON.stringify({ userId }) });
-}
-
-export function fetchEligibleWatchOwners(id: string): Promise<{ users: Array<{ id: string; name: string }> }> {
-  return apiJson(`/v1/dashboard/watches/${encodeURIComponent(id)}/ownership/eligible`);
-}
-
-export function acceptWatchOwnership(id: string): Promise<{ ok: boolean; data: AppWatch }> {
-  return apiAction(`/v1/dashboard/watches/${encodeURIComponent(id)}/ownership/accept`, { method: 'POST' });
-}
-
-export function deleteWatch(id: string): Promise<{ ok: boolean }> {
-  return apiAction(`/v1/dashboard/watches/${encodeURIComponent(id)}`, { method: 'DELETE' }, 'Watch removed');
-}
-
-export function importWatches(watches: WatchInput[]): Promise<{ ok: boolean; data: { watches: AppWatch[]; skipped: string[] } }> {
-  return apiAction('/v1/dashboard/watches/import', { method: 'POST', body: JSON.stringify({ watches }) }, 'Watches imported');
-}
-
-export function watchesExportUrl(): string {
-  return '/v1/dashboard/watches/export';
-}
-
-export function previewWatchDispatch(id: string): Promise<UpdateCheck> {
-  return apiJson(`/v1/dashboard/watches/${encodeURIComponent(id)}/preview-dispatch`, undefined, 'external');
-}
-
-export interface PreviewSourceResult {
-  source: 'appStore' | 'testflight';
-  result: UpdateCheck | TestFlightUpdateCheck;
-}
-
-export function previewWatchDispatchSource(id: string, source: 'app-store' | 'testflight'): Promise<PreviewSourceResult> {
-  return apiJson(`/v1/dashboard/watches/${encodeURIComponent(id)}/preview-dispatch/${source}`, undefined, 'external');
-}
-
-export function previewWatchDispatchDraft(bundleId: string, repo: string): Promise<UpdateCheck> {
-  return apiJson(
-    '/v1/dashboard/watches/preview-dispatch-draft',
-    { method: 'POST', body: JSON.stringify({ bundleId, repo }) },
-    'external',
-  );
-}
-
-export interface DispatchValidationResult {
-  repo: string;
-  workflow: string;
-  ok: boolean;
-  checks: { label: string; ok: boolean; detail: string }[];
-}
-
-export function validateWatchDispatchDraft(targets: DispatchTarget[]): Promise<{ ok: boolean; results: DispatchValidationResult[] }> {
-  return apiJson('/v1/dashboard/watches/validate-dispatch-draft', { method: 'POST', body: JSON.stringify({ targets }) }, 'external');
-}
-
-export function triggerWatchDispatch(id: string): Promise<{ ok: boolean; data: { ok: boolean; error?: string } }> {
-  return apiAction(`/v1/dashboard/watches/${encodeURIComponent(id)}/trigger-dispatch`, { method: 'POST' });
-}
-
 export interface WebhookDeliveryEntry {
   id: string;
   ts: number;
-  kind: 'scheduler' | 'job';
+  kind: 'automation' | 'scheduler' | 'job';
   event: string;
   targetHost: string;
   ok: boolean;
@@ -1609,7 +1378,7 @@ export interface InsightsSummary {
   successRate: number;
   totalSizeBytes: number;
   manualCount: number;
-  schedulerCount: number;
+  systemCount: number;
   topApps: InsightsAppStats[];
   trend: { date: string; count: number }[];
   failureBreakdown: { category: string; count: number }[];
@@ -1799,71 +1568,6 @@ export function fetchStorageForecast(): Promise<StorageForecast> {
 
 export function supportBundleUrl(): string {
   return `/v1/dashboard/support-bundle?projectId=${encodeURIComponent(projectSelectionState.id)}`;
-}
-
-export interface WatchHealthSummary {
-  watchId: string;
-  bundleId: string;
-  schedulable: boolean;
-  dispatchTargetCount: number;
-  lastCheckAt?: number;
-  lastCheckOk?: boolean;
-  consecutiveFailures: number;
-  everTriggeredInHistory: boolean;
-  historyCount: number;
-  schedulerJobCount: number;
-  schedulerJobSuccessRate?: number;
-  medianSchedulerJobDurationMs?: number;
-}
-
-export function fetchWatchHealth(): Promise<{ watches: WatchHealthSummary[] }> {
-  return apiJson('/v1/dashboard/watches/health');
-}
-
-export interface SchedulerCalendarRun {
-  watchId: string;
-  bundleId: string;
-  at: number;
-  deferred: boolean;
-}
-
-export function fetchWatchCalendar(hours = 24, fromAt?: number, projectId?: string): Promise<{ fromAt: number; untilAt: number; runs: SchedulerCalendarRun[]; truncated: boolean }> {
-  return apiJson(`/v1/dashboard/watches/calendar?hours=${hours}${fromAt ? `&fromAt=${fromAt}` : ''}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`);
-}
-
-export interface GitHubBudgetTelemetryEntry {
-  id: string;
-  ts: number;
-  watchId: string;
-  bundleId: string;
-  estimatedRequests: number;
-  observedRequests?: number;
-  limit: number;
-  remainingBefore: number;
-  remainingAfter?: number;
-  resetAt: number;
-}
-
-export function fetchGitHubBudgetTelemetry(limit = 30, projectId?: string): Promise<{ entries: GitHubBudgetTelemetryEntry[] }> {
-  return apiJson(`/v1/dashboard/github/budget-history?limit=${limit}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`);
-}
-
-export function fetchGithubRepos(): Promise<{ repos: GithubRepoOption[] }> {
-  return apiJson('/v1/dashboard/github/repos');
-}
-
-export function fetchGithubWorkflows(repo: string): Promise<{ workflows: GithubWorkflowOption[] }> {
-  return apiJson(`/v1/dashboard/github/workflows?repo=${encodeURIComponent(repo)}`);
-}
-
-export interface GithubRateLimit {
-  limit?: number;
-  remaining?: number;
-  reset?: number;
-}
-
-export function fetchGithubRateLimit(): Promise<GithubRateLimit> {
-  return apiJson('/v1/dashboard/github/rate-limit');
 }
 
 export function searchApps(term: string): Promise<{ results: AppStoreSearchResult[] } | { error: string }> {
@@ -2258,11 +1962,11 @@ export function updateKeyAllowTestFlight(id: string, allowTestFlight: boolean): 
   );
 }
 
-export function fetchSettings(): Promise<SchedulerSettings> {
+export function fetchSettings(): Promise<DashboardSettings> {
   return apiJson('/v1/dashboard/settings');
 }
 
-export function saveSettings(patch: Partial<SchedulerSettings>): Promise<{ ok: boolean; data: SchedulerSettings }> {
+export function saveSettings(patch: Partial<DashboardSettings>): Promise<{ ok: boolean; data: DashboardSettings }> {
   return apiAction('/v1/dashboard/settings', { method: 'PUT', body: JSON.stringify(patch) }, 'Settings saved');
 }
 

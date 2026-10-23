@@ -6,9 +6,7 @@ import {
   dashboardDeviceResponseSchema,
   dashboardDiskUsageSchema,
   dashboardMaintenanceStatusSchema,
-  dashboardSchedulerRunEntrySchema,
-  dashboardWatchResponseSchema,
-  schedulerSettingsResponseSchema,
+  dashboardSettingsResponseSchema,
 } from '#dashboardModelsContracts.js';
 
 const Identifier = identifierSchema;
@@ -16,15 +14,7 @@ export const dashboardOverviewQuerySchema = Type.Object({ projectId: Type.Option
 
 export const dashboardOverviewResponseSchema = Type.Object({
   projectId: Identifier,
-  schedulerEnabled: Type.Boolean(),
-  settings: schedulerSettingsResponseSchema,
-  watches: Type.Array(dashboardWatchResponseSchema),
-  statusWatches: Type.Array(Type.Object({
-    id: Identifier,
-    bundleId: BundleId,
-    schedulable: Type.Boolean(),
-    nextRunAt: Type.Optional(Type.Number()),
-  })),
+  settings: dashboardSettingsResponseSchema,
   devices: Type.Array(dashboardDeviceResponseSchema),
   statusDevices: Type.Array(Type.Object({
     id: Identifier,
@@ -44,8 +34,6 @@ export const dashboardOverviewResponseSchema = Type.Object({
     unavailable: Type.Integer({ minimum: 0 }),
     freshUntil: Type.Optional(Type.Number()),
   }),
-  lastSchedulerRunAt: Type.Optional(Type.Number()),
-  schedulerRunHistory: Type.Array(dashboardSchedulerRunEntrySchema),
   disk: Type.Optional(dashboardDiskUsageSchema),
   isPaidPlan: Type.Boolean(),
   maintenance: dashboardMaintenanceStatusSchema,

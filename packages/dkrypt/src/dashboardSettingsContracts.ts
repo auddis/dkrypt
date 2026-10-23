@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { ApiErrorEnvelope } from '#contracts.js';
 import { bundleIdSchema as BundleId, identifierSchema } from '#apiCommonContracts.js';
-import { schedulerSettingsResponseSchema } from '#dashboardModelsContracts.js';
+import { dashboardSettingsResponseSchema } from '#dashboardModelsContracts.js';
 
 export const dashboardSettingsPatchBodySchema = Type.Object({
   notifyWebhookUrl: Type.Optional(Type.String({ maxLength: 2048 })),
@@ -18,13 +18,10 @@ export const dashboardSettingsPatchBodySchema = Type.Object({
   notifyOnJobCompleted: Type.Optional(Type.Boolean()),
   notifyOnQueueSloBreach: Type.Optional(Type.Boolean()),
   maintenanceMode: Type.Optional(Type.Boolean()),
-  notifyOnDispatchSuccess: Type.Optional(Type.Boolean()),
-  notifyOnDispatchFailure: Type.Optional(Type.Boolean()),
   notifyFormat: Type.Optional(Type.Union([Type.Literal('embed'), Type.Literal('plain')])),
   notifySuccessMode: Type.Optional(Type.Union([Type.Literal('instant'), Type.Literal('daily'), Type.Literal('weekly')])),
   notifyQuietHoursStart: Type.Optional(Type.String({ maxLength: 5, pattern: '^(?:|\\d{2}:\\d{2})$' })),
   notifyQuietHoursEnd: Type.Optional(Type.String({ maxLength: 5, pattern: '^(?:|\\d{2}:\\d{2})$' })),
-  schedulerRetryCount: Type.Optional(Type.Number()),
   deviceOfflineAlertMinutes: Type.Optional(Type.Number()),
   batteryHotAlertC: Type.Optional(Type.Number()),
   batteryLowAlertPercent: Type.Optional(Type.Number()),
@@ -104,12 +101,12 @@ export const dashboardWebhookTestResponseSchema = Type.Object({
 }, { additionalProperties: true });
 
 export type DashboardSettingsGetRoute = {
-  Reply: { 200: Static<typeof schedulerSettingsResponseSchema>; 401: ApiErrorEnvelope; 403: ApiErrorEnvelope };
+  Reply: { 200: Static<typeof dashboardSettingsResponseSchema>; 401: ApiErrorEnvelope; 403: ApiErrorEnvelope };
 };
 
 export type DashboardSettingsUpdateRoute = {
   Body: Static<typeof dashboardSettingsPatchBodySchema>;
-  Reply: { 200: Static<typeof schedulerSettingsResponseSchema>; 400: ApiErrorEnvelope; 401: ApiErrorEnvelope; 403: ApiErrorEnvelope };
+  Reply: { 200: Static<typeof dashboardSettingsResponseSchema>; 400: ApiErrorEnvelope; 401: ApiErrorEnvelope; 403: ApiErrorEnvelope };
 };
 
 export type DashboardSettingsRetentionPreviewRoute = {

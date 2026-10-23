@@ -8,7 +8,7 @@ import { canAccessProject } from '#dashboardJobPresentation.js';
 import { listAuthProfiles } from '#identity.js';
 import { PermissionFlag, hasPermission } from '#permissions.js';
 import { fastifyRequireSession, getFastifySession } from '#session.js';
-import { DEFAULT_PROJECT_ID, getEffectiveDevices, getProject, listAllowedUsers, listWatches, searchAppCatalogEntries, type AppCatalogEntry, type DeviceRecord, type JobHistoryEntry, type ProjectRecord, type AppWatch } from '#store/state.js';
+import { DEFAULT_PROJECT_ID, getEffectiveDevices, getProject, listAllowedUsers, searchAppCatalogEntries, type AppCatalogEntry, type DeviceRecord, type JobHistoryEntry, type ProjectRecord } from '#store/state.js';
 import { recordFastifyDashboardActivity } from '#dashboardActivity.js';
 import { createHttpErrorEnvelope } from '#util/httpResponse.js';
 
@@ -23,7 +23,6 @@ const quickSearchResultSchema = Type.Object({
     Type.Literal('job'),
     Type.Literal('artifact'),
     Type.Literal('device'),
-    Type.Literal('watch'),
     Type.Literal('user'),
     Type.Literal('settings'),
   ]),
@@ -49,7 +48,6 @@ interface QuickSearchServices {
   getActiveJobs: typeof getActiveJobs;
   listArtifacts: typeof listArtifacts;
   getEffectiveDevices: typeof getEffectiveDevices;
-  listWatches: typeof listWatches;
   listAuthProfiles: typeof listAuthProfiles;
   listAllowedUsers: typeof listAllowedUsers;
 }
@@ -62,7 +60,6 @@ const defaultServices: QuickSearchServices = {
   getActiveJobs,
   listArtifacts,
   getEffectiveDevices,
-  listWatches,
   listAuthProfiles,
   listAllowedUsers,
 };
@@ -82,7 +79,7 @@ function projectMatches(projectId: string, recordProjectId: string | undefined):
 function visibleSettings(permissions: QuickSearchPermissions): Array<{ id: string; title: string; keywords: string; any: bigint[]; all?: bigint[] }> {
   return [
     { id: 'personalization', title: 'Personalization', keywords: 'timezone time zone touch targets navigation favorites artifact columns appearance density', any: [] },
-    { id: 'scheduler', title: 'Automation', keywords: 'watch schedule cron github webhook testflight', any: [PermissionFlag.viewAutomation, PermissionFlag.manageAutomation] },
+    { id: 'notifications', title: 'Notifications', keywords: 'webhook alerts events quiet hours digest', any: [PermissionFlag.viewAutomation, PermissionFlag.manageAutomation] },
     { id: 'storage', title: 'Storage', keywords: 'artifact retention quota cleanup prune', any: [PermissionFlag.manageAutomation], all: [PermissionFlag.requestDecrypt] },
     { id: 'devices', title: 'Devices', keywords: 'usb wifi pairing health setup', any: [PermissionFlag.viewDevices, PermissionFlag.manageDevices] },
     { id: 'doctor', title: 'System', keywords: 'diagnostics health configuration', any: [PermissionFlag.manageDevices] },
@@ -184,14 +181,6 @@ export function createDashboardQuickSearchRoutes(overrides: Partial<QuickSearchS
           .map((device: DeviceRecord) => ({ kind: 'device' as const, id: device.id, title: device.name, subtitle: [device.productType, device.transport === 'usb' ? 'USB' : 'Wi-Fi'].filter(Boolean).join(' · ') })));
       }
 
-      const canSearchWatches = hasPermission(session.permissions, PermissionFlag.viewAutomation) || hasPermission(session.permissions, PermissionFlag.manageAutomation);
-      if (canSearchWatches) {
-        append(services.listWatches()
-          .filter((watch) => projectMatches(projectId, watch.projectId) && matches(query, [watch.id, watch.bundleId, watch.repo, catalog.get(watch.bundleId)?.displayName]))
-          .slice(0, MAX_RESULTS_PER_KIND)
-          .map((watch: AppWatch) => ({ kind: 'watch' as const, id: watch.id, title: catalog.get(watch.bundleId)?.displayName ?? watch.bundleId, subtitle: [watch.enabled ? 'Enabled' : 'Paused', watch.repo, services.getProject(projectId)?.name].filter(Boolean).join(' · '), projectId })));
-      }
-
       const canSearchUsers = hasPermission(session.permissions, PermissionFlag.viewUsers) || hasPermission(session.permissions, PermissionFlag.manageUsers);
       if (canSearchUsers) {
         const allowedUsers = new Set(services.listAllowedUsers().map((user) => user.username.toLowerCase()));
@@ -206,7 +195,7 @@ export function createDashboardQuickSearchRoutes(overrides: Partial<QuickSearchS
         .filter((section) => matches(query, [section.title, section.id, section.keywords]))
         .map((section) => ({ kind: 'settings' as const, id: section.id, title: section.title, subtitle: 'Settings' }));
       append(settings);
-      const kinds: QuickSearchResult['kind'][] = ['app', 'job', 'artifact', 'device', 'watch', 'user', 'settings'];
+      const kinds: QuickSearchResult['kind'][] = ['app', 'job', 'artifact', 'device', 'user', 'settings'];
       const grouped = new Map<QuickSearchResult['kind'], QuickSearchResult[]>();
       const seen = new Set<string>();
       for (const result of results) {

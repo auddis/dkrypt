@@ -54,7 +54,7 @@
     'user.update': 'updated user',
     'user.remove': 'removed user',
     'state.import': 'restored backup',
-    'settings.update': 'updated scheduler settings',
+    'settings.update': 'updated dashboard settings',
     'watch.add': 'added watch',
     'watch.update': 'updated watch',
     'watch.remove': 'removed watch',

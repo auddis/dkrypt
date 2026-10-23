@@ -45,7 +45,7 @@ const defaultServices: TestFlightBrowseServices = {
 };
 
 const canDecrypt = fastifyRequirePermission(PermissionFlag.requestDecrypt);
-const canManageSchedulerSettings = fastifyRequirePermission(PermissionFlag.manageAutomation);
+const canManageAutomation = fastifyRequirePermission(PermissionFlag.manageAutomation);
 const limitExternalRequest = fastifyRateLimitPerUser(
   externalRequestRateLimiter,
   (request) => getFastifySession(request)?.sub ?? request.ip,
@@ -165,7 +165,7 @@ export function createDashboardTestFlightBrowseRoutes(overrides: Partial<TestFli
 
     server.get<DashboardTestFlightDiagnosticsRoute>('/v1/dashboard/testflight/diagnostics', {
       schema: getRouteContract('GET', '/v1/dashboard/testflight/diagnostics'),
-      preHandler: [canManageSchedulerSettings, limitExternalRequest],
+      preHandler: [canManageAutomation, limitExternalRequest],
     }, async (request, reply) => {
       try {
         return await services.getDiagnostics();

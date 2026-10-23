@@ -49,7 +49,6 @@ import {
   getDeviceUptimePercent,
   getEffectiveDevices,
   getPrimaryDevice,
-  listWatches,
   recordDeviceActivity,
   type DeviceRecord,
   updateDevice,
@@ -416,8 +415,7 @@ export const dashboardDeviceRoutes: FastifyPluginAsyncTypebox = async (server) =
     if (!device) return reply.code(404).send(createHttpErrorEnvelope(request.id, 404, 'device not found'));
     const alternatives = getEffectiveDevices().filter((candidate) => candidate.id !== device.id && candidate.enabled && !candidate.draining);
     const jobs = getActiveJobs().filter((job) => job.status === 'queued' && (job.preferredDeviceId === device.id || (!job.preferredDeviceId && alternatives.length === 0)));
-    const watches = alternatives.length === 0 ? listWatches().filter((watch) => watch.enabled) : [];
-    return { deviceId: device.id, queuedJobCount: jobs.length, watchCount: watches.length, runningJobCount: getActiveJobs().filter((job) => job.status === 'running' && job.deviceId === device.id).length };
+    return { deviceId: device.id, queuedJobCount: jobs.length, runningJobCount: getActiveJobs().filter((job) => job.status === 'running' && job.deviceId === device.id).length };
   });
 
   server.post<{ Params: { id: string } }>('/v1/dashboard/devices/:id/drain', {

@@ -456,15 +456,7 @@ export function requestFocusSearch(bundleId?: string): void {
 export const jobDetailJumpState = $state<{ id: string | null }>({ id: null });
 export const artifactDetailJumpState = $state<{ id: string | null }>({ id: null });
 export const deviceDetailJumpState = $state<{ id: string | null }>({ id: null });
-export const watchDetailJumpState = $state<{ id: string | null }>({ id: null });
 export const logSearchJumpState = $state<{ value: { query: string; scope?: string } | null }>({ value: null });
-export const createWatchPrefillState = $state<{ value: { bundleId: string; displayName?: string } | null }>({ value: null });
-
-export function requestCreateWatch(bundleId: string, displayName?: string): void {
-  createWatchPrefillState.value = { bundleId, displayName };
-  setActiveTab('settings');
-  setSettingsSubtab('scheduler');
-}
 
 export const batchDecryptJumpState = $state<{ requested: boolean }>({ requested: false });
 
@@ -485,7 +477,7 @@ function readInitialTab(): TabId {
 
 export const tabState = $state<{ active: TabId; settingsSubtab: string }>({
   active: readInitialTab(),
-  settingsSubtab: getQueryParam('stab') ?? localStorage.getItem('activeSettingsSubtab') ?? 'scheduler',
+  settingsSubtab: getQueryParam('stab') ?? localStorage.getItem('activeSettingsSubtab') ?? 'personalization',
 });
 
 let navigationReviewPending = false;

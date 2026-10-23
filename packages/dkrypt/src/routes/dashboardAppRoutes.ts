@@ -11,7 +11,7 @@ import { artifactKeyForAppStoreVersion, getArtifactByKey, type ArtifactRecord } 
 import { getRouteContract } from '#contracts.js';
 import { scopedLogger } from '#logger.js';
 import { PermissionFlag } from '#permissions.js';
-import { lookupAppMetadata, lookupAppMetadataByTrackId, searchApps, type ItunesAppMetadata, type ItunesSearchResult } from '#scheduler/itunes.js';
+import { lookupAppMetadata, lookupAppMetadataByTrackId, searchApps, type ItunesAppMetadata, type ItunesSearchResult } from '#appStoreMetadata.js';
 import { fastifyRequirePermission, fastifyRequireSession } from '#session.js';
 import {
   getAppCatalogEntries,
@@ -53,7 +53,7 @@ const defaultServices: DashboardAppServices = {
   getArtifactByKey,
 };
 
-const canViewScheduler = fastifyRequirePermission(PermissionFlag.viewAutomation, PermissionFlag.manageAutomation);
+const canViewAutomation = fastifyRequirePermission(PermissionFlag.viewAutomation, PermissionFlag.manageAutomation);
 const canManageAppCatalog = fastifyRequirePermission(PermissionFlag.manageAutomation);
 const bundleIdPattern = /^[A-Za-z0-9.-]{3,200}$/;
 const APP_CATALOG_REVALIDATION_MS = 24 * 60 * 60 * 1000;
@@ -197,7 +197,7 @@ export function createDashboardAppRoutes(overrides: Partial<DashboardAppServices
 
     server.get<DashboardAppCatalogStatsRoute>('/v1/dashboard/apps/cache', {
       schema: getRouteContract('GET', '/v1/dashboard/apps/cache'),
-      preHandler: canViewScheduler,
+      preHandler: canViewAutomation,
     }, () => services.getAppCatalogStats());
 
     server.post<DashboardAppMetadataRefreshRoute>('/v1/dashboard/apps/metadata/refresh', {

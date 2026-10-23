@@ -15,7 +15,6 @@
     components: {
       service: { state: ComponentState };
       automation: { state: ComponentState };
-      scheduler: { state: ComponentState };
     };
   };
 
@@ -119,11 +118,10 @@
         </div>
       </Card>
 
-      <div class="grid gap-4 sm:grid-cols-3">
+      <div class="grid gap-4 sm:grid-cols-2">
         {#each [
           ['service', 'Service', status.components.service.state],
           ['automation', 'Device automation', status.components.automation.state],
-          ['scheduler', 'Scheduler', status.components.scheduler.state],
         ] as component (component[0])}
           {@const Icon = stateIcon(component[2] as ComponentState)}
           <Card>

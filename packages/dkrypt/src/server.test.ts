@@ -17,7 +17,7 @@ import { buildServer as buildRawServer } from '#server.js';
 import { dashboardRouter } from '#routes/dashboard.js';
 import { parseDeviceConnection } from '#routes/dashboardDeviceRoutes.js';
 import type { Response } from '#http.js';
-import { addAllowedUser, createApiKey, createDevice, createProject, createRole, createTestFlightSubscription, createWatch, deleteDevice, deleteRole, deleteUserPersonalData, deleteWatch, getEffectiveSettings, recordAudit, recordDeviceActivity, recordGitHubBudgetTelemetry, recordJobHistory, recordNotification, recordSchedulerRunOutcome, revokeApiKey, updateRole, updateSchedulerRunOutcome, updateSettings, withdrawTestFlightSubscription } from '#store/state.js';
+import { addAllowedUser, createApiKey, createDevice, createProject, createRole, createTestFlightSubscription, deleteDevice, deleteRole, deleteUserPersonalData, getEffectiveSettings, recordAudit, recordDeviceActivity, recordJobHistory, recordNotification, revokeApiKey, updateRole, updateSettings, withdrawTestFlightSubscription } from '#store/state.js';
 import { setSessionCookie } from '#session.js';
 
 test('request trace context is available throughout the Fastify request lifecycle', async () => {
@@ -1254,10 +1254,10 @@ test('native settings routes preserve permission gates and normalize updates', a
       method: 'PUT',
       url: '/v1/dashboard/settings',
       headers: { cookie: administratorCookie },
-      payload: { notifyFormat: 'plain', schedulerRetryCount: 12, notifyOnDispatchSuccess: false, notifyOnQueueSloBreach: false },
+      payload: { notifyFormat: 'plain', notifyOnAutomationSuccess: false, notifyOnQueueSloBreach: false },
     });
     expect(updated.statusCode).toBe(200);
-    expect(updated.json()).toMatchObject({ notifyFormat: 'plain', schedulerRetryCount: 5, notifyOnAutomationSuccess: false, notifyOnQueueSloBreach: false });
+    expect(updated.json()).toMatchObject({ notifyFormat: 'plain', notifyOnAutomationSuccess: false, notifyOnQueueSloBreach: false });
 
     const invalid = await server.inject({
       method: 'PUT',
@@ -1505,11 +1505,13 @@ test('dashboard overview uses native Fastify routing and preserves project check
 
     const viewerOverview = await server.inject({ method: 'GET', url: '/v1/dashboard/overview', headers: { cookie: decryptOnlyCookie } });
     expect(viewerOverview.statusCode).toBe(200);
-    expect(viewerOverview.json()).toMatchObject({ projectId: 'default', schedulerEnabled: expect.any(Boolean), activeJobs: expect.any(Array) });
+    expect(viewerOverview.json()).toMatchObject({ projectId: 'default', activeJobs: expect.any(Array) });
+    expect(viewerOverview.json()).not.toHaveProperty('schedulerEnabled');
+    expect(viewerOverview.json()).not.toHaveProperty('watches');
 
     const administratorOverview = await server.inject({ method: 'GET', url: '/v1/dashboard/overview', headers: { cookie: administratorCookie } });
     expect(administratorOverview.statusCode).toBe(200);
-    expect(administratorOverview.json()).toMatchObject({ projectId: 'default', devices: expect.any(Array), watches: expect.any(Array) });
+    expect(administratorOverview.json()).toMatchObject({ projectId: 'default', devices: expect.any(Array) });
   } finally {
     await server.close();
   }
@@ -1591,8 +1593,6 @@ test('members can read primary operational status without device configuration o
     expect(overview.json()).toMatchObject({
       devices: [],
       statusDevices: expect.arrayContaining([expect.objectContaining({ id: device.id, name: device.name, isPrimary: true })]),
-      statusWatches: expect.any(Array),
-      schedulerRunHistory: expect.any(Array),
     });
     expect(JSON.stringify(overview.json())).not.toContain('192.0.2.44');
     const defaultOverview = await server.inject({ method: 'GET', url: '/v1/dashboard/overview', headers: { cookie: noRoleCookie } });
@@ -2362,453 +2362,6 @@ test('project event streams close immediately after membership is revoked', asyn
   }
 });
 
-test('scheduler watch lists and budget history stay within the selected project', async () => {
-  const { server } = await signIn();
-  const memberId = `github:project-watch-${crypto.randomUUID()}`;
-  const statusMemberId = `github:project-status-${crypto.randomUUID()}`;
-  const permissions = PermissionFlag.viewAutomation | PermissionFlag.manageAutomation;
-  const role = createRole({ name: `Watch manager ${crypto.randomUUID()}`, color: '#3498db', permissions: serializeBits(permissions) }, 'test');
-  addAllowedUser(memberId, [role.id], 'test');
-  addAllowedUser(statusMemberId, [], 'test');
-  const memberCookie = createSessionCookie(memberId, permissions);
-  const statusOnlyCookie = createSessionCookie(statusMemberId, 0n);
-  const accessibleProject = createProject({ name: `Accessible ${crypto.randomUUID()}`, memberIds: [memberId, statusMemberId] }, 'root').project!;
-  const hiddenProject = createProject({ name: `Hidden ${crypto.randomUUID()}` }, 'root').project!;
-  const accessibleWatch = createWatch({
-    projectId: accessibleProject.id,
-    bundleId: `com.example.watch.${crypto.randomUUID()}`,
-    repo: 'owner/repo',
-    ghWorkflowFile: 'release.yml',
-    pollCron: '0 * * * *',
-    enabled: false,
-  }, 'test').watch!;
-  const hiddenWatch = createWatch({
-    projectId: hiddenProject.id,
-    bundleId: `com.example.watch.${crypto.randomUUID()}`,
-    repo: 'owner/repo',
-    ghWorkflowFile: 'release.yml',
-    pollCron: '0 * * * *',
-    enabled: false,
-  }, 'test').watch!;
-  const telemetry = (watchId: string, bundleId: string) => recordGitHubBudgetTelemetry({
-    watchId,
-    bundleId,
-    estimatedRequests: 5,
-    limit: 5000,
-    remainingBefore: 4995,
-    resetAt: Date.now() + 60_000,
-  });
-  telemetry(accessibleWatch.id, accessibleWatch.bundleId);
-  telemetry(hiddenWatch.id, hiddenWatch.bundleId);
-
-  try {
-    const watchesResponse = await server.inject({ method: 'GET', url: '/v1/dashboard/watches', headers: { cookie: memberCookie } });
-    const watches = (watchesResponse.json() as { watches: { id: string }[] }).watches;
-    const healthResponse = await server.inject({ method: 'GET', url: '/v1/dashboard/watches/health', headers: { cookie: memberCookie } });
-    const health = (healthResponse.json() as { watches: { watchId: string }[] }).watches;
-    const budgetResponse = await server.inject({ method: 'GET', url: `/v1/dashboard/github/budget-history?projectId=${accessibleProject.id}`, headers: { cookie: memberCookie } });
-    const entries = (budgetResponse.json() as { entries: { watchId: string }[] }).entries;
-    const calendarResponse = await server.inject({ method: 'GET', url: `/v1/dashboard/watches/calendar?projectId=${accessibleProject.id}&hours=24`, headers: { cookie: memberCookie } });
-    const statusOverview = await server.inject({ method: 'GET', url: `/v1/dashboard/overview?projectId=${accessibleProject.id}`, headers: { cookie: statusOnlyCookie } });
-
-    expect(watchesResponse.statusCode).toBe(200);
-    expect(statusOverview.statusCode).toBe(200);
-    expect(statusOverview.json().watches).toEqual([]);
-    expect(statusOverview.json().statusWatches).toContainEqual(expect.objectContaining({ id: accessibleWatch.id, bundleId: accessibleWatch.bundleId }));
-    expect(statusOverview.json().statusWatches).not.toContainEqual(expect.objectContaining({ id: hiddenWatch.id }));
-    expect(watches.map((watch) => watch.id)).toContain(accessibleWatch.id);
-    expect(watches.map((watch) => watch.id)).not.toContain(hiddenWatch.id);
-    expect(healthResponse.statusCode).toBe(200);
-    expect(health.map((watch) => watch.watchId)).toContain(accessibleWatch.id);
-    expect(health.map((watch) => watch.watchId)).not.toContain(hiddenWatch.id);
-    expect(budgetResponse.statusCode).toBe(200);
-    expect(entries.map((entry) => entry.watchId)).toEqual([accessibleWatch.id]);
-    expect(calendarResponse.statusCode).toBe(200);
-  } finally {
-    deleteWatch(accessibleWatch.id, 'test');
-    deleteWatch(hiddenWatch.id, 'test');
-    await server.close();
-  }
-});
-
-test('scheduler calendar defers quiet-window runs while preserving local time across daylight-saving changes', async () => {
-  const originalToken = config.ghToken;
-  config.ghToken = 'timezone-calendar-test-token';
-  const server = await buildTestServer({ includePublicRoutes: false });
-  const cookie = createSessionCookie('root', PermissionFlag.administrator);
-  let watchId: string | undefined;
-  let overnightWatchId: string | undefined;
-
-  try {
-    const created = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches',
-      headers: { cookie },
-      payload: {
-        bundleId: `com.example.watch.timezone.${crypto.randomUUID()}`,
-        repo: 'owner/repo',
-        ghWorkflowFile: 'release.yml',
-        pollCron: '0 9 * * *',
-        timezone: 'Europe/Berlin',
-        maintenanceWindow: { start: '08:00', end: '10:00' },
-      },
-    });
-    expect(created.statusCode).toBe(201);
-    expect(created.json()).toMatchObject({ maintenanceWindow: { start: '08:00', end: '10:00' } });
-    watchId = (created.json() as { id: string }).id;
-
-    const fromAt = Date.parse('2026-10-24T07:30:00.000Z');
-    const calendar = await server.inject({
-      method: 'GET',
-      url: `/v1/dashboard/watches/calendar?fromAt=${fromAt}&hours=72`,
-      headers: { cookie },
-    });
-    expect(calendar.statusCode).toBe(200);
-    expect((calendar.json() as { runs: { watchId: string; at: number; deferred: boolean }[] }).runs
-      .filter((run) => run.watchId === watchId)
-      .map(({ at, deferred }) => ({ at, deferred }))).toEqual([
-      { at: Date.parse('2026-10-25T09:00:00.000Z'), deferred: true },
-      { at: Date.parse('2026-10-26T09:00:00.000Z'), deferred: true },
-    ]);
-
-    const overnightCreated = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches',
-      headers: { cookie },
-      payload: {
-        bundleId: `com.example.watch.overnight.${crypto.randomUUID()}`,
-        repo: 'owner/repo',
-        ghWorkflowFile: 'release.yml',
-        pollCron: '0 23 * * *',
-        timezone: 'Europe/Berlin',
-        maintenanceWindow: { start: '22:00', end: '06:00' },
-      },
-    });
-    expect(overnightCreated.statusCode).toBe(201);
-    overnightWatchId = (overnightCreated.json() as { id: string }).id;
-
-    const overnightCalendar = await server.inject({
-      method: 'GET',
-      url: `/v1/dashboard/watches/calendar?fromAt=${Date.parse('2026-10-24T20:30:00.000Z')}&hours=24`,
-      headers: { cookie },
-    });
-    expect(overnightCalendar.statusCode).toBe(200);
-    expect((overnightCalendar.json() as { runs: { watchId: string; at: number; deferred: boolean }[] }).runs
-      .filter((run) => run.watchId === overnightWatchId)
-      .map(({ at, deferred }) => ({ at, deferred }))).toEqual([
-      { at: Date.parse('2026-10-25T05:00:00.000Z'), deferred: true },
-    ]);
-  } finally {
-    if (watchId) await server.inject({ method: 'DELETE', url: `/v1/dashboard/watches/${watchId}`, headers: { cookie } });
-    if (overnightWatchId) await server.inject({ method: 'DELETE', url: `/v1/dashboard/watches/${overnightWatchId}`, headers: { cookie } });
-    config.ghToken = originalToken;
-    await server.close();
-  }
-});
-
-test('native scheduler watch routes enforce permissions and preserve CRUD and import behavior', async () => {
-  const server = await buildTestServer({ includePublicRoutes: false });
-  const administratorCookie = createSessionCookie('root', PermissionFlag.administrator);
-  const decryptOnlyCookie = createSessionCookie('root', PermissionFlag.requestDecrypt);
-  const suffix = crypto.randomUUID();
-  let createdId: string | undefined;
-  let importedId: string | undefined;
-
-  try {
-    const nativeRoutes = [
-      ['GET', '/v1/dashboard/github/rate-limit'],
-      ['GET', '/v1/dashboard/watches'],
-      ['GET', '/v1/dashboard/watches/export'],
-      ['GET', '/v1/dashboard/watches/health'],
-      ['GET', '/v1/dashboard/watches/calendar'],
-      ['GET', '/v1/dashboard/github/budget-history'],
-      ['GET', '/v1/dashboard/github/repos'],
-      ['GET', '/v1/dashboard/github/workflows'],
-      ['POST', '/v1/dashboard/watches'],
-      ['PATCH', '/v1/dashboard/watches/:id'],
-      ['DELETE', '/v1/dashboard/watches/:id'],
-      ['POST', '/v1/dashboard/watches/import'],
-      ['POST', '/v1/dashboard/watches/preview-dispatch-draft'],
-      ['POST', '/v1/dashboard/watches/validate-dispatch-draft'],
-      ['GET', '/v1/dashboard/watches/:id/preview-dispatch'],
-      ['GET', '/v1/dashboard/watches/:id/preview-dispatch/:source'],
-      ['POST', '/v1/dashboard/watches/:id/trigger-dispatch'],
-    ] as const;
-    expect(nativeRoutes.every(([method, url]) => server.hasRoute({ method, url }))).toBe(true);
-
-    const denied = await server.inject({ method: 'GET', url: '/v1/dashboard/watches', headers: { cookie: decryptOnlyCookie } });
-    expect(denied.statusCode).toBe(403);
-
-    const invalidWorkflowRepo = await server.inject({ method: 'GET', url: '/v1/dashboard/github/workflows?repo=bad', headers: { cookie: administratorCookie } });
-    expect(invalidWorkflowRepo.statusCode).toBe(400);
-
-    const deniedTrigger = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches/missing/trigger-dispatch',
-      headers: { cookie: decryptOnlyCookie },
-    });
-    expect(deniedTrigger.statusCode).toBe(403);
-
-    const invalidSource = await server.inject({
-      method: 'GET',
-      url: '/v1/dashboard/watches/missing/preview-dispatch/unsupported',
-      headers: { cookie: administratorCookie },
-    });
-    expect(invalidSource.statusCode).toBe(400);
-
-    const missingPreview = await server.inject({
-      method: 'GET',
-      url: '/v1/dashboard/watches/missing/preview-dispatch',
-      headers: { cookie: administratorCookie },
-    });
-    expect(missingPreview.statusCode).toBe(404);
-
-    const invalidDraft = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches/preview-dispatch-draft',
-      headers: { cookie: administratorCookie },
-      payload: {},
-    });
-    expect(invalidDraft.statusCode).toBe(400);
-
-    const invalidTargets = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches/validate-dispatch-draft',
-      headers: { cookie: administratorCookie },
-      payload: { targets: [] },
-    });
-    expect(invalidTargets.statusCode).toBe(400);
-
-    const missingTrigger = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches/missing/trigger-dispatch',
-      headers: { cookie: administratorCookie },
-    });
-    expect(missingTrigger.statusCode).toBe(404);
-
-    const invalidCron = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches',
-      headers: { cookie: administratorCookie },
-      payload: { bundleId: `com.example.watch.invalid.${suffix}`, repo: 'owner/repo', pollCron: 'not-cron' },
-    });
-    expect(invalidCron.statusCode).toBe(400);
-
-    const invalidTimezone = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches',
-      headers: { cookie: administratorCookie },
-      payload: { bundleId: `com.example.watch.invalid-timezone.${suffix}`, repo: 'owner/repo', pollCron: '0 * * * *', timezone: 'Mars/Olympus_Mons' },
-    });
-    expect(invalidTimezone.statusCode).toBe(400);
-
-    const invalidMaintenanceWindow = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches',
-      headers: { cookie: administratorCookie },
-      payload: { bundleId: `com.example.watch.invalid-window.${suffix}`, repo: 'owner/repo', pollCron: '0 * * * *', maintenanceWindow: { start: '02:00', end: '02:00' } },
-    });
-    expect(invalidMaintenanceWindow.statusCode).toBe(400);
-
-    const invalidMissedRunPolicy = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches',
-      headers: { cookie: administratorCookie },
-      payload: { bundleId: `com.example.watch.invalid-missed-policy.${suffix}`, repo: 'owner/repo', pollCron: '0 * * * *', missedRunPolicy: 'replayAll' },
-    });
-    expect(invalidMissedRunPolicy.statusCode).toBe(400);
-
-    const created = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches',
-      headers: { cookie: administratorCookie },
-      payload: {
-        bundleId: `com.example.watch.created.${suffix}`,
-        repo: 'owner/repo',
-        ghWorkflowFile: 'release.yml',
-        pollCron: '0 * * * *',
-        timezone: 'Europe/Berlin',
-        enabled: false,
-      },
-    });
-    expect(created.statusCode).toBe(201);
-    expect(created.json()).toMatchObject({ bundleId: `com.example.watch.created.${suffix}`, timezone: 'Europe/Berlin', missedRunPolicy: 'skip', enabled: false, schedulable: false });
-    createdId = (created.json() as { id: string }).id;
-
-    const updated = await server.inject({
-      method: 'PATCH',
-      url: `/v1/dashboard/watches/${createdId}`,
-      headers: { cookie: administratorCookie },
-      payload: { pollCron: '15 * * * *', timezone: 'America/New_York', missedRunPolicy: 'runOnce', testFlightPolicy: 'train', testFlightTrain: 'beta' },
-    });
-    expect(updated.statusCode).toBe(200);
-    expect(updated.json()).toMatchObject({ pollCron: '15 * * * *', timezone: 'America/New_York', missedRunPolicy: 'runOnce', testFlightPolicy: 'train', testFlightTrain: 'beta' });
-
-    const maintenanceWindowCleared = await server.inject({
-      method: 'PATCH',
-      url: `/v1/dashboard/watches/${createdId}`,
-      headers: { cookie: administratorCookie },
-      payload: { maintenanceWindow: null },
-    });
-    expect(maintenanceWindowCleared.statusCode).toBe(200);
-    expect(maintenanceWindowCleared.json()).not.toHaveProperty('maintenanceWindow');
-
-    const latestWatch = maintenanceWindowCleared.json() as { enabled: boolean; updatedAt: number };
-    const staleUndo = await server.inject({
-      method: 'PATCH',
-      url: `/v1/dashboard/watches/${createdId}`,
-      headers: { cookie: administratorCookie },
-      payload: { enabled: true, expectedUpdatedAt: latestWatch.updatedAt - 1 },
-    });
-    expect(staleUndo.statusCode).toBe(409);
-    expect(staleUndo.json()).toMatchObject({ remediation: { current: { id: createdId, pollCron: '15 * * * *', updatedAt: latestWatch.updatedAt } } });
-    expect(staleUndo.json().remediation.current).not.toHaveProperty('webhookUrl');
-    const toggled = await server.inject({
-      method: 'PATCH',
-      url: `/v1/dashboard/watches/${createdId}`,
-      headers: { cookie: administratorCookie },
-      payload: { enabled: !latestWatch.enabled, expectedUpdatedAt: latestWatch.updatedAt },
-    });
-    expect(toggled.statusCode).toBe(200);
-    expect(toggled.json()).toMatchObject({ enabled: true });
-    const restored = await server.inject({
-      method: 'PATCH',
-      url: `/v1/dashboard/watches/${createdId}`,
-      headers: { cookie: administratorCookie },
-      payload: { enabled: latestWatch.enabled, expectedUpdatedAt: (toggled.json() as { updatedAt: number }).updatedAt },
-    });
-    expect(restored.statusCode).toBe(200);
-    expect(restored.json()).toMatchObject({ enabled: false });
-
-    const exported = await server.inject({ method: 'GET', url: '/v1/dashboard/watches/export', headers: { cookie: administratorCookie } });
-    expect(exported.statusCode).toBe(200);
-    expect(exported.headers['content-disposition']).toContain('dkrypt-watches.json');
-    expect((exported.json() as { watches: { id: string; timezone?: string }[] }).watches).toContainEqual(expect.objectContaining({ id: createdId, timezone: 'America/New_York' }));
-
-    const oversizedImport = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches/import',
-      headers: { cookie: administratorCookie },
-      payload: { watches: [{ bundleId: `com.example.watch.oversized.${suffix}`, ghWorkflowFile: 'x'.repeat(201) }] },
-    });
-    expect(oversizedImport.statusCode).toBe(400);
-
-    const imported = await server.inject({
-      method: 'POST',
-      url: '/v1/dashboard/watches/import',
-      headers: { cookie: administratorCookie },
-      payload: {
-        watches: [
-          {
-            bundleId: `com.example.watch.invalid.${suffix}`,
-            repo: 'owner/repo',
-            ghWorkflowFile: 'release.yml',
-            pollCron: 'not-cron',
-          },
-          {
-            bundleId: `com.example.watch.imported.${suffix}`,
-            repo: 'owner/repo',
-            ghWorkflowFile: 'release.yml',
-            pollCron: '0 */2 * * *',
-            timezone: 'Europe/Berlin',
-            maintenanceWindow: { start: '22:00', end: '06:00' },
-            missedRunPolicy: 'runOnce',
-          },
-        ],
-      },
-    });
-    expect(imported.statusCode).toBe(201);
-    expect(imported.json()).toMatchObject({ watches: [expect.objectContaining({ timezone: 'Europe/Berlin', maintenanceWindow: { start: '22:00', end: '06:00' }, missedRunPolicy: 'runOnce', enabled: false })], skipped: ['invalid watch'] });
-    importedId = (imported.json() as { watches: { id: string }[] }).watches[0]?.id;
-
-    const removed = await server.inject({ method: 'DELETE', url: `/v1/dashboard/watches/${createdId}`, headers: { cookie: administratorCookie } });
-    expect(removed.statusCode).toBe(200);
-    expect(removed.json()).toMatchObject({ ok: true });
-    createdId = undefined;
-  } finally {
-    if (createdId) deleteWatch(createdId, 'test');
-    if (importedId) deleteWatch(importedId, 'test');
-    await server.close();
-  }
-});
-
-test('native GitHub lookup failures retain safe upstream diagnostics', async () => {
-  const originalToken = config.ghToken;
-  const originalFetch = globalThis.fetch;
-  const server = await buildTestServer({ includePublicRoutes: false });
-
-  try {
-    config.ghToken = 'test-github-token-secret';
-    globalThis.fetch = (async () => new globalThis.Response('private upstream body', {
-      status: 403,
-      headers: { 'x-ratelimit-remaining': '1' },
-    })) as unknown as typeof globalThis.fetch;
-    const response = await server.inject({
-      method: 'GET',
-      url: '/v1/dashboard/github/repos',
-      headers: { cookie: createSessionCookie('root', PermissionFlag.administrator) },
-    });
-    const body = response.json() as {
-      code: string;
-      error: string;
-      message: string;
-      retryable: boolean;
-      remediation: { service: string; category: string; upstreamStatus: number; action: string };
-    };
-    expect(response.statusCode).toBe(502);
-    expect(body).toMatchObject({
-      code: 'internal_error',
-      error: 'internal server error',
-      message: 'internal server error',
-      retryable: true,
-      remediation: {
-        service: 'github',
-        category: 'permissions_or_rate_limit',
-        upstreamStatus: 403,
-        action: 'Verify GH_TOKEN repository permissions and GitHub rate limits.',
-      },
-    });
-    expect(JSON.stringify(body)).not.toContain('test-github-token-secret');
-    expect(JSON.stringify(body)).not.toContain('private upstream body');
-  } finally {
-    config.ghToken = originalToken;
-    globalThis.fetch = originalFetch;
-    await server.close();
-  }
-});
-
-test('native dispatch previews share the external request budget with native TestFlight lookups', async () => {
-  const username = `rate-limit-${crypto.randomUUID()}`;
-  const role = createRole({ name: `Rate limit ${username}`, color: '#52637a', permissions: serializeBits(PermissionFlag.manageAutomation) }, 'root');
-  addAllowedUser(username, [role.id], 'test setup');
-  const server = await buildTestServer({ includePublicRoutes: false });
-
-  try {
-    const cookie = createSessionCookie(username, PermissionFlag.manageAutomation);
-    for (let index = 0; index < 10; index += 1) {
-      const response = await server.inject({
-        method: 'POST',
-        url: '/v1/dashboard/watches/validate-dispatch-draft',
-        headers: { cookie },
-        payload: { targets: [] },
-      });
-      expect(response.statusCode).toBe(400);
-    }
-    const legacyLookup = await server.inject({
-      method: 'GET',
-      url: '/v1/dashboard/testflight/0/trains',
-      headers: { cookie },
-    });
-    expect(legacyLookup.statusCode).toBe(429);
-    expect(legacyLookup.headers['x-ratelimit-remaining']).toBe('0');
-    expect(legacyLookup.json()).toMatchObject({ code: 'rate_limited', retryable: true });
-  } finally {
-    deleteUserPersonalData(username);
-    deleteRole(role.id, 'test cleanup');
-    await server.close();
-  }
-});
-
 test('Fastify rejects obsolete device root submissions', async () => {
   const { server, cookie } = await signIn();
 
@@ -3145,9 +2698,9 @@ test('Fastify exposes coarse public service status without device details', asyn
       components: {
         service: { state: expect.any(String) },
         automation: { state: expect.any(String) },
-        scheduler: { state: expect.any(String) },
       },
     });
+    expect(response.json().components).not.toHaveProperty('scheduler');
     expect(response.body).not.toContain('deviceId');
     expect(response.body).not.toContain('capabilities');
   } finally {
@@ -3157,50 +2710,18 @@ test('Fastify exposes coarse public service status without device details', asyn
   }
 });
 
-test('public status degrades for a failed scheduled workflow and recovers after success', async () => {
-  const originalToken = config.ghToken;
-  config.ghToken = 'public-status-scheduler-test-token';
-  const bundleId = `com.example.public-status.${crypto.randomUUID()}`;
-  const watch = createWatch({
-    bundleId,
-    repo: 'owner/repo',
-    ghWorkflowFile: 'release.yml',
-    pollCron: '0 * * * *',
-  }, 'root').watch;
-  if (!watch) throw new Error('test watch was not created');
+test('public status omits retired workflow scheduler state', async () => {
   const server = await buildTestServer({ includePublicRoutes: false });
-
   try {
-    const failedRunId = recordSchedulerRunOutcome({
-      watchId: watch.id,
-      bundleId,
-      appStore: { ok: true, triggered: false, reason: 'no new App Store version' },
-      testflight: { ok: true, triggered: true, runStatus: 'dispatched', reason: 'workflow dispatched' },
+    const response = await server.inject({ method: 'GET', url: '/v1/status' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().components).toMatchObject({
+      service: { state: expect.any(String) },
+      automation: { state: expect.any(String) },
     });
-    updateSchedulerRunOutcome(failedRunId, 'testflight', { runStatus: 'failed', reason: 'workflow failed' });
-
-    const failed = await server.inject({ method: 'GET', url: '/v1/status' });
-    expect(failed.json()).toMatchObject({
-      status: 'degraded',
-      components: { scheduler: { state: 'degraded' } },
-    });
-
-    recordSchedulerRunOutcome({
-      watchId: watch.id,
-      bundleId,
-      appStore: { ok: true, triggered: false, reason: 'no new App Store version' },
-      testflight: { ok: true, triggered: false, reason: 'workflow completed', runStatus: 'succeeded' },
-    });
-
-    const recovered = await server.inject({ method: 'GET', url: '/v1/status' });
-    expect(recovered.json()).toMatchObject({
-      status: 'operational',
-      components: { scheduler: { state: 'operational' } },
-    });
+    expect(response.json().components).not.toHaveProperty('scheduler');
   } finally {
     await server.close();
-    deleteWatch(watch.id, 'test');
-    config.ghToken = originalToken;
   }
 });
 

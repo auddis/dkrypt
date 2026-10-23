@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-const { lookupAppMetadata, lookupAppMetadataByTrackId, searchApps } = await import(`${new URL('./itunes.ts', import.meta.url).href}?storefront-test`);
+const { lookupAppMetadata, lookupAppMetadataByTrackId, searchApps } = await import(`${new URL('./appStoreMetadata.ts', import.meta.url).href}?storefront-test`);
 
 const originalFetch = globalThis.fetch;
 
@@ -33,7 +33,7 @@ async function runCurrentVersionLookupInIsolatedProcess(): Promise<{ url: string
     "  globalThis.requestUrl = String(input);",
     "  return new Response(JSON.stringify({ resultCount: 1, results: [{ version: '340.0', bundleId: 'com.hammerandchisel.discord', trackId: 985746746, minimumOsVersion: '16.0' }] }), { status: 200 });",
     "};",
-    "const { lookupCurrentVersion } = await import('./src/scheduler/itunes.ts');",
+    "const { lookupCurrentVersion } = await import('./src/appStoreMetadata.ts');",
     "const result = await lookupCurrentVersion('com.hammerandchisel.discord');",
     "console.log(JSON.stringify({ url: globalThis.requestUrl, version: result.version, minimumOsVersion: result.minimumOsVersion }));",
   ].join('\n');
@@ -53,7 +53,7 @@ async function runAbortableVersionLookupInIsolatedProcess(): Promise<string> {
     '  if (!init?.signal) return new Response(JSON.stringify({ resultCount: 1, results: [{ version: "340.0", bundleId: "com.hammerandchisel.discord", trackId: 985746746 }] }), { status: 200 });',
     '  return new Promise((resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }));',
     '};',
-    "const { lookupCurrentVersion } = await import('./src/scheduler/itunes.ts');",
+    "const { lookupCurrentVersion } = await import('./src/appStoreMetadata.ts');",
     'const controller = new AbortController();',
     'const lookup = lookupCurrentVersion("com.hammerandchisel.discord", controller.signal);',
     'controller.abort(new Error("job deadline exceeded"));',

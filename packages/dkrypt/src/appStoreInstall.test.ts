@@ -28,7 +28,7 @@ const originalSetTimeout = globalThis.setTimeout;
 const originalDateNow = Date.now;
 
 const idevice = await import('#idevice.js');
-const itunes = await import('#scheduler/itunes.js');
+const itunes = await import('#appStoreMetadata.js');
 const state = await import('#store/state.js');
 
 mock.module('#idevice.js', () => ({
@@ -89,7 +89,7 @@ mock.module('#idevice.js', () => ({
   withSSH: async (_device: object, fn: (conn: object) => Promise<void>) => fn({}),
 }));
 
-mock.module('#scheduler/itunes.js', () => ({
+mock.module('#appStoreMetadata.js', () => ({
   ...itunes,
   lookupCurrentVersion: async (bundleId: string) => {
     listingBundleId = bundleId;

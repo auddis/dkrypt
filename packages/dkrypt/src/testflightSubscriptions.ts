@@ -2,7 +2,7 @@ import { BridgeError } from '#idevice.js';
 import { scopedLogger } from '#logger.js';
 import { trackBackgroundWork } from '#backgroundWork.js';
 import { uninstallFromDevice } from '#appStoreInstall.js';
-import { lookupAppMetadata, searchApps, type ItunesSearchResult } from '#scheduler/itunes.js';
+import { lookupAppMetadata, searchApps, type ItunesSearchResult } from '#appStoreMetadata.js';
 import {
   ensureTestFlightSubscriptionDevices,
   getTestFlightSubscriptions,

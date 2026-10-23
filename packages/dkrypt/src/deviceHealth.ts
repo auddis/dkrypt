@@ -144,7 +144,7 @@ export interface DeviceReadiness {
 }
 
 export function formatTestFlightBridgeDownDescription(deviceName: string, alertMinutes: number): string {
-  return `The autoinstall SpringBoard bridge on ${deviceName} has stopped responding for at least ${alertMinutes} minutes - TestFlight installs and the scheduler's TestFlight watch can't run until it recovers.`;
+  return `The autoinstall SpringBoard bridge on ${deviceName} has stopped responding for at least ${alertMinutes} minutes - TestFlight installs can't run until it recovers.`;
 }
 
 export function testFlightBridgeReachability(health: Pick<DeviceHealth, 'reachable' | 'testFlightBridgeReachable'>): boolean | undefined {

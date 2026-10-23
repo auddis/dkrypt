@@ -13,7 +13,7 @@ export const dashboardIntegrationRoutes: FastifyPluginAsyncTypebox = async (serv
   server.addHook('preHandler', fastifyRequireSession);
 
   const administrator = fastifyRequirePermission(PermissionFlag.administrator);
-  const schedulerViewer = fastifyRequirePermission(PermissionFlag.viewAutomation, PermissionFlag.manageAutomation);
+  const integrationViewer = fastifyRequirePermission(PermissionFlag.viewAutomation, PermissionFlag.manageAutomation);
   const profileName = (userId: string | undefined): string => userId ? getAuthProfile(userId)?.displayName ?? userId : 'System-owned';
   const serializeIntegration = <T extends { billingOwnerId?: string; billingOwnerTransfer?: { userId: string; requestedBy: string } }>(policy: T) => ({
     ...policy,
@@ -31,7 +31,7 @@ export const dashboardIntegrationRoutes: FastifyPluginAsyncTypebox = async (serv
 
   server.get('/v1/dashboard/integrations/github-oidc', { schema: { hide: true }, preHandler: administrator }, () => ({ policies: listGithubOidcPolicies().map(serializeIntegration) }));
 
-  server.get('/v1/dashboard/integrations/ownership/pending', { schema: { hide: true }, preHandler: schedulerViewer }, (request) => {
+  server.get('/v1/dashboard/integrations/ownership/pending', { schema: { hide: true }, preHandler: integrationViewer }, (request) => {
     const actor = getFastifySession(request)!.sub.toLowerCase();
     const signed = listSignedTriggerPolicies().filter((policy) => policy.billingOwnerTransfer?.userId === actor).map((policy) => ({ ...serializeIntegration(policy), kind: policy.kind, label: `${policy.projectId} · ${policy.bundleIds.join(', ')}` }));
     const oidc = listGithubOidcPolicies().filter((policy) => policy.billingOwnerTransfer?.userId === actor).map((policy) => ({ ...serializeIntegration(policy), kind: policy.kind, label: `GitHub Actions · ${policy.projectId} · ${policy.bundleIds.join(', ')}` }));
@@ -55,7 +55,7 @@ export const dashboardIntegrationRoutes: FastifyPluginAsyncTypebox = async (serv
     const policy = getSignedTriggerPolicy(request.params.id) ?? listGithubOidcPolicies().find((candidate) => candidate.id === request.params.id);
     if (!policy || !policy.enabled) return reply.code(404).send(createHttpErrorEnvelope(request.id, 404, 'active integration not found'));
     const userId = request.body.userId.trim().toLowerCase();
-    if (userId !== 'root' && !eligibleOwners(policy.projectId).some((user) => user.id === userId)) return reply.code(409).send(createHttpErrorEnvelope(request.id, 409, 'recipient needs project, scheduler, and decrypt access'));
+    if (userId !== 'root' && !eligibleOwners(policy.projectId).some((user) => user.id === userId)) return reply.code(409).send(createHttpErrorEnvelope(request.id, 409, 'recipient needs project, integration, and decrypt access'));
     const result = requestIntegrationBillingOwnerTransfer(request.params.id, userId, actor);
     if (!result) return reply.code(404).send(createHttpErrorEnvelope(request.id, 404, 'active integration not found'));
     recordAudit(actor, 'integration.billing-owner-request', result.id, userId);
@@ -64,7 +64,7 @@ export const dashboardIntegrationRoutes: FastifyPluginAsyncTypebox = async (serv
 
   server.post('/v1/dashboard/integrations/:id/ownership/accept', {
     schema: { hide: true, params: Type.Object({ id: Type.String() }) },
-    preHandler: schedulerViewer,
+    preHandler: integrationViewer,
   }, (request, reply) => {
     const actor = getFastifySession(request)!.sub;
     const existing = getSignedTriggerPolicy(request.params.id) ?? listGithubOidcPolicies().find((candidate) => candidate.id === request.params.id);

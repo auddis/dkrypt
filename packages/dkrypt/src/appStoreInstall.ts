@@ -16,7 +16,7 @@ import {
   type InstallVerification,
 } from '#idevice.js';
 import { scopedLogger } from '#logger.js';
-import { lookupAppMetadataByTrackId, lookupCurrentVersion, type ItunesLookupResult } from '#scheduler/itunes.js';
+import { lookupAppMetadataByTrackId, lookupCurrentVersion, type ItunesLookupResult } from '#appStoreMetadata.js';
 import { getPrimaryDevice, type DeviceRecord } from '#store/state.js';
 import { BRIDGE_CAPABILITIES, hasBridgeCapabilities } from '#bridgeProtocol.js';
 import { normalizeVersion } from '#util/version.js';

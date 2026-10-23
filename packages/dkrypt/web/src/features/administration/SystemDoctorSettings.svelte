@@ -13,6 +13,7 @@
   import SignedTriggerSettings from '#features/administration/SignedTriggerSettings.svelte';
   import GithubOidcSettings from '#features/administration/GithubOidcSettings.svelte';
   import AppStoreOfflineSettings from '#features/administration/AppStoreOfflineSettings.svelte';
+  import BridgeDiagnostics from '#features/devices/BridgeDiagnostics.svelte';
 
   const checkTitles: Record<string, string> = {
     'session-secret': 'Session signing secret',
@@ -228,6 +229,7 @@
     </section>
   {/if}
 
+  {#if sessionHasPermission(PermissionFlag.administrator)}<BridgeDiagnostics />{/if}
   {#if sessionHasPermission(PermissionFlag.administrator)}<SignedTriggerSettings />{/if}
   {#if sessionHasPermission(PermissionFlag.administrator)}<GithubOidcSettings />{/if}
   {#if sessionHasPermission(PermissionFlag.administrator)}<AppStoreOfflineSettings />{/if}

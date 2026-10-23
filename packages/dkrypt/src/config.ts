@@ -132,12 +132,6 @@ export const config = {
   jobProcessGraceSeconds: optionalInt('JOB_PROCESS_GRACE_SECONDS', 10),
   jobRetentionMinutes: optionalInt('JOB_RETENTION_MINUTES', 24 * 60),
 
-  watchBundleId: optional('WATCH_BUNDLE_ID', ''),
-  watchAppRepo: optional('WATCH_APP_REPO', ''),
-  ghDispatchRepo: optional('GH_DISPATCH_REPO', ''),
-  ghWorkflowFile: optional('GH_WORKFLOW_FILE', 'remote-ipa-update.yml'),
-  ghToken: optional('GH_TOKEN', ''),
-  pollCron: optional('POLL_CRON', '0 * * * *'),
   runPollIntervalSeconds: optionalInt('RUN_POLL_INTERVAL_SECONDS', 15),
   runPollTimeoutMinutes: optionalInt('RUN_POLL_TIMEOUT_MINUTES', 30),
   notifyWebhookUrl: optional('NOTIFY_WEBHOOK_URL', ''),

@@ -1,7 +1,6 @@
 <script lang="ts">
   import { Rocket, X } from 'lucide-svelte';
   import { fetchInsights } from '#lib/api';
-  import { liveState } from '#lib/live.svelte';
   import { PermissionFlag } from '#lib/permissions';
   import { sessionHasPermission } from '#lib/session.svelte';
   import { setActiveTab, setSettingsSubtab } from '#lib/ui.svelte';
@@ -18,8 +17,7 @@
     }
   });
 
-  const watchCount = $derived(liveState.overview?.watches.length ?? 0);
-  const show = $derived(!dismissed && totalRuns === 0 && watchCount === 0);
+  const show = $derived(!dismissed && totalRuns === 0);
 
   function dismiss(): void {
     dismissed = true;
@@ -31,10 +29,6 @@
     setSettingsSubtab('devices');
   }
 
-  function goToWatches(): void {
-    setActiveTab('settings');
-    setSettingsSubtab('scheduler');
-  }
 </script>
 
 {#if show}
@@ -49,11 +43,7 @@
             <strong>Find a device</strong> to connect your jailbroken iPhone or iPad and check its setup.
           </li>
           <li>Once a device is reachable, try a decrypt from the search box on this page.</li>
-          <li>
-            Optionally, <Button variant="link" size="sm" class="h-auto p-0 text-primary" onclick={goToWatches}>add a watch</Button> to auto-decrypt
-            new releases, and check <Button variant="link" size="sm" class="h-auto p-0 text-primary" onclick={goToDevices}>Settings → Devices</Button> if
-            you're pooling more than one.
-          </li>
+          <li>If you add more devices later, connect them from <Button variant="link" size="sm" class="h-auto p-0 text-primary" onclick={goToDevices}>Settings → Devices</Button>.</li>
         </ol>
       </div>
       <Button variant="ghost" size="icon" class="h-7 w-7 shrink-0 text-muted hover:text-foreground" onclick={dismiss} aria-label="Dismiss" title="Dismiss">

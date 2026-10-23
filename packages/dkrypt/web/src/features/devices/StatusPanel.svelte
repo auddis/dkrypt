@@ -2,13 +2,9 @@
 	import {
 		BatteryCharging,
 		BatteryMedium,
-		Circle,
-		CircleCheck,
 		Globe,
-		LoaderCircle,
 		RefreshCw,
 		Thermometer,
-		TriangleAlert,
 		Wifi,
 		WifiOff,
 		Zap,
@@ -27,7 +23,6 @@
 		type HourlyBatteryBucket,
 		type HourlyHealthBucket,
 		type HourlyTemperatureBucket,
-		type SchedulerRunOutcome,
 	} from "#lib/api";
 	import Badge from "#lib/components/ui/Badge.svelte";
 	import type { BadgeVariant } from "#lib/components/ui/variants";
@@ -39,15 +34,15 @@
 		appIconUrl,
 		ensureAppCatalog,
 	} from "#lib/appCatalog.svelte";
-	import { fmtBytesGB, fmtCalendarDate, fmtDateTime, fmtNumber, fmtUntil, trendDelta } from "#lib/format.svelte";
+	import { fmtBytesGB, fmtCalendarDate, fmtDateTime, fmtNumber, trendDelta } from "#lib/format.svelte";
 	import { liveState } from "#lib/live.svelte";
 	import { PermissionFlag } from "#lib/permissions";
 	import { sessionHasAnyPermission } from "#lib/session.svelte";
 
 	const overview = $derived(liveState.overview);
+	let now = $state(Date.now());
 	const canViewDevices = $derived(sessionHasAnyPermission([PermissionFlag.viewDevices, PermissionFlag.manageDevices]));
 	const canManageDevices = $derived(sessionHasAnyPermission([PermissionFlag.manageDevices]));
-	const statusWatches = $derived(overview?.statusWatches ?? overview?.watches ?? []);
 	const statusDevices = $derived(overview?.statusDevices ?? overview?.devices.map((device) => ({
 		id: device.id,
 		name: device.name,
@@ -63,61 +58,6 @@
 			: primaryStatusDeviceId ? "primary" : undefined,
 	);
 
-	type RunState =
-		| "inProgress"
-		| "succeeded"
-		| "failed"
-		| "timedOut"
-		| "upToDate"
-		| "checkFailed";
-
-	function runState(outcome: SchedulerRunOutcome): RunState {
-		if (!outcome.triggered) return outcome.ok ? "upToDate" : "checkFailed";
-		if (!outcome.ok) return "failed";
-		switch (outcome.runStatus) {
-			case "dispatched":
-				return "inProgress";
-			case "succeeded":
-				return "succeeded";
-			case "failed":
-				return "failed";
-			case "timed_out":
-				return "timedOut";
-			default:
-				return "succeeded";
-		}
-	}
-
-	const RUN_STATE_LABEL: Record<RunState, string> = {
-		inProgress: "Run in progress",
-		succeeded: "Run succeeded",
-		failed: "Run failed",
-		timedOut: "Timed out waiting for run",
-		upToDate: "Up to date",
-		checkFailed: "Check failed",
-	};
-
-	let now = $state(Date.now());
-	$effect(() => {
-		const interval = setInterval(() => (now = Date.now()), 30_000);
-		return () => clearInterval(interval);
-	});
-
-	const nextRunAt = $derived.by(() => {
-		const times = statusWatches
-			.map((w) => w.nextRunAt)
-			.filter((t): t is number => t !== undefined);
-		return times.length > 0 ? Math.min(...times) : undefined;
-	});
-
-	const nextRunLabel = $derived.by(() => {
-		void now;
-		if (!nextRunAt) return undefined;
-
-		if (nextRunAt <= Date.now()) return "due any moment";
-		return fmtUntil(nextRunAt);
-	});
-
 	const diskColor = $derived.by(() => {
 		const pct = overview?.disk?.usedPercent ?? 0;
 		if (pct >= 0.9) return "bg-err";
@@ -126,10 +66,7 @@
 	});
 
 	$effect(() => {
-		void ensureAppCatalog([
-			...(overview?.activeJobs ?? []).map((job) => job.bundleId),
-			...statusWatches.map((watch) => watch.bundleId),
-		]);
+		void ensureAppCatalog((overview?.activeJobs ?? []).map((job) => job.bundleId));
 	});
 
 	function thermalBadgeVariant(
@@ -140,8 +77,8 @@
 		return "secondary";
 	}
 
-	function fmtDayLabel(dateStr: string): string {
-		return fmtCalendarDate(dateStr, { month: "short", day: "numeric" });
+	function fmtDayLabel(date: string): string {
+		return fmtCalendarDate(date, { month: "short", day: "numeric" });
 	}
 
 	let volume = $state<{ label: string; value: number }[] | null>(null);
@@ -162,6 +99,11 @@
 			refreshingHealth = false;
 		}
 	}
+
+	$effect(() => {
+		const interval = setInterval(() => (now = Date.now()), 15_000);
+		return () => clearInterval(interval);
+	});
 
 	$effect(() => {
 		return observeJobVolume((snapshot) => {
@@ -459,10 +401,6 @@
 		};
 	});
 	const activeJobs = $derived(overview?.activeJobs.length ?? 0);
-	const schedulableWatchCount = $derived(
-		statusWatches.filter((w) => w.schedulable).length,
-	);
-
 	function debugBundleText(): string {
 		return JSON.stringify(
 			{
@@ -470,12 +408,10 @@
 				health,
 				overview: overview
 					? {
-							schedulerEnabled: overview.schedulerEnabled,
 							devices: overview.devices,
 							disk: overview.disk,
 							maintenance: overview.maintenance,
 							activeJobs: overview.activeJobs,
-							schedulerRunHistory: overview.schedulerRunHistory,
 						}
 					: undefined,
 				poolHealth,
@@ -535,36 +471,6 @@
 		<p role="status" class="mb-2 text-xs text-warning">{healthError}</p>
 	{/if}
 	<div class="mb-1.5 flex flex-wrap items-center gap-1.5">
-		{#if overview}
-			<Popover>
-				{#snippet trigger()}
-					<Badge
-						variant={overview.schedulerEnabled
-							? "success"
-							: "secondary"}
-						>Scheduler {overview.schedulerEnabled
-							? "on"
-							: "off"}</Badge
-					>
-				{/snippet}
-				<div class="flex flex-col gap-1 whitespace-nowrap">
-					<div>
-						<span class="text-muted">Watching</span> · {fmtNumber(schedulableWatchCount, 0)}
-						app{schedulableWatchCount === 1 ? "" : "s"}
-					</div>
-					{#if nextRunLabel}
-						<div>
-							<span class="text-muted">Next run</span> · {nextRunLabel ===
-							"due any moment"
-								? nextRunLabel
-								: `in ${nextRunLabel}`}
-						</div>
-					{:else}
-						<div class="text-muted">No runs scheduled.</div>
-					{/if}
-				</div>
-			</Popover>
-		{/if}
 		<Popover>
 			{#snippet trigger()}
 				<Badge variant={activeJobs > 0 ? "default" : "secondary"}
@@ -877,38 +783,6 @@
 			</div>
 		</div>
 	{/if}
-	{#if statusWatches.length}
-		<dl class="text-sm">
-			{#each statusWatches as w (w.id)}
-				<div
-					class="border-border flex items-center gap-2.5 border-t py-2"
-				>
-					<div class="min-w-0 flex-1">
-						<div class="truncate text-[13px]" title={w.bundleId}>
-							{appDisplayName(w.bundleId)}
-						</div>
-					</div>
-					<Badge
-						variant={w.schedulable ? "success" : "secondary"}
-						class="shrink-0 text-xs"
-						>{w.schedulable ? "watching" : "off"}</Badge
-					>
-				</div>
-			{/each}
-			{#if nextRunLabel}
-				<div
-					class="border-border flex items-center gap-2.5 border-t py-2"
-				>
-					<dt class="w-24 shrink-0 text-xs text-muted">Next run</dt>
-					<dd class="min-w-0 flex-1 truncate text-[13px]">
-						{nextRunLabel === "due any moment"
-							? nextRunLabel
-							: `in ${nextRunLabel}`}
-					</dd>
-				</div>
-			{/if}
-		</dl>
-	{/if}
 	{#if overview?.disk}
 		<div class="border-border mt-1 border-t pt-3">
 			<div
@@ -1015,71 +889,4 @@
 			</Button>
 		</div>
 	{/if}
-	{#if overview?.schedulerRunHistory?.length}
-		<div class="border-border mt-3 border-t pt-3">
-			<div class="mb-1.5 text-xs text-muted">Recent scheduler checks</div>
-			<div class="flex flex-col gap-1.5">
-				{#each overview.schedulerRunHistory as run (run.ts)}
-					<div
-						class="border-border rounded-md border px-2.5 py-2 text-xs"
-					>
-						<div class="mb-1 text-muted">
-							<RelativeTime ms={run.ts} />
-						</div>
-						<div class="flex flex-col gap-1">
-							{@render sourceRow("App Store", run.appStore)}
-							{@render sourceRow("TestFlight", run.testflight)}
-						</div>
-					</div>
-				{/each}
-			</div>
-		</div>
-	{/if}
 </Card>
-
-{#snippet sourceRow(label: string, outcome: SchedulerRunOutcome)}
-	{@const state = runState(outcome)}
-	<div class="flex flex-col gap-0.5">
-		<div class="flex items-center gap-1.5">
-			{#if state === "inProgress"}
-				<LoaderCircle
-					class="text-accent h-3.5 w-3.5 shrink-0 animate-spin"
-				/>
-			{:else if state === "succeeded"}
-				<CircleCheck class="text-ok h-3.5 w-3.5 shrink-0" />
-			{:else if state === "failed" || state === "checkFailed"}
-				<TriangleAlert class="text-err h-3.5 w-3.5 shrink-0" />
-			{:else if state === "timedOut"}
-				<TriangleAlert class="text-warn h-3.5 w-3.5 shrink-0" />
-			{:else}
-				<Circle class="text-muted h-3.5 w-3.5 shrink-0" />
-			{/if}
-			<span class="text-muted w-16 shrink-0">{label}</span>
-			{#if outcome.runUrl}
-				<a
-					href={outcome.runUrl}
-					target="_blank"
-					rel="noopener noreferrer"
-					class="hover:underline"
-					title={outcome.reason}
-					aria-label="{outcome.reason} - view run on GitHub"
-				>
-					{RUN_STATE_LABEL[state]} ↗
-				</a>
-			{:else}
-				<span class="truncate" title={outcome.reason}
-					>{RUN_STATE_LABEL[state]}</span
-				>
-			{/if}
-			{#if outcome.observedVersion}
-				<span class="text-muted">v{outcome.observedVersion}</span>
-			{/if}
-		</div>
-		{#if outcome.failureSummary}
-			<span class="pl-[5.375rem] text-[11px] text-err" title={outcome.failureSummary}>{outcome.failureSummary}</span>
-		{/if}
-		{#if outcome.destinationFailureSummary}
-			<span class="pl-[5.375rem] text-[11px] text-warn" title={outcome.destinationFailureSummary}>{outcome.destinationFailureSummary}</span>
-		{/if}
-	</div>
-{/snippet}

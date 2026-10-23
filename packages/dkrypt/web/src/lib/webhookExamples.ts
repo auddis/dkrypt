@@ -1,4 +1,4 @@
-import type { SchedulerSettings } from '#lib/api';
+import type { DashboardSettings } from '#lib/api';
 
 interface EmbedField {
   name: string;
@@ -15,7 +15,7 @@ interface ExampleEmbed {
 
 const COLOR = { info: 0x5b8cff, ok: 0x3ecf8e, warn: 0xf5a623, err: 0xf2545b };
 
-const EXAMPLES: Record<keyof SchedulerSettings & `notifyOn${string}`, ExampleEmbed> = {
+const EXAMPLES: Record<keyof DashboardSettings & `notifyOn${string}`, ExampleEmbed> = {
   notifyOnJobCompleted: {
     title: 'Decrypt finished',
     color: COLOR.ok,
@@ -110,7 +110,7 @@ function flattenEmbed(embed: ExampleEmbed): string {
   return lines.join('\n');
 }
 
-export function exampleWebhookPayload(eventKey: keyof SchedulerSettings, format: SchedulerSettings['notifyFormat']): string {
+export function exampleWebhookPayload(eventKey: keyof DashboardSettings, format: DashboardSettings['notifyFormat']): string {
   const embed = EXAMPLES[eventKey as keyof typeof EXAMPLES];
   if (!embed) return '{}';
 

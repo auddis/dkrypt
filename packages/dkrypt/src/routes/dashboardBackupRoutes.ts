@@ -20,7 +20,7 @@ import { dashboardEvents, emitJobsChanged } from '#events.js';
 import { getRouteContract } from '#contracts.js';
 import { reloadArtifactIndex } from '#artifacts.js';
 import { PermissionFlag } from '#permissions.js';
-import { applyBackupSchedule, applyWatchSchedules } from '#scheduler/index.js';
+import { applyBackupSchedule } from '#backupScheduler.js';
 import { fastifyRequirePermission, fastifyRequireSession, getFastifySession } from '#session.js';
 import {
   createBackupSnapshot,
@@ -72,7 +72,6 @@ export const dashboardBackupRoutes: FastifyPluginAsyncTypebox = async (server) =
       return;
     }
     reloadArtifactIndex();
-    applyWatchSchedules();
     dashboardEvents.emit('projectsChanged');
     emitJobsChanged();
     return { ok: true };

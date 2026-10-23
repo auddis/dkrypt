@@ -15,7 +15,7 @@ import { getRouteContract } from '#contracts.js';
 import { sendTestNotification } from '#notify.js';
 import { PermissionFlag } from '#permissions.js';
 import { fastifyRequirePermission, fastifyRequireSession, getFastifySession } from '#session.js';
-import { getEffectiveSettings, previewJobHistoryRetention, updateSettings, type SchedulerSettings } from '#store/state.js';
+import { getEffectiveSettings, previewJobHistoryRetention, updateSettings, type DashboardSettings } from '#store/state.js';
 import { sendHttpErrorEnvelope } from '#util/httpResponse.js';
 
 const canViewSettings = fastifyRequirePermission(PermissionFlag.viewAutomation, PermissionFlag.manageAutomation);
@@ -25,9 +25,8 @@ const canManageRetention = [
   canManageAutomation,
   fastifyRequirePermission(PermissionFlag.requestDecrypt),
 ];
-const canTestWebhook = fastifyRequirePermission(PermissionFlag.triggerDispatch);
+const canTestWebhook = fastifyRequirePermission(PermissionFlag.manageAutomation);
 
-const maxSchedulerRetryCount = 5;
 const minDeviceOfflineAlertMinutes = 5;
 const maxDeviceOfflineAlertMinutes = 180;
 const minBatteryHotAlertC = 30;
@@ -65,10 +64,10 @@ export const dashboardSettingsRoutes: FastifyPluginAsyncTypebox = async (server)
       return;
     }
     const body = request.body ?? {};
-    const patch: Partial<SchedulerSettings> = {};
+    const patch: Partial<DashboardSettings> = {};
 
     if (typeof body.notifyWebhookUrl === 'string') patch.notifyWebhookUrl = body.notifyWebhookUrl.trim();
-    const booleanFields: Array<keyof SchedulerSettings> = [
+    const booleanFields: Array<keyof DashboardSettings> = [
       'notifyOnKeyRequest',
       'notifyOnAutomationSuccess',
       'notifyOnAutomationFailure',
@@ -88,19 +87,12 @@ export const dashboardSettingsRoutes: FastifyPluginAsyncTypebox = async (server)
       if (typeof value === 'boolean') Object.assign(patch, { [field]: value });
     }
 
-    if (typeof body.notifyOnDispatchSuccess === 'boolean' && patch.notifyOnAutomationSuccess === undefined) {
-      patch.notifyOnAutomationSuccess = body.notifyOnDispatchSuccess;
-    }
-    if (typeof body.notifyOnDispatchFailure === 'boolean' && patch.notifyOnAutomationFailure === undefined) {
-      patch.notifyOnAutomationFailure = body.notifyOnDispatchFailure;
-    }
     if (body.notifyFormat === 'embed' || body.notifyFormat === 'plain') patch.notifyFormat = body.notifyFormat;
     if (body.notifySuccessMode === 'instant' || body.notifySuccessMode === 'daily' || body.notifySuccessMode === 'weekly') {
       patch.notifySuccessMode = body.notifySuccessMode;
     }
     if (typeof body.notifyQuietHoursStart === 'string') patch.notifyQuietHoursStart = body.notifyQuietHoursStart;
     if (typeof body.notifyQuietHoursEnd === 'string') patch.notifyQuietHoursEnd = body.notifyQuietHoursEnd;
-    if (typeof body.schedulerRetryCount === 'number') patch.schedulerRetryCount = clampRounded(body.schedulerRetryCount, 0, maxSchedulerRetryCount);
     if (typeof body.deviceOfflineAlertMinutes === 'number') {
       patch.deviceOfflineAlertMinutes = clampRounded(body.deviceOfflineAlertMinutes, minDeviceOfflineAlertMinutes, maxDeviceOfflineAlertMinutes);
     }

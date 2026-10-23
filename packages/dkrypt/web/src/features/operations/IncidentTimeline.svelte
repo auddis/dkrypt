@@ -87,11 +87,6 @@
       setSettingsSubtab('devices');
       return;
     }
-    if (event.kind === 'watch' && event.watchId) {
-      setActiveTab('settings');
-      setSettingsSubtab('scheduler');
-      return;
-    }
     if (event.deploymentId) {
       logSearchJumpState.value = { query: event.deploymentId, scope: 'deploy' };
       setActiveTab('logs');
@@ -182,7 +177,7 @@
       {#each events as event (event.id)}
         <li class="flex min-w-0 items-start gap-3 py-3 first:pt-0 last:pb-0">
           <time class="shrink-0 pt-0.5 font-mono text-[10px] text-muted" datetime={new Date(event.at).toISOString()}>{fmtTime(event.at)}</time>
-          <Button variant="link" class="h-auto min-w-0 flex-1 justify-start whitespace-normal p-0 text-left" onclick={() => openEvent(event)}>
+          <Button variant="link" class="h-auto min-w-0 flex-1 justify-start whitespace-normal p-0 text-left" disabled={event.kind === 'watch' && !event.deploymentId} title={event.kind === 'watch' && !event.deploymentId ? 'This is a historical watch event; app watches are no longer available.' : undefined} onclick={() => openEvent(event)}>
             <span class="block min-w-0"><span class="block text-xs font-medium">{event.title}</span>{#if event.detail}<span class="mt-0.5 block break-words text-[11px] text-muted" data-sensitive="true">{event.detail}</span>{/if}</span>
           </Button>
           <span class="shrink-0 rounded-full border border-border/70 px-2 py-0.5 text-[9px] uppercase text-muted">{event.kind}</span>

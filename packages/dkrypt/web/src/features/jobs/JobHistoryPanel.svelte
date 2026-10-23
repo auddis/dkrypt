@@ -918,7 +918,7 @@
 				variant={sourceFilter === "scheduler" ? "default" : "secondary"}
 				onclick={() => (sourceFilter = "scheduler")}
 			>
-				Scheduler
+				System
 			</Button>
 		</div>
 	</div>

@@ -184,7 +184,7 @@ describe('TestFlight bridge alerts', () => {
 
   test('describes the outage without speculative tweak recovery advice', () => {
     expect(formatTestFlightBridgeDownDescription('iPad Pro', 15)).toBe(
-      "The autoinstall SpringBoard bridge on iPad Pro has stopped responding for at least 15 minutes - TestFlight installs and the scheduler's TestFlight watch can't run until it recovers.",
+      "The autoinstall SpringBoard bridge on iPad Pro has stopped responding for at least 15 minutes - TestFlight installs can't run until it recovers.",
     );
   });
 });

@@ -96,10 +96,9 @@ import {
 } from '#dashboardArtifactContracts.js';
 import {
   dashboardDeviceResponseSchema as DeviceResponse,
-  dashboardWatchResponseSchema as WatchResponse,
   bridgeHeartbeatsSchema,
   deviceTransportStateSchema as DeviceTransportState,
-  schedulerSettingsResponseSchema as SchedulerSettingsResponse,
+  dashboardSettingsResponseSchema as DashboardSettingsResponse,
 } from '#dashboardModelsContracts.js';
 import {
   dashboardAuditLogExportQuerySchema,
@@ -204,30 +203,6 @@ import {
 } from '#dashboardDiscordContracts.js';
 import { dashboardEventsQuerySchema } from '#dashboardEventsContracts.js';
 import {
-  dashboardGitHubBudgetHistoryQuerySchema,
-  dashboardGitHubBudgetHistoryResponseSchema,
-  dashboardGitHubRateLimitResponseSchema,
-  dashboardGitHubReposResponseSchema,
-  dashboardGitHubWorkflowsQuerySchema,
-  dashboardGitHubWorkflowsResponseSchema,
-  dashboardWatchCalendarQuerySchema,
-  dashboardWatchCalendarResponseSchema,
-  dashboardWatchDispatchPreviewResponseSchema,
-  dashboardWatchDispatchValidationResponseSchema,
-  dashboardWatchExportResponseSchema,
-  dashboardWatchHealthResponseSchema,
-  dashboardWatchImportBodySchema,
-  dashboardWatchImportResponseSchema,
-  dashboardWatchInputSchema,
-  dashboardWatchListResponseSchema,
-  dashboardWatchParamsSchema,
-  dashboardWatchPatchSchema,
-  dashboardWatchPreviewDraftBodySchema,
-  dashboardWatchSourceParamsSchema,
-  dashboardWatchSourcePreviewResponseSchema,
-  dashboardWatchDispatchValidationBodySchema,
-} from '#dashboardWatchContracts.js';
-import {
   dashboardApiKeyBulkDailyLimitBodySchema,
   dashboardApiKeyBulkExpiryBodySchema,
   dashboardApiKeyBulkIdsBodySchema,
@@ -288,7 +263,6 @@ const PublicStatusState = Type.Union([
   Type.Literal('degraded'),
   Type.Literal('maintenance'),
   Type.Literal('not_configured'),
-  Type.Literal('paused'),
   Type.Literal('unknown'),
 ]);
 const PublicStatusResponse = Type.Object({
@@ -298,7 +272,6 @@ const PublicStatusResponse = Type.Object({
   components: Type.Object({
     service: Type.Object({ state: PublicStatusState }),
     automation: Type.Object({ state: PublicStatusState }),
-    scheduler: Type.Object({ state: PublicStatusState }),
   }),
 });
 const PaginationQuery = paginationQuerySchema;
@@ -354,7 +327,6 @@ const PageCursor = Type.Optional(Type.String());
 const HealthResponse = object({
   ok: Type.Boolean(),
   serviceReady: Type.Boolean(),
-  schedulerEnabled: Type.Boolean(),
   deployment: object({ id: Type.String(), ref: Type.String() }),
   database: object({ path: Type.String(), schemaVersion: Type.Integer(), integrity: Type.Literal('ok') }),
   bridge: object({ state: Type.Union([Type.Literal('ready'), Type.Literal('offline')]), transport: Type.String(), deviceCount: Type.Integer(), capabilities: Type.Array(Type.String()) }),
@@ -412,7 +384,7 @@ const BillingResponse = object({
 const BillingSubscriptionPage = object({ subscriptions: Type.Array(JsonObject), total: Type.Integer({ minimum: 0 }), nextCursor: PageCursor });
 const ArtifactPage = object({ artifacts: Type.Array(JsonObject), total: Type.Integer({ minimum: 0 }), totalBytes: Type.Number(), maxBytes: Type.Number(), nextCursor: PageCursor });
 const DeviceListResponse = object({ devices: Type.Array(DeviceResponse) });
-const DeviceDisableImpactResponse = object({ deviceId: Identifier, queuedJobCount: Type.Integer({ minimum: 0 }), watchCount: Type.Integer({ minimum: 0 }), runningJobCount: Type.Integer({ minimum: 0 }) });
+const DeviceDisableImpactResponse = object({ deviceId: Identifier, queuedJobCount: Type.Integer({ minimum: 0 }), runningJobCount: Type.Integer({ minimum: 0 }) });
 export const JobTimelineResponse = object({
   id: Identifier,
   correlationId: Identifier,
@@ -667,7 +639,7 @@ const InsightsResponse = Type.Object({
   successRate: Type.Number({ minimum: 0, maximum: 1 }),
   totalSizeBytes: Type.Number({ minimum: 0 }),
   manualCount: Type.Integer({ minimum: 0 }),
-  schedulerCount: Type.Integer({ minimum: 0 }),
+  systemCount: Type.Integer({ minimum: 0 }),
   topApps: Type.Array(InsightsAppResponse),
   trend: Type.Array(Type.Object({ date: Type.String(), count: Type.Integer({ minimum: 0 }) }, { additionalProperties: true })),
   failureBreakdown: Type.Array(Type.Object({ category: Type.String(), count: Type.Integer({ minimum: 0 }) }, { additionalProperties: true })),
@@ -735,7 +707,7 @@ const WebhookDeliveryPageResponse = Type.Object({
   deliveries: Type.Array(Type.Object({
     id: Identifier,
     ts: Type.Number(),
-    kind: Type.Union([Type.Literal('scheduler'), Type.Literal('job')]),
+    kind: Type.Union([Type.Literal('automation'), Type.Literal('scheduler'), Type.Literal('job')]),
     event: Type.String(),
     targetHost: Type.String(),
     ok: Type.Boolean(),
@@ -769,29 +741,6 @@ const SupportBundleResponse = Type.Object({
     newestUpdatedAt: Type.Optional(Type.Number()),
   }, { additionalProperties: true }),
   devices: Type.Array(Type.Object({ id: Identifier, name: Type.String(), enabled: Type.Boolean(), isPrimary: Type.Optional(Type.Boolean()) }, { additionalProperties: true })),
-  watches: Type.Array(Type.Object({ bundleId: BundleId, enabled: Type.Boolean(), pollCron: Type.String(), destinations: Type.Integer({ minimum: 0 }) }, { additionalProperties: true })),
-  watchHealth: Type.Array(Type.Object({
-    watchId: Identifier,
-    bundleId: BundleId,
-    schedulable: Type.Boolean(),
-    dispatchTargetCount: Type.Integer({ minimum: 0 }),
-    lastCheckAt: Type.Optional(Type.Number()),
-    lastCheckOk: Type.Optional(Type.Boolean()),
-    consecutiveFailures: Type.Integer({ minimum: 0 }),
-    everTriggeredInHistory: Type.Boolean(),
-    historyCount: Type.Integer({ minimum: 0 }),
-    schedulerJobCount: Type.Integer({ minimum: 0 }),
-    schedulerJobSuccessRate: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
-    medianSchedulerJobDurationMs: Type.Optional(Type.Number({ minimum: 0 })),
-  }, { additionalProperties: true })),
-  schedulerRuns: Type.Array(Type.Object({
-    id: Identifier,
-    ts: Type.Number(),
-    watchId: Type.Optional(Identifier),
-    bundleId: Type.Optional(BundleId),
-    appStore: Type.Object({ ok: Type.Boolean(), triggered: Type.Boolean(), reason: Type.String() }, { additionalProperties: true }),
-    testflight: Type.Object({ ok: Type.Boolean(), triggered: Type.Boolean(), reason: Type.String() }, { additionalProperties: true }),
-  }, { additionalProperties: true })),
   logs: Type.Array(Type.Object({
     id: Identifier,
     ts: Type.Number(),
@@ -852,7 +801,6 @@ export type DashboardSupportBundleRoute = {
   };
 };
 const WebhookReceiptResponse = object({ received: Type.Boolean(), duplicate: Type.Optional(Type.Boolean()), quarantined: Type.Optional(Type.Boolean()), inProgress: Type.Optional(Type.Boolean()) });
-const DispatchTriggerResponse = object({ ok: Type.Boolean(), error: Type.Optional(Type.String()) });
 const BinaryFileResponse = { content: { 'application/octet-stream': { schema: Type.String({ format: 'binary' }) } } };
 const EventStreamResponse = { content: { 'text/event-stream': { schema: Type.String() } } };
 const PrometheusResponse = { content: { 'text/plain': { schema: Type.String() } } };
@@ -910,7 +858,6 @@ const bodylessPostContracts = new Set([
   '/v1/dashboard/keys/:id/reveal',
   '/v1/dashboard/keys/:id/approve',
   '/v1/dashboard/keys/:id/deny',
-  '/v1/dashboard/watches/:id/trigger-dispatch',
   '/v1/dashboard/devices/setup-operations/:id/resume',
 ]);
 
@@ -1087,23 +1034,6 @@ const remainingContracts: Array<[ContractMethod, string]> = [
   ['POST', '/v1/dashboard/apps/metadata/refresh'],
   ['GET', '/v1/dashboard/versions/:bundleId'],
   ['GET', '/v1/dashboard/devices/discover'],
-  ['GET', '/v1/dashboard/github/rate-limit'],
-  ['GET', '/v1/dashboard/watches'],
-  ['GET', '/v1/dashboard/watches/export'],
-  ['GET', '/v1/dashboard/watches/health'],
-  ['GET', '/v1/dashboard/watches/calendar'],
-  ['GET', '/v1/dashboard/github/budget-history'],
-  ['GET', '/v1/dashboard/github/repos'],
-  ['GET', '/v1/dashboard/github/workflows'],
-  ['POST', '/v1/dashboard/watches'],
-  ['PATCH', '/v1/dashboard/watches/:id'],
-  ['DELETE', '/v1/dashboard/watches/:id'],
-  ['POST', '/v1/dashboard/watches/import'],
-  ['POST', '/v1/dashboard/watches/preview-dispatch-draft'],
-  ['POST', '/v1/dashboard/watches/validate-dispatch-draft'],
-  ['GET', '/v1/dashboard/watches/:id/preview-dispatch'],
-  ['GET', '/v1/dashboard/watches/:id/preview-dispatch/:source'],
-  ['POST', '/v1/dashboard/watches/:id/trigger-dispatch'],
   ['GET', '/v1/dashboard/testflight/:appId/trains'],
   ['GET', '/v1/dashboard/testflight/diagnostics'],
   ['GET', '/v1/dashboard/testflight/:appId/builds'],
@@ -1261,10 +1191,10 @@ register('POST', '/v1/billing/checkout', {
 register('POST', '/v1/billing/portal', { response: { 200: UrlResponse } });
 register('POST', '/v1/billing/cancel', { headers: billingIdempotencyKeyHeadersSchema, response: { 200: BillingCancelResponse } });
 register('POST', '/v1/billing/subscription', { body: billingSubscriptionBodySchema, response: { 200: BillingSubscriptionUpdateResponse } });
-register('GET', '/v1/dashboard/settings', { response: { 200: SchedulerSettingsResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } });
+register('GET', '/v1/dashboard/settings', { response: { 200: DashboardSettingsResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } });
 register('PUT', '/v1/dashboard/settings', {
   body: dashboardSettingsPatchBodySchema,
-  response: { 200: SchedulerSettingsResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope },
+  response: { 200: DashboardSettingsResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope },
 });
 register('GET', '/v1/dashboard/users', { response: { 200: UserDirectoryResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } });
 register('GET', '/v1/dashboard/audit-log', { querystring: dashboardAuditLogQuerySchema, response: { 200: dashboardAuditLogResponseSchema, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope } });
@@ -1511,43 +1441,6 @@ register('GET', '/v1/dashboard/insights', {
 });
 register('GET', '/v1/dashboard/failure-patterns', { querystring: dashboardFailurePatternsQuerySchema, response: { 200: FailurePatternsResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope } });
 register('GET', '/v1/dashboard/storage-forecast', { querystring: dashboardStorageForecastQuerySchema, response: { 200: StorageForecastResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope, 503: ErrorEnvelope } });
-register('GET', '/v1/dashboard/watches', { response: { 200: dashboardWatchListResponseSchema } });
-register('GET', '/v1/dashboard/watches/export', { response: { 200: dashboardWatchExportResponseSchema } });
-register('GET', '/v1/dashboard/watches/health', { response: { 200: dashboardWatchHealthResponseSchema } });
-register('GET', '/v1/dashboard/watches/calendar', {
-  querystring: dashboardWatchCalendarQuerySchema,
-  response: { 200: dashboardWatchCalendarResponseSchema },
-});
-register('GET', '/v1/dashboard/github/budget-history', {
-  querystring: dashboardGitHubBudgetHistoryQuerySchema,
-  response: { 200: dashboardGitHubBudgetHistoryResponseSchema },
-});
-register('GET', '/v1/dashboard/github/repos', { response: { 200: dashboardGitHubReposResponseSchema, 502: ErrorEnvelope } });
-register('GET', '/v1/dashboard/github/workflows', {
-  querystring: dashboardGitHubWorkflowsQuerySchema,
-  response: { 200: dashboardGitHubWorkflowsResponseSchema, 502: ErrorEnvelope },
-});
-register('POST', '/v1/dashboard/watches', { body: dashboardWatchInputSchema, response: { 201: WatchResponse } });
-register('PATCH', '/v1/dashboard/watches/:id', { params: dashboardWatchParamsSchema, body: dashboardWatchPatchSchema, response: { 200: WatchResponse } });
-register('DELETE', '/v1/dashboard/watches/:id', { params: dashboardWatchParamsSchema, response: { 200: OkResponse } });
-register('POST', '/v1/dashboard/watches/import', {
-  body: dashboardWatchImportBodySchema,
-  response: { 201: dashboardWatchImportResponseSchema },
-});
-register('POST', '/v1/dashboard/watches/preview-dispatch-draft', {
-  body: dashboardWatchPreviewDraftBodySchema,
-  response: { 200: dashboardWatchDispatchPreviewResponseSchema },
-});
-register('POST', '/v1/dashboard/watches/validate-dispatch-draft', {
-  body: dashboardWatchDispatchValidationBodySchema,
-  response: { 200: dashboardWatchDispatchValidationResponseSchema },
-});
-register('GET', '/v1/dashboard/watches/:id/preview-dispatch', { params: dashboardWatchParamsSchema, response: { 200: dashboardWatchDispatchPreviewResponseSchema } });
-register('GET', '/v1/dashboard/watches/:id/preview-dispatch/:source', {
-  params: dashboardWatchSourceParamsSchema,
-  response: { 200: dashboardWatchSourcePreviewResponseSchema },
-});
-register('POST', '/v1/dashboard/watches/:id/trigger-dispatch', { params: dashboardWatchParamsSchema, response: { 202: JsonObject, 409: JsonObject } });
 register('GET', '/v1/dashboard/apps/metadata', {
   querystring: dashboardAppMetadataQuerySchema,
   response: { 200: AppMetadataResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 500: ErrorEnvelope },
@@ -1620,15 +1513,9 @@ register('GET', '/v1/dashboard/support-bundle', {
   querystring: dashboardSupportBundleQuerySchema,
   response: { 200: SupportBundleResponse, 400: ErrorEnvelope, 401: ErrorEnvelope, 403: ErrorEnvelope, 404: ErrorEnvelope },
 });
-register('GET', '/v1/dashboard/github/rate-limit', {
-  response: { 200: dashboardGitHubRateLimitResponseSchema, 502: ErrorEnvelope },
-});
 register('GET', '/v1/dashboard/audit-log/export', {
   querystring: dashboardAuditLogExportQuerySchema,
   response: { 200: dashboardAuditLogExportResponseSchema, 401: ErrorEnvelope, 403: ErrorEnvelope },
-});
-register('GET', '/v1/dashboard/watches/export', {
-  response: { 200: dashboardWatchExportResponseSchema },
 });
 register('GET', '/v1/dashboard/backup/export', {
   response: { 200: backupExportResponseSchema },
@@ -1743,10 +1630,6 @@ register('POST', '/v1/dashboard/email/test', {
 });
 register('GET', '/v1/dashboard/testflight/diagnostics', {
   response: { 200: TestFlightDiagnosticsResponse, 401: ErrorEnvelope, 403: ErrorEnvelope, 429: ErrorEnvelope, 500: ErrorEnvelope, 502: ErrorEnvelope },
-});
-register('POST', '/v1/dashboard/watches/:id/trigger-dispatch', {
-  params: object({ id: Identifier }),
-  response: { 202: DispatchTriggerResponse, 409: DispatchTriggerResponse },
 });
 register('POST', '/v1/stripe/webhook', {
   headers: object({ 'stripe-signature': Type.String({ minLength: 1, maxLength: 200 }) }),

@@ -11,7 +11,6 @@ import { canViewAllProjects } from '#dashboardJobPresentation.js';
 import { getRouteContract } from '#contracts.js';
 import { getAuthProfile } from '#identity.js';
 import { PermissionFlag } from '#permissions.js';
-import { applyWatchSchedules } from '#scheduler/index.js';
 import { fastifyRequirePermission, fastifyRequireSession, getFastifySession } from '#session.js';
 import {
   createProject,
@@ -100,7 +99,6 @@ export const dashboardProjectRoutes: FastifyPluginAsyncTypebox = async (server) 
       return createHttpErrorEnvelope(request.id, statusCode, result.error ?? 'project update was rejected');
     }
     dashboardEvents.emit('projectChanged', request.params.id);
-    applyWatchSchedules();
     return result.project;
   });
 };

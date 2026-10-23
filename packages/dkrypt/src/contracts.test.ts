@@ -57,23 +57,18 @@ test('every versioned route is represented in generated OpenAPI', async () => {
   }
 });
 
-test('GitHub automation routes document their upstream failure envelopes', async () => {
+test('retired app-watch and GitHub browsing endpoints are absent from dashboard OpenAPI', async () => {
   const server = await buildTestServer({ includePublicRoutes: false });
   try {
     await server.ready();
-    const document = server.swagger() as {
-      paths?: Record<string, Record<string, { responses?: Record<string, { content?: Record<string, { schema?: { properties?: Record<string, unknown> } }> }> }>>;
-    };
-    const routes = [
-      ['/v1/dashboard/github/rate-limit', 'get'],
-      ['/v1/dashboard/github/repos', 'get'],
-      ['/v1/dashboard/github/workflows', 'get'],
-    ] as const;
-    for (const [path, method] of routes) {
-      const schema = document.paths?.[path]?.[method]?.responses?.['502']?.content?.['application/json']?.schema;
-      expect(schema).toBeDefined();
-      expect(Object.keys(schema?.properties ?? {})).toEqual(expect.arrayContaining(['error', 'code', 'message', 'requestId', 'retryable']));
-    }
+    const document = server.swagger() as { paths?: Record<string, unknown> };
+    for (const path of [
+      '/v1/dashboard/github/rate-limit',
+      '/v1/dashboard/github/repos',
+      '/v1/dashboard/github/workflows',
+      '/v1/dashboard/watches',
+      '/v1/dashboard/watches/calendar',
+    ]) expect(document.paths?.[path]).toBeUndefined();
   } finally {
     await server.close();
   }
@@ -181,7 +176,7 @@ test('core operational responses publish their required fields', async () => {
       ['/v1/health', 'get', ['ok', 'serviceReady', 'deployment', 'database', 'bridge', 'device']],
       ['/v1/status', 'get', ['status', 'checkedAt', 'deployment', 'components']],
       ['/v1/billing', 'get', ['enabled', 'provider', 'plans', 'providers', 'entitlement']],
-      ['/v1/dashboard/overview', 'get', ['schedulerEnabled', 'watches', 'devices', 'deviceStatus', 'activeJobs']],
+      ['/v1/dashboard/overview', 'get', ['devices', 'deviceStatus', 'activeJobs']],
       ['/v1/dashboard/jobs', 'get', ['history', 'total', 'nextCursor']],
       ['/v1/dashboard/artifacts', 'get', ['artifacts', 'total', 'totalBytes', 'maxBytes']],
       ['/v1/dashboard/artifacts/bulk-pin', 'post', ['ok', 'pinned', 'changedIds', 'artifacts']],
@@ -201,10 +196,6 @@ test('core operational responses publish their required fields', async () => {
       ['/v1/dashboard/insights', 'get', ['totalRuns', 'topApps', 'trend', 'byDevice', 'anomalies']],
       ['/v1/dashboard/failure-patterns', 'get', ['patterns']],
       ['/v1/dashboard/storage-forecast', 'get', ['freeBytes', 'bytesPerDay', 'daysRemaining', 'sampleCount']],
-      ['/v1/dashboard/watches', 'get', ['watches']],
-      ['/v1/dashboard/watches/calendar', 'get', ['fromAt', 'untilAt', 'runs', 'truncated']],
-      ['/v1/dashboard/github/repos', 'get', ['repos']],
-      ['/v1/dashboard/github/workflows', 'get', ['workflows']],
       ['/v1/dashboard/apps/metadata', 'get', ['entries']],
       ['/v1/dashboard/apps/cache', 'get', ['entries', 'icons']],
       ['/v1/dashboard/settings/artifact-storage', 'get', ['count', 'usedBytes', 'maxBytes']],
@@ -336,13 +327,8 @@ test('dashboard overview publishes typed nested dashboard records', async () => 
     const settings = Object.keys(properties.settings?.properties ?? {});
     expect(settings).toEqual(expect.arrayContaining(['notifyFormat', 'notifyWebhookUrl', 'maintenanceMode', 'jobHistoryRetentionDays']));
 
-    const watch = properties.watches?.items?.properties ?? {};
-    expect(Object.keys(watch)).toEqual(expect.arrayContaining(['id', 'bundleId', 'dispatchTargets', 'timezone', 'maintenanceWindow', 'missedRunPolicy', 'nextRunAt', 'schedulable', 'configIssues']));
-    expect(watch.bundleId).toMatchObject({ pattern: '^[A-Za-z0-9.-]+$', minLength: 3, maxLength: 200 });
-    expect(Object.keys(watch.dispatchTargets?.items?.properties ?? {})).toEqual(expect.arrayContaining(['repo', 'ghWorkflowFile', 'mode', 'inputs']));
-
-    const calendarRuns = document.paths?.['/v1/dashboard/watches/calendar']?.get?.responses?.['200']?.content?.['application/json']?.schema?.properties?.runs?.items?.properties ?? {};
-    expect(Object.keys(calendarRuns)).toEqual(expect.arrayContaining(['watchId', 'bundleId', 'at', 'deferred']));
+    expect(properties).not.toHaveProperty('watches');
+    expect(properties).not.toHaveProperty('schedulerRunHistory');
 
     const device = properties.devices?.items?.properties ?? {};
     expect(Object.keys(device)).toEqual(expect.arrayContaining(['id', 'transportState', 'transportCapabilities', 'setupRequired', 'recoveryState']));
@@ -352,8 +338,6 @@ test('dashboard overview publishes typed nested dashboard records', async () => 
 
     expect(Object.keys(properties.maintenance?.properties ?? {})).toEqual(expect.arrayContaining(['active', 'manual', 'auto', 'reason']));
     expect(Object.keys(properties.disk?.properties ?? {})).toEqual(expect.arrayContaining(['totalBytes', 'freeBytes', 'usedBytes', 'usedPercent']));
-    expect(Object.keys(properties.schedulerRunHistory?.items?.properties ?? {})).toEqual(expect.arrayContaining(['id', 'ts', 'appStore', 'testflight']));
-    expect(Object.keys(properties.schedulerRunHistory?.items?.properties?.appStore?.properties ?? {})).toEqual(expect.arrayContaining(['failureClass', 'retryable', 'destinationFailureSummary']));
   } finally {
     await server.close();
   }
@@ -458,10 +442,6 @@ test('device and TestFlight mutation contracts publish their success status', as
       ['/v1/auth/passkeys/verify', 'post', '200', ['ok', 'expiresAt']],
       ['/v1/auth/passkeys/reauth/verify', 'post', '200', ['ok', 'expiresAt']],
       ['/v1/auth/privacy/delete', 'post', '200', ['ok']],
-      ['/v1/dashboard/watches', 'post', '201', ['id', 'bundleId', 'pollCron', 'schedulable']],
-      ['/v1/dashboard/watches/{id}', 'patch', '200', ['id', 'bundleId', 'pollCron', 'schedulable']],
-      ['/v1/dashboard/watches/{id}', 'delete', '200', ['ok']],
-      ['/v1/dashboard/watches/import', 'post', '201', ['watches', 'skipped']],
       ['/v1/dashboard/notifications/read', 'post', '200', ['ok', 'marked']],
       ['/v1/dashboard/jobs/{id}/cancel', 'post', '200', ['ok']],
       ['/v1/dashboard/jobs/{id}/prioritize', 'post', '200', ['ok']],
@@ -564,7 +544,6 @@ test('administrative, notification, and diagnostic contracts publish structured 
       ['/v1/dashboard/webhooks', 'get', '200', ['deliveries']],
       ['/v1/dashboard/jobs/{id}/diagnostic', 'get', '200', ['generatedAt', 'correlationId', 'job', 'timeline']],
       ['/v1/dashboard/support-bundle', 'get', '200', ['generatedAt', 'deployment', 'database', 'latestBackup', 'devices', 'jobs']],
-      ['/v1/dashboard/github/rate-limit', 'get', '200', ['limit', 'remaining', 'reset']],
       ['/v1/dashboard/discord/status', 'get', '200', ['botEnabled', 'guilds']],
       ['/v1/dashboard/discord/perks', 'get', '200', ['perks']],
       ['/v1/dashboard/discord/perks', 'post', '201', ['id', 'guildId', 'discordRoleId', 'appRoleId']],
@@ -579,7 +558,6 @@ test('administrative, notification, and diagnostic contracts publish structured 
       ['/v1/dashboard/me/prefs', 'get', '200', ['theme', 'density', 'preferPrimaryDevice']],
       ['/v1/dashboard/push/public-key', 'get', '200', ['publicKey']],
       ['/v1/dashboard/testflight/diagnostics', 'get', '200', ['bridge']],
-      ['/v1/dashboard/watches/{id}/trigger-dispatch', 'post', '202', ['ok', 'error']],
       ['/v1/stripe/webhook', 'post', '200', ['received', 'duplicate']],
       ['/v1/nowpayments/webhook', 'post', '200', ['received', 'duplicate']],
     ];

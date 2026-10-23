@@ -4,7 +4,7 @@ import { listArtifacts, type ArtifactRecord } from '#artifacts.js';
 import { canAccessProject } from '#dashboardJobPresentation.js';
 import { PermissionFlag } from '#permissions.js';
 import { fastifyRequirePermission, fastifyRequireSession, getFastifySession } from '#session.js';
-import { DEFAULT_PROJECT_ID, getAllJobHistory, getAppCatalogEntries, getEffectiveDevices, getEffectiveWatches, getTestFlightCatalogCache, upsertAppCatalogEntries } from '#store/state.js';
+import { DEFAULT_PROJECT_ID, getAllJobHistory, getAppCatalogEntries, getEffectiveDevices, getTestFlightCatalogCache, upsertAppCatalogEntries } from '#store/state.js';
 import { listBuilds, listTrains } from '#testflight.js';
 import { createHttpErrorEnvelope } from '#util/httpResponse.js';
 import { compareVersions } from '#util/version.js';
@@ -26,8 +26,7 @@ function projectArtifacts(projectId: string): ArtifactRecord[] {
 function coverageForProject(projectId: string) {
   const artifacts = projectArtifacts(projectId);
   const jobs = getAllJobHistory().filter((job) => (job.projectId ?? DEFAULT_PROJECT_ID) === projectId);
-  const watches = getEffectiveWatches().filter((watch) => (watch.projectId ?? DEFAULT_PROJECT_ID) === projectId);
-  const bundleIds = [...new Set([...artifacts.map((artifact) => artifact.bundleId), ...jobs.map((job) => job.bundleId), ...watches.map((watch) => watch.bundleId)])];
+  const bundleIds = [...new Set([...artifacts.map((artifact) => artifact.bundleId), ...jobs.map((job) => job.bundleId)])];
   const catalog = new Map(getAppCatalogEntries(bundleIds).map((entry) => [entry.bundleId, entry]));
   const testFlightCache = getTestFlightCatalogCache();
   const testFlight = new Map(testFlightCache?.apps.map((app) => [app.bundleId, app]) ?? []);

@@ -45,10 +45,8 @@ import { createJobHistoryRepository } from '#store/jobHistoryRepository.js';
 import { createSessionRepository } from '#store/sessionRepository.js';
 import { createSettingsRepository } from '#store/settingsRepository.js';
 import { createWatchRepository, isAppWatchRecord } from '#store/watchRepository.js';
-import { recordWatchRevision } from '#store/watchWorkflowRepository.js';
 import { firstStateOwnedCollectionMismatch, openStateDatabase, readStateCollection, stableJson, verifyDatabaseBackup, writeStateMirror, type StateCollectionReplacement, type StateDatabase } from '#store/sqlite.js';
 import { paginateCursor } from '#util/cursor.js';
-import { effectiveTimeZone } from '#util/timezone.js';
 import type { MaintenanceWindow } from '#util/maintenanceWindow.js';
 
 export type ApiKeyStatus = 'pending' | 'approved' | 'denied';
@@ -59,19 +57,6 @@ export interface ApiKeyOutcomeUsage {
   clientError: number;
   serverError: number;
   lastAt: number;
-}
-
-export interface GitHubBudgetTelemetryEntry {
-  id: string;
-  ts: number;
-  watchId: string;
-  bundleId: string;
-  estimatedRequests: number;
-  observedRequests?: number;
-  limit: number;
-  remainingBefore: number;
-  remainingAfter?: number;
-  resetAt: number;
 }
 
 export interface Role {
@@ -275,7 +260,7 @@ export interface ApiKeyAuthResult {
   allowTestFlight?: boolean;
 }
 
-export interface SchedulerSettings {
+export interface DashboardSettings {
   notifyWebhookUrl: string;
   notifyFormat: 'embed' | 'plain';
   notifySuccessMode: 'instant' | 'daily' | 'weekly';
@@ -293,7 +278,6 @@ export interface SchedulerSettings {
   notifyOnTestFlightBridgeDown: boolean;
   notifyOnJobCompleted: boolean;
   notifyOnQueueSloBreach: boolean;
-  schedulerRetryCount: number;
   deviceOfflineAlertMinutes: number;
   batteryHotAlertC: number;
   batteryLowAlertPercent: number;
@@ -304,8 +288,9 @@ export interface SchedulerSettings {
   maintenanceMode: boolean;
 }
 
-export interface PersistedSettings extends Partial<SchedulerSettings> {
+export interface PersistedSettings extends Partial<DashboardSettings> {
   billingCheckoutsPaused?: boolean;
+  schedulerRetryCount?: number;
 }
 
 export interface AppWatch {
@@ -359,7 +344,7 @@ export interface DeviceRecord {
   updatedAt: number;
 }
 
-export type WebhookDeliveryKind = 'scheduler' | 'job';
+export type WebhookDeliveryKind = 'automation' | 'scheduler' | 'job';
 
 export interface WebhookDeliveryEntry {
   id: string;
@@ -732,7 +717,6 @@ interface PersistedState {
   vapidKeys?: VapidKeys;
   apiKeyBundleUsage: Record<string, Record<string, number>>;
   apiKeyOutcomeUsage: Record<string, Record<string, ApiKeyOutcomeUsage>>;
-  githubBudgetTelemetry: GitHubBudgetTelemetryEntry[];
   webhookDeliveryLog: WebhookDeliveryEntry[];
   discordRolePerks: DiscordRolePerk[];
   discordGuilds: DiscordGuildConfiguration[];
@@ -749,7 +733,7 @@ interface PersistedState {
 
 const MAX_HISTORY = 100;
 const MAX_AUDIT_LOG = 200;
-const MAX_SCHEDULER_RUNS = 20;
+const MAX_LEGACY_SCHEDULER_RUNS = 20;
 const MAX_USAGE_DAYS = 30;
 const MAX_DEVICE_HEALTH_CHECKS = 288;
 const DEVICE_OFFLINE_CONFIRMATION_CHECKS = 3;
@@ -813,7 +797,6 @@ function defaultState(): PersistedState {
     pushSubscriptions: {},
     apiKeyBundleUsage: {},
     apiKeyOutcomeUsage: {},
-    githubBudgetTelemetry: [],
     webhookDeliveryLog: [],
     discordRolePerks: [],
     discordGuilds: [],
@@ -2812,18 +2795,6 @@ export function getApiKeyOutcomeUsage(id: string, limit = 10): ApiKeyOutcomeUsag
     .slice(0, limit);
 }
 
-const MAX_GITHUB_BUDGET_TELEMETRY = 200;
-
-export function recordGitHubBudgetTelemetry(entry: Omit<GitHubBudgetTelemetryEntry, 'id' | 'ts'>): void {
-  state.githubBudgetTelemetry.unshift({ id: randomUUID(), ts: Date.now(), ...entry });
-  if (state.githubBudgetTelemetry.length > MAX_GITHUB_BUDGET_TELEMETRY) state.githubBudgetTelemetry.length = MAX_GITHUB_BUDGET_TELEMETRY;
-  dirty = true;
-}
-
-export function getGitHubBudgetTelemetry(limit = 30): GitHubBudgetTelemetryEntry[] {
-  return state.githubBudgetTelemetry.slice(0, limit);
-}
-
 export function getUserPriority(username: string): number {
   if (username === 'root') return 0;
   const manualPriority = state.allowedUsers.find((u) => u.username === username.toLowerCase())?.priority ?? 0;
@@ -2895,10 +2866,8 @@ export function startApiKeySweeper(): void {
   }, 60_000).unref();
 }
 
-export function getEffectiveSettings(): SchedulerSettings {
+export function getEffectiveSettings(): DashboardSettings {
   const legacySettings = state.settings as Record<string, unknown>;
-  const legacyDispatchSuccess = typeof legacySettings.notifyOnDispatchSuccess === 'boolean' ? legacySettings.notifyOnDispatchSuccess : undefined;
-  const legacyDispatchFailure = typeof legacySettings.notifyOnDispatchFailure === 'boolean' ? legacySettings.notifyOnDispatchFailure : undefined;
   const legacyAutomationSuccess = [legacySettings.notifyOnAppStoreAutomationSuccess, legacySettings.notifyOnTestFlightAutomationSuccess]
     .filter((value): value is boolean => typeof value === 'boolean')
     .some(Boolean);
@@ -2921,8 +2890,8 @@ export function getEffectiveSettings(): SchedulerSettings {
         ? state.settings.notifyQuietHoursEnd
         : '',
     notifyOnKeyRequest: state.settings.notifyOnKeyRequest ?? true,
-    notifyOnAutomationSuccess: state.settings.notifyOnAutomationSuccess ?? legacyDispatchSuccess ?? legacyAutomationSuccess ?? true,
-    notifyOnAutomationFailure: state.settings.notifyOnAutomationFailure ?? legacyDispatchFailure ?? legacyAutomationFailure ?? true,
+    notifyOnAutomationSuccess: state.settings.notifyOnAutomationSuccess ?? legacyAutomationSuccess ?? true,
+    notifyOnAutomationFailure: state.settings.notifyOnAutomationFailure ?? legacyAutomationFailure ?? true,
     notifyOnKeyExpiringSoon: state.settings.notifyOnKeyExpiringSoon ?? true,
     notifyOnDeviceOffline: state.settings.notifyOnDeviceOffline ?? true,
     notifyOnDeviceBatteryHot: state.settings.notifyOnDeviceBatteryHot ?? true,
@@ -2932,7 +2901,6 @@ export function getEffectiveSettings(): SchedulerSettings {
     notifyOnTestFlightBridgeDown: state.settings.notifyOnTestFlightBridgeDown ?? true,
     notifyOnJobCompleted: state.settings.notifyOnJobCompleted ?? false,
     notifyOnQueueSloBreach: state.settings.notifyOnQueueSloBreach ?? true,
-    schedulerRetryCount: state.settings.schedulerRetryCount ?? 0,
     deviceOfflineAlertMinutes: state.settings.deviceOfflineAlertMinutes ?? 15,
     batteryHotAlertC: state.settings.batteryHotAlertC ?? 45,
     batteryLowAlertPercent: state.settings.batteryLowAlertPercent ?? 10,
@@ -2944,270 +2912,33 @@ export function getEffectiveSettings(): SchedulerSettings {
   };
 }
 
-function diffSettings(before: SchedulerSettings, after: SchedulerSettings): string {
-  const changed = (Object.keys(after) as (keyof SchedulerSettings)[]).filter((k) => before[k] !== after[k]);
+function diffSettings(before: DashboardSettings, after: DashboardSettings): string {
+  const changed = (Object.keys(after) as (keyof DashboardSettings)[]).filter((k) => before[k] !== after[k]);
   return changed.map((k) => `${k}: ${String(before[k])} -> ${String(after[k])}`).join(', ');
 }
 
-export function updateSettings(patch: Partial<SchedulerSettings>, actor?: string): SchedulerSettings {
+export function updateSettings(patch: Partial<DashboardSettings>, actor?: string): DashboardSettings {
   const before = getEffectiveSettings();
   state.settings = { ...state.settings, ...patch };
   persistNow();
   const after = getEffectiveSettings();
   if (actor) {
     const detail = diffSettings(before, after);
-    if (detail) recordAudit(actor, 'settings.update', 'scheduler', detail);
+    if (detail) recordAudit(actor, 'settings.update', 'settings', detail);
   }
   return after;
 }
 
-interface LegacySingleWatchSettings {
-  watchBundleId?: string;
-  watchAppRepo?: string;
-  ghDispatchRepo?: string;
-  ghWorkflowFile?: string;
-  pollCron?: string;
-}
-
-function getLegacySingleWatchFields(): Omit<AppWatch, 'id' | 'name' | 'enabled' | 'createdAt' | 'updatedAt'> | undefined {
-  const legacy = state.settings as LegacySingleWatchSettings;
-  const bundleId = legacy.watchBundleId || config.watchBundleId;
-  if (!bundleId) return undefined;
-  return {
-    bundleId,
-
-    repo: legacy.watchAppRepo || legacy.ghDispatchRepo || config.watchAppRepo || config.ghDispatchRepo,
-    ghWorkflowFile: legacy.ghWorkflowFile || config.ghWorkflowFile,
-    pollCron: legacy.pollCron || config.pollCron,
-  };
-}
-
-export function getEffectiveWatches(): AppWatch[] {
-  if (state.watches.length > 0) return state.watches;
-  const legacy = getLegacySingleWatchFields();
-  return legacy ? [{ id: 'default', enabled: true, createdAt: 0, updatedAt: 0, ...legacy }] : [];
-}
-
-export function listWatches(): AppWatch[] {
-  return getEffectiveWatches();
-}
-
-export function isBundleWatched(bundleId: string): boolean {
-  return getEffectiveWatches().some((w) => w.bundleId === bundleId);
-}
-
-export function getWatch(id: string): AppWatch | undefined {
-  return getEffectiveWatches().find((w) => w.id === id);
-}
-
-function hasEnabledWatchWithBundleId(bundleId: string, projectId: string, excludeId?: string): boolean {
-  return getEffectiveWatches().some((watch) => watch.enabled && watch.bundleId === bundleId && (watch.projectId ?? DEFAULT_PROJECT_ID) === projectId && watch.id !== excludeId);
-}
-
-function materializeWatches(): void {
-  if (state.watches.length > 0) return;
-  const legacy = getLegacySingleWatchFields();
-  if (legacy) state.watches = [{ id: 'default', enabled: true, createdAt: 0, updatedAt: 0, ...legacy }];
-}
-
-export interface CreateWatchInput {
-  projectId?: string;
-  bundleId: string;
-  repo: string;
-  ghWorkflowFile: string;
-  dispatchTargets?: DispatchTarget[];
-  pollCron: string;
-  timezone?: string;
-  maintenanceWindow?: MaintenanceWindow;
-  missedRunPolicy?: 'skip' | 'runOnce';
-  enabled?: boolean;
-  webhookUrl?: string;
-  testFlightPolicy?: 'latest' | 'latestNonExpired' | 'train';
-  testFlightTrain?: string;
-}
-
-export function getWatchDispatchTargets(watch: Pick<AppWatch, 'repo' | 'ghWorkflowFile' | 'dispatchTargets'>): DispatchTarget[] {
-  const candidates = watch.dispatchTargets?.length
-    ? watch.dispatchTargets
-    : [{ repo: watch.repo, ghWorkflowFile: watch.ghWorkflowFile }];
-  const seen = new Set<string>();
-  return candidates
-    .map((target) => ({
-      repo: target.repo.trim(),
-      ghWorkflowFile: target.ghWorkflowFile.trim(),
-      mode: target.mode,
-      ref: target.ref?.trim() || undefined,
-      inputs: target.inputs,
-    }))
-    .filter((target) => {
-      const key = JSON.stringify([target.repo, target.ghWorkflowFile, target.mode ?? 'repository_dispatch', target.ref ?? '', target.inputs ?? {}]);
-      if (!target.repo || !target.ghWorkflowFile || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-}
-
-function normalizedWatchInput(input: CreateWatchInput): Pick<CreateWatchInput, 'repo' | 'ghWorkflowFile' | 'dispatchTargets'> {
-  const targets = getWatchDispatchTargets(input);
-  const primary = targets[0] ?? { repo: input.repo.trim(), ghWorkflowFile: input.ghWorkflowFile.trim() };
-  const preserveTargets = targets.length > 1 || targets.some((target) => target.mode === 'workflow_dispatch' || target.ref || Object.keys(target.inputs ?? {}).length > 0);
-  return {
-    repo: primary.repo,
-    ghWorkflowFile: primary.ghWorkflowFile,
-    dispatchTargets: preserveTargets ? targets : undefined,
-  };
-}
-
-export function createWatch(input: CreateWatchInput, actor: string): { ok: boolean; watch?: AppWatch; error?: string } {
-  materializeWatches();
-  const projectId = input.projectId ?? DEFAULT_PROJECT_ID;
-  const project = getProject(projectId);
-  if (!project || project.archivedAt !== undefined) return { ok: false, error: 'watch project is unavailable' };
-  if (input.enabled !== false && hasEnabledWatchWithBundleId(input.bundleId, projectId)) {
-    return { ok: false, error: `another enabled watch already targets ${input.bundleId}` };
+export function disableLegacyAppWatches(): number {
+  const enabled = state.watches.filter((watch) => watch.enabled);
+  if (enabled.length === 0) return 0;
+  const timestamp = Date.now();
+  for (const watch of enabled) {
+    watch.enabled = false;
+    watch.updatedAt = Math.max(timestamp, watch.updatedAt + 1);
   }
-  const now = Date.now();
-  const dispatch = normalizedWatchInput(input);
-  const watch: AppWatch = {
-    id: randomUUID(),
-    billingOwnerId: actor,
-    projectId,
-    bundleId: input.bundleId,
-    ...dispatch,
-    pollCron: input.pollCron,
-    timezone: effectiveTimeZone(input.timezone),
-    maintenanceWindow: input.maintenanceWindow,
-    missedRunPolicy: input.missedRunPolicy ?? 'skip',
-    lastScheduledAt: now,
-    enabled: input.enabled ?? true,
-    webhookUrl: input.webhookUrl,
-    testFlightPolicy: input.testFlightPolicy,
-    testFlightTrain: input.testFlightTrain,
-    createdAt: now,
-    updatedAt: now,
-  };
-  state.watches.push(watch);
-  persistNow([], (database) => { recordWatchRevision(watch, actor, 'created', undefined, database); });
-  recordAudit(actor, 'watch.add', watch.id, watch.bundleId);
-  return { ok: true, watch };
-}
-
-export function updateWatch(id: string, patch: Partial<CreateWatchInput>, actor: string, revisionAction: 'updated' | 'restored' = 'updated'): { ok: boolean; watch?: AppWatch; error?: string } {
-  materializeWatches();
-  const watch = state.watches.find((w) => w.id === id);
-  if (!watch) return { ok: false, error: 'watch not found' };
-  const nextProjectId = patch.projectId ?? watch.projectId ?? DEFAULT_PROJECT_ID;
-  const nextProject = getProject(nextProjectId);
-  if (!nextProject || nextProject.archivedAt !== undefined) return { ok: false, error: 'watch project is unavailable' };
-  const nextBundleId = patch.bundleId ?? watch.bundleId;
-  const nextEnabled = patch.enabled ?? watch.enabled;
-  if (nextEnabled && hasEnabledWatchWithBundleId(nextBundleId, nextProjectId, id)) {
-    return { ok: false, error: `another enabled watch already targets ${nextBundleId}` };
-  }
-  const merged = { ...watch, ...patch } as CreateWatchInput;
-  const previous = structuredClone(watch);
-  const dispatch = normalizedWatchInput(merged);
-  const scheduleChanged = (patch.pollCron !== undefined && patch.pollCron !== watch.pollCron)
-    || (patch.timezone !== undefined && effectiveTimeZone(patch.timezone) !== effectiveTimeZone(watch.timezone))
-    || (patch.missedRunPolicy !== undefined && patch.missedRunPolicy !== watch.missedRunPolicy)
-    || (patch.enabled !== undefined && patch.enabled !== watch.enabled)
-    || ('maintenanceWindow' in patch && (patch.maintenanceWindow?.start !== watch.maintenanceWindow?.start || patch.maintenanceWindow?.end !== watch.maintenanceWindow?.end));
-  Object.assign(watch, patch, dispatch, { updatedAt: Math.max(Date.now(), watch.updatedAt + 1) });
-  if (scheduleChanged) watch.lastScheduledAt = Date.now();
-  persistNow([], (database) => { recordWatchRevision(watch, actor, revisionAction, previous, database); });
-  recordAudit(actor, 'watch.update', watch.id, watch.bundleId);
-  return { ok: true, watch };
-}
-
-export function requestWatchBillingOwnerTransfer(id: string, requestedUserId: string, actor: string): { ok: boolean; watch?: AppWatch; error?: string } {
-  materializeWatches();
-  const watch = state.watches.find((candidate) => candidate.id === id);
-  if (!watch) return { ok: false, error: 'watch not found' };
-  const userId = requestedUserId.trim().toLowerCase();
-  if (userId !== 'root' && !state.allowedUsers.some((user) => user.username === userId)) return { ok: false, error: 'recipient account not found' };
-  if (userId !== 'root' && !userCanAccessProject(userId, watch.projectId ?? DEFAULT_PROJECT_ID)) return { ok: false, error: 'recipient cannot access this project' };
-  if (userId !== 'root' && !hasPermission(getUserEffectivePermissions(userId), PermissionFlag.viewAutomation | PermissionFlag.manageAutomation)) return { ok: false, error: 'recipient needs scheduler access to review ownership' };
-  if (userId !== 'root' && !hasPermission(getUserEffectivePermissions(userId), PermissionFlag.requestDecrypt)) return { ok: false, error: 'recipient needs decrypt access before accepting ownership' };
-  const previous = structuredClone(watch);
-  if (userId === actor.toLowerCase()) {
-    watch.billingOwnerId = userId;
-    watch.billingOwnerTransfer = undefined;
-  } else {
-    watch.billingOwnerTransfer = { userId, requestedBy: actor, requestedAt: Date.now() };
-  }
-  watch.updatedAt = Math.max(Date.now(), watch.updatedAt + 1);
-  persistNow([], (database) => { recordWatchRevision(watch, actor, 'updated', previous, database); });
-  recordAudit(actor, 'watch.billing-owner-request', id, userId);
-  return { ok: true, watch };
-}
-
-export function acceptWatchBillingOwnerTransfer(id: string, actor: string): { ok: boolean; watch?: AppWatch; error?: string } {
-  materializeWatches();
-  const watch = state.watches.find((candidate) => candidate.id === id);
-  if (!watch) return { ok: false, error: 'watch not found' };
-  if (watch.billingOwnerTransfer?.userId !== actor.toLowerCase()) return { ok: false, error: 'no ownership request is awaiting this account' };
-  if (actor !== 'root' && !userCanAccessProject(actor, watch.projectId ?? DEFAULT_PROJECT_ID)) return { ok: false, error: 'recipient cannot access this project' };
-  if (actor !== 'root' && !hasPermission(getUserEffectivePermissions(actor), PermissionFlag.requestDecrypt)) return { ok: false, error: 'decrypt access is required to accept ownership' };
-  const previous = structuredClone(watch);
-  watch.billingOwnerId = actor.toLowerCase();
-  watch.billingOwnerTransfer = undefined;
-  watch.updatedAt = Math.max(Date.now(), watch.updatedAt + 1);
-  persistNow([], (database) => { recordWatchRevision(watch, actor, 'updated', previous, database); });
-  recordAudit(actor, 'watch.billing-owner-accept', id, actor);
-  return { ok: true, watch };
-}
-
-export function deleteWatch(id: string, actor: string): boolean {
-  materializeWatches();
-  const removed = state.watches.find((watch) => watch.id === id);
-  const before = state.watches.length;
-  state.watches = state.watches.filter((w) => w.id !== id);
-  const changed = state.watches.length !== before;
-  if (changed) {
-    persistNow([], (database) => { if (removed) recordWatchRevision(removed, actor, 'deleted', undefined, database); });
-    recordAudit(actor, 'watch.remove', id);
-  }
-  return changed;
-}
-
-export function markWatchScheduleRun(id: string, timestamp = Date.now()): boolean {
-  materializeWatches();
-  const watch = state.watches.find((candidate) => candidate.id === id);
-  if (!watch) return false;
-  watch.lastScheduledAt = timestamp;
   persistNow();
-  return true;
-}
-
-export function isWatchSchedulable(watch: AppWatch): boolean {
-  const project = getProject(watch.projectId ?? DEFAULT_PROJECT_ID);
-  const ownerReady = !watch.billingOwnerId || watch.billingOwnerId === 'root' || hasPermission(getUserEffectivePermissions(watch.billingOwnerId), PermissionFlag.requestDecrypt);
-  return watch.enabled && ownerReady && project !== undefined && project.archivedAt === undefined && watch.bundleId !== '' && getWatchDispatchTargets(watch).length > 0 && config.ghToken !== '';
-}
-
-export function getWatchConfigIssues(watch: AppWatch): string[] {
-  const project = getProject(watch.projectId ?? DEFAULT_PROJECT_ID);
-  const hasRepo = Boolean(watch.repo || watch.dispatchTargets?.some((target) => target.repo.trim()));
-  const fieldsSet = [watch.bundleId, hasRepo].filter(Boolean).length;
-  const issues: string[] = [];
-
-  if (!project || project.archivedAt !== undefined) issues.push('The assigned project is unavailable; restore it or choose an active project.');
-  if (watch.billingOwnerId && watch.billingOwnerId !== 'root' && !hasPermission(getUserEffectivePermissions(watch.billingOwnerId), PermissionFlag.requestDecrypt)) issues.push('The billing owner no longer has decrypt access; restore their access or transfer ownership before this watch can dispatch.');
-
-  if (fieldsSet > 0 && fieldsSet < 2) {
-    const missing = [!watch.bundleId && 'watch bundle ID', !hasRepo && 'repo'].filter((v): v is string => typeof v === 'string');
-    issues.push(`Watch is partially configured - still missing ${missing.join(', ')}.`);
-  }
-
-  if (fieldsSet === 2 && config.ghToken === '') {
-    issues.push('A dispatch target is configured but GH_TOKEN is not set - this watch will never actually run.');
-  }
-
-  if (watch.testFlightPolicy === 'train' && !watch.testFlightTrain?.trim()) {
-    issues.push('A TestFlight train is required when the train policy is selected.');
-  }
-
-  return issues;
+  return enabled.length;
 }
 
 export function getEffectiveDevices(): DeviceRecord[] {
@@ -3721,7 +3452,7 @@ export interface InsightsSummary {
   successRate: number;
   totalSizeBytes: number;
   manualCount: number;
-  schedulerCount: number;
+  systemCount: number;
   topApps: InsightsAppStats[];
   trend: { date: string; count: number }[];
   failureBreakdown: { category: string; count: number }[];
@@ -3848,7 +3579,7 @@ export function getInsightsSummary(topAppsLimit = 5, trendDays = 14, projectId?:
     successRate: runs.length > 0 ? doneCount / runs.length : 0,
     totalSizeBytes,
     manualCount: runs.filter((j) => j.source === 'manual').length,
-    schedulerCount: runs.filter((j) => j.source === 'scheduler').length,
+    systemCount: runs.filter((j) => j.source === 'scheduler').length,
     topApps,
     trend: getDailyVolume(trendDays, projectId),
     failureBreakdown: getFailureBreakdown(runs),
@@ -3897,98 +3628,6 @@ export function getDeviceThroughput(projectId?: string): DeviceThroughputStats[]
       };
     })
     .sort((a, b) => b.totalRuns - a.totalRuns);
-}
-
-export function recordSchedulerRun(): void {
-  state.lastSchedulerRunAt = Date.now();
-  persistNow();
-}
-
-export function getLastSchedulerRunAt(): number | undefined {
-  return state.lastSchedulerRunAt;
-}
-
-export function recordSchedulerRunOutcome(outcome: Omit<SchedulerRunEntry, 'ts' | 'id'>): string {
-  const id = randomUUID();
-  state.schedulerRunHistory.unshift({ id, ts: Date.now(), ...outcome });
-  if (state.schedulerRunHistory.length > MAX_SCHEDULER_RUNS) state.schedulerRunHistory.length = MAX_SCHEDULER_RUNS;
-  persistNow();
-  return id;
-}
-
-export function updateSchedulerRunOutcome(entryId: string, source: 'appStore' | 'testflight', patch: Partial<SchedulerRunOutcome>): void {
-  const entry = state.schedulerRunHistory.find((e) => e.id === entryId);
-  if (!entry) return;
-  entry[source] = { ...entry[source], ...patch };
-  persistNow();
-}
-
-export function getSchedulerRunHistory(limit = 10, watchId?: string): SchedulerRunEntry[] {
-  const legacyWatch = getEffectiveWatches()[0];
-  const filled = state.schedulerRunHistory.map((e) =>
-    e.watchId ? e : { ...e, watchId: legacyWatch?.id, bundleId: legacyWatch?.bundleId },
-  );
-  const filtered = watchId ? filled.filter((e) => e.watchId === watchId) : filled;
-  return filtered.slice(0, limit);
-}
-
-export interface WatchHealthSummary {
-  watchId: string;
-  bundleId: string;
-  schedulable: boolean;
-  dispatchTargetCount: number;
-  lastCheckAt?: number;
-  lastCheckOk?: boolean;
-  consecutiveFailures: number;
-  everTriggeredInHistory: boolean;
-  historyCount: number;
-  schedulerJobCount: number;
-  schedulerJobSuccessRate?: number;
-  medianSchedulerJobDurationMs?: number;
-}
-
-function schedulerRunHasFailure(entry: SchedulerRunEntry): boolean {
-  return [entry.appStore, entry.testflight].some((outcome) =>
-    !outcome.ok || outcome.runStatus === 'failed' || outcome.runStatus === 'timed_out',
-  );
-}
-
-export function getWatchHealthRollup(): WatchHealthSummary[] {
-  return getEffectiveWatches().map((watch) => {
-    const entries = getSchedulerRunHistory(MAX_SCHEDULER_RUNS, watch.id);
-    let consecutiveFailures = 0;
-    for (const e of entries) {
-      if (!schedulerRunHasFailure(e)) break;
-      consecutiveFailures += 1;
-    }
-    const last = entries[0];
-    const schedulerJobs = state.jobHistory.filter((job) => job.source === 'scheduler' && job.bundleId === watch.bundleId);
-    const completedJobs = schedulerJobs.filter((job) => job.status === 'done');
-    const durations = completedJobs
-      .filter((job) => job.startedAt)
-      .map((job) => job.finishedAt - (job.startedAt as number))
-      .sort((a, b) => a - b);
-    const midpoint = Math.floor(durations.length / 2);
-    const medianSchedulerJobDurationMs = durations.length === 0
-      ? undefined
-      : durations.length % 2 === 1
-        ? durations[midpoint]
-        : Math.round((durations[midpoint - 1] + durations[midpoint]) / 2);
-    return {
-      watchId: watch.id,
-      bundleId: watch.bundleId,
-      schedulable: isWatchSchedulable(watch),
-      dispatchTargetCount: getWatchDispatchTargets(watch).length,
-      lastCheckAt: last?.ts,
-      lastCheckOk: last ? !schedulerRunHasFailure(last) : undefined,
-      consecutiveFailures,
-      everTriggeredInHistory: entries.some((e) => e.appStore.triggered || e.testflight.triggered),
-      historyCount: entries.length,
-      schedulerJobCount: schedulerJobs.length,
-      schedulerJobSuccessRate: schedulerJobs.length > 0 ? completedJobs.length / schedulerJobs.length : undefined,
-      medianSchedulerJobDurationMs,
-    };
-  });
 }
 
 export function recordDeviceActivity(entry: Omit<DeviceActivityEntry, 'id' | 'ts'>): void {
@@ -4443,7 +4082,7 @@ export function exportBackup(): BackupPayload {
     artifactProjectLinks: exportArtifactProjectLinks(),
     apiKeys: state.apiKeys.map((k) => ({ ...k, pendingReveal: undefined })),
     settings: state.settings,
-    watches: getEffectiveWatches(),
+    watches: state.watches,
     devices: getEffectiveDevices().map(normalizeBackupDevice),
     jobHistory: state.jobHistory,
     lastSchedulerRunAt: state.lastSchedulerRunAt,
@@ -5079,11 +4718,11 @@ function prepareBackupRestore(payload: ValidatedBackupPayload): Pick<PersistedSt
     projects: payload.projects,
     apiKeys: payload.apiKeys.map((key) => ({ ...key, pendingReveal: undefined })),
     settings: payload.settings,
-    watches: payload.watches,
+    watches: payload.watches.map((watch) => ({ ...watch, enabled: false })),
     devices: payload.devices.map(normalizeLoadedDevice),
     jobHistory: payload.jobHistory.slice(0, MAX_HISTORY),
     auditLog: payload.auditLog.slice(0, MAX_AUDIT_LOG),
-    schedulerRunHistory: payload.schedulerRunHistory.slice(0, MAX_SCHEDULER_RUNS).map((entry) => ({ ...entry, id: entry.id ?? randomUUID() })),
+    schedulerRunHistory: payload.schedulerRunHistory.slice(0, MAX_LEGACY_SCHEDULER_RUNS).map((entry) => ({ ...entry, id: entry.id ?? randomUUID() })),
     userPrefs: payload.userPrefs,
     apiKeyUsage: payload.apiKeyUsage,
     rootSessionVersion: payload.rootSessionVersion,
@@ -5195,7 +4834,6 @@ function restoredStateForPayload(payload: ValidatedBackupPayload, restored: Back
   if (payload.lastSchedulerRunAt) restoredState.lastSchedulerRunAt = payload.lastSchedulerRunAt;
   restoredState.apiKeyBundleUsage = payload.apiKeyBundleUsage ?? {};
   restoredState.apiKeyOutcomeUsage = {};
-  restoredState.githubBudgetTelemetry = [];
   restoredState.deviceActivity = payload.deviceActivity?.slice(0, MAX_DEVICE_ACTIVITY) ?? [];
   return restoredState;
 }

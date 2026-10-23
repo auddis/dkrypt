@@ -8,7 +8,7 @@ import { recordDeviceActivity, type DeviceRecord } from '#store/state.js';
 import { buildAppStoreOperationId, installFromAppStore } from '#appStoreInstall.js';
 import { installBuild } from '#testflight.js';
 import { getDeviceHealth, getDeviceInstallBlocker } from '#deviceHealth.js';
-import { lookupCurrentVersion, type ItunesLookupResult } from '#scheduler/itunes.js';
+import { lookupCurrentVersion, type ItunesLookupResult } from '#appStoreMetadata.js';
 import { extractIpaMetadata } from '#util/ipaMetadata.js';
 import type { ExtractedIpaMetadata } from '#util/ipaMetadata.js';
 import { classifyIpaDecryptOutput } from '#util/ipadecryptOutput.js';

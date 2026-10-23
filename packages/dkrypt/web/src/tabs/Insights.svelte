@@ -8,13 +8,10 @@
 		fetchFailurePatterns,
 		fetchJobSlo,
 		fetchStorageForecast,
-		fetchWatchHealth,
 		type JobSloSummary,
 		type InsightsSummary,
 		type FailurePattern,
-		type SchedulerRunEntry,
 		type StorageForecast,
-		type WatchHealthSummary,
 	} from "#lib/api";
 	import Badge from "#lib/components/ui/Badge.svelte";
 	import Button from "#lib/components/ui/Button.svelte";
@@ -25,8 +22,8 @@
 		csvCell,
 		downloadBlob,
 		fmtBytesGB,
-		fmtDurationApprox,
 		fmtCalendarDate,
+		fmtDurationApprox,
 		fmtNumber,
 		trendDelta,
 	} from "#lib/format.svelte";
@@ -91,7 +88,7 @@
 		newPresetName = "";
 	}
 
-	const canViewScheduler = $derived(
+	const canViewOperationalInsights = $derived(
 		sessionHasAnyPermission([
 			PermissionFlag.viewAutomation,
 			PermissionFlag.manageAutomation,
@@ -155,34 +152,15 @@
 		const refreshTimer = setInterval(() => void loadQueueSlo(), 30_000);
 		return () => clearInterval(refreshTimer);
 	});
-	let watchHealth = $state<WatchHealthSummary[] | null>(null);
 	let storageForecast = $state<StorageForecast | null>(null);
 	let failurePatterns = $state<FailurePattern[]>([]);
 
 	$effect(() => {
 		projectSelectionState.id;
-		if (!canViewScheduler) return;
-		void fetchWatchHealth().then((r) => (watchHealth = r.watches));
+		if (!canViewOperationalInsights) return;
 		void fetchStorageForecast().then((forecast) => (storageForecast = forecast));
 		void fetchFailurePatterns().then(({ patterns }) => (failurePatterns = patterns));
 	});
-
-	const releaseDays = $derived(
-		(liveState.overview?.schedulerRunHistory ?? []).reduce<Record<string, SchedulerRunEntry[]>>((days, run) => {
-			const day = new Date(run.ts).toISOString().slice(0, 10);
-			(days[day] ??= []).push(run);
-			return days;
-		}, {}),
-	);
-
-	const flaggedWatches = $derived(
-		(watchHealth ?? []).filter(
-			(w) =>
-				w.schedulable &&
-				(w.consecutiveFailures >= 3 ||
-					(w.historyCount > 0 && !w.everTriggeredInHistory)),
-		),
-	);
 
 	function load(): void {
 		void fetchInsights(Number(trendDays), Number(topAppsLimit)).then(
@@ -358,9 +336,9 @@
 				</div>
 			</div>
 			<div class="border-border rounded-lg border p-3">
-				<div class="text-xs text-muted">Manual / scheduler</div>
+				<div class="text-xs text-muted">Manual / system</div>
 				<div class="text-xl font-semibold">
-					{fmtNumber(insights.manualCount, 0)} / {fmtNumber(insights.schedulerCount, 0)}
+					{fmtNumber(insights.manualCount, 0)} / {fmtNumber(insights.systemCount, 0)}
 				</div>
 			</div>
 		</div>
@@ -627,7 +605,7 @@
 	</Card>
 {/if}
 
-{#if canViewScheduler && watchHealth !== null && watchHealth.some((w) => w.schedulable)}
+{#if canViewOperationalInsights}
 	<Card title="Storage forecast" class="mt-4">
 		{#if storageForecast?.sampleCount}
 			<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
@@ -655,81 +633,6 @@
 		{/if}
 	</Card>
 
-	<Card title="Release calendar" class="mt-4">
-		{#if Object.keys(releaseDays).length === 0}
-			<EmptyState message="Scheduled release activity will appear here after watches run." />
-		{:else}
-			<div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-				{#each Object.entries(releaseDays) as [day, runs] (day)}
-					<div class="border-border rounded-lg border p-2.5">
-						<div class="mb-2 text-xs font-medium text-muted">{fmtCalendarDate(day, { month: "short", day: "numeric" })}</div>
-						<div class="flex flex-col gap-1.5">
-							{#each runs as run (run.id)}
-								<div class="flex min-w-0 items-center gap-2 text-xs">
-									<span class="min-w-0 flex-1 truncate" title={run.bundleId}>{appDisplayName(run.bundleId ?? "unknown")}</span>
-									<Badge variant={run.appStore.runStatus === "failed" || run.testflight.runStatus === "failed" ? "destructive" : run.appStore.triggered || run.testflight.triggered ? "success" : "secondary"}>{run.appStore.triggered || run.testflight.triggered ? "released" : "checked"}</Badge>
-								</div>
-							{/each}
-						</div>
-					</div>
-				{/each}
-			</div>
-		{/if}
-	</Card>
-
-	<Card title="Watch performance" class="mt-4">
-		<div class="flex flex-col gap-1.5">
-			{#each watchHealth.filter((w) => w.schedulable) as w (w.watchId)}
-				<div class="border-border flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-2.5 py-2 text-xs">
-					<span class="min-w-0 flex-1 truncate" title={w.bundleId}>{appDisplayName(w.bundleId)}</span>
-					<span class="text-muted">{fmtNumber(w.dispatchTargetCount, 0)} destination{w.dispatchTargetCount === 1 ? "" : "s"}</span>
-					{#if w.schedulerJobSuccessRate !== undefined}
-						<Badge variant={w.schedulerJobSuccessRate >= 0.9 ? "success" : w.schedulerJobSuccessRate >= 0.5 ? "secondary" : "destructive"}>{Math.round(w.schedulerJobSuccessRate * 100)}% success</Badge>
-					{:else}
-						<span class="text-muted">No scheduler jobs yet</span>
-					{/if}
-					{#if w.medianSchedulerJobDurationMs}
-						<span class="text-muted">{fmtDurationApprox(w.medianSchedulerJobDurationMs)} median</span>
-					{/if}
-				</div>
-			{/each}
-		</div>
-	</Card>
-
-	<Card title="Watch health" class="mt-4">
-		{#if flaggedWatches.length === 0}
-			<EmptyState
-				message="All watches are checking in fine - no repeated failures, all have found a match before."
-			/>
-		{:else}
-			<div class="flex flex-col gap-1.5">
-				{#each flaggedWatches as w (w.watchId)}
-					<div
-						class="border-border flex items-center gap-2.5 rounded-md border px-2.5 py-2 text-xs"
-					>
-						<TriangleAlert class="text-warn h-3.5 w-3.5 shrink-0" />
-						<span class="min-w-0 flex-1 truncate" title={w.bundleId}
-							>{appDisplayName(w.bundleId)}</span
-						>
-						{#if w.consecutiveFailures >= 3}
-							<Badge variant="destructive"
-								>{fmtNumber(w.consecutiveFailures, 0)} checks failed in a row</Badge
-							>
-						{:else}
-							<Badge variant="secondary"
-								>no match in visible history ({fmtNumber(w.historyCount, 0)} checks)</Badge
-							>
-						{/if}
-						{#if w.lastCheckAt}
-							<span class="text-muted"
-								><RelativeTime ms={w.lastCheckAt} /></span
-							>
-						{/if}
-					</div>
-				{/each}
-			</div>
-		{/if}
-	</Card>
 {/if}
 
 <details class="mt-4 rounded-xl border border-border/70 bg-panel/40 px-4 py-3">

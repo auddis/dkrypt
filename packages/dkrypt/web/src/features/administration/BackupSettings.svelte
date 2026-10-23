@@ -197,7 +197,7 @@
   {#if canManageBackup}
   <Card title="Export">
     <div class="mb-3 text-sm text-muted">
-      Downloads member role assignments, API keys (metadata and hashes, not their plaintext), scheduler settings, job history,
+      Downloads member role assignments, API keys (metadata and hashes, not their plaintext), dashboard settings, job history,
       and audit log as one JSON file. Treat it like a set of password hashes - it's not directly usable by an
       attacker, but it's not something to post publicly either.
     </div>
@@ -271,7 +271,6 @@
           <span>Users {preview.current.users} → {preview.incoming.users}</span>
           <span>Roles {preview.current.roles} → {preview.incoming.roles}</span>
           <span>API keys {preview.current.apiKeys} → {preview.incoming.apiKeys}</span>
-          <span>Watches {preview.current.watches} → {preview.incoming.watches}</span>
           <span>Devices {preview.current.devices} → {preview.incoming.devices}</span>
           <span>Job history {preview.current.jobHistory} → {preview.incoming.jobHistory}</span>
           <span>Audit log {preview.current.auditLog} → {preview.incoming.auditLog}</span>

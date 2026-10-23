@@ -27,13 +27,12 @@ test('deployment smoke rejects unknown App Store health when the USB device agen
   expect(() => assertAppStoreSubsystemWhenAgentReady('offline', 'unknown')).not.toThrow();
 });
 
-test('deployment smoke accepts an operational service with scheduler-only degradation', () => {
+test('deployment smoke accepts service status without the retired scheduler component', () => {
   expect(() => assertDeploymentPublicStatus({
-    status: 'degraded',
+    status: 'operational',
     components: {
       service: { state: 'operational' },
       automation: { state: 'operational' },
-      scheduler: { state: 'degraded' },
     },
   })).not.toThrow();
 
@@ -42,7 +41,6 @@ test('deployment smoke accepts an operational service with scheduler-only degrad
     components: {
       service: { state: 'operational' },
       automation: { state: 'operational' },
-      scheduler: { state: 'operational' },
     },
   })).not.toThrow();
 });
@@ -53,7 +51,6 @@ test('deployment smoke rejects service or automation degradation', () => {
     components: {
       service: { state: 'operational' },
       automation: { state: 'degraded' },
-      scheduler: { state: 'operational' },
     },
   })).toThrow('deployment is not operational after device recovery');
 
@@ -62,7 +59,6 @@ test('deployment smoke rejects service or automation degradation', () => {
     components: {
       service: { state: 'maintenance' },
       automation: { state: 'operational' },
-      scheduler: { state: 'operational' },
     },
   })).toThrow('deployment is not operational after device recovery');
 });

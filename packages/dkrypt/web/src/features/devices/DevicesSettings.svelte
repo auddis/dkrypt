@@ -34,7 +34,7 @@
     type DeviceRecord,
     type DeviceSetupResult,
     type DeviceSetupOperation,
-    type SchedulerSettings,
+    type DashboardSettings,
   } from '#lib/api';
   import Badge from '#lib/components/ui/Badge.svelte';
   import Button from '#lib/components/ui/Button.svelte';
@@ -101,7 +101,7 @@
     ];
   }
 
-  let maintenanceSettings = $state<SchedulerSettings | null>(null);
+  let maintenanceSettings = $state<DashboardSettings | null>(null);
   let comparingDevices = $state(false);
   let togglingMaintenance = $state(false);
 
@@ -531,7 +531,7 @@
   async function toggleEnabled(device: DeviceRecord): Promise<void> {
     const enabled = !device.enabled;
     const impact = enabled ? undefined : await fetchDeviceDisableImpact(device.id);
-    const consequence = impact ? ` ${impact.queuedJobCount} queued jobs and ${impact.watchCount} watches may be affected. ${impact.runningJobCount} running jobs will not be cancelled.` : ' It can receive new jobs.';
+    const consequence = impact ? ` ${impact.queuedJobCount} queued jobs may be affected. ${impact.runningJobCount} running jobs will not be cancelled.` : ' It can receive new jobs.';
     if (!(await confirmDialog(`${enabled ? 'Enable' : 'Disable'} ${device.name}?${consequence}`, { confirmLabel: enabled ? 'Enable device' : 'Disable device' }))) return;
     await updateDevice(device.id, { enabled });
     await reloadDevices();
@@ -539,7 +539,7 @@
 
   async function startDrain(device: DeviceRecord): Promise<void> {
     const impact = await fetchDeviceDisableImpact(device.id);
-    if (!(await confirmDialog(`Drain ${device.name}? It will stop receiving new jobs now and disable after ${impact.runningJobCount} running jobs finish. ${impact.queuedJobCount} queued jobs and ${impact.watchCount} watches may be affected.`, { confirmLabel: 'Drain device' }))) return;
+    if (!(await confirmDialog(`Drain ${device.name}? It will stop receiving new jobs now and disable after ${impact.runningJobCount} running jobs finish. ${impact.queuedJobCount} queued jobs may be affected.`, { confirmLabel: 'Drain device' }))) return;
     await drainDevice(device.id);
     await reloadDevices();
   }
@@ -683,7 +683,7 @@
   </Dialog>
 
   <Dialog open={setupOpen} onOpenChange={(value) => (setupOpen = value)} class="max-w-xl">
-    <div class="mb-1 text-sm font-semibold">Set up {setupName || 'device'}</div><div class="mb-4 text-xs text-muted">dkrypt is connecting, identifying the device, preparing decrypt access, and checking automation prerequisites.</div>
+    <div class="mb-1 text-sm font-semibold">Set up {setupName || 'device'}</div><div class="mb-4 text-xs text-muted">dkrypt is connecting, identifying the device, preparing decrypt access, and checking decrypt prerequisites.</div>
     {#if setupError}<div class="border-err/40 bg-err/10 text-err mb-3 rounded-lg border px-3 py-2 text-sm">{setupError}</div>{/if}
     {#if setupOperation?.stages.length}<ol class="mb-3 space-y-2" aria-label="Device setup progress">{#each setupOperation.stages as stage (stage.at)}<li class="flex items-center gap-2 text-xs"><span class={stage.status === 'failed' ? 'text-err' : stage.status === 'complete' ? 'text-ok' : 'text-muted'}>{stage.status === 'complete' ? '✓' : stage.status === 'failed' ? '!' : '…'}</span><span>{stage.label}</span></li>{/each}</ol>{/if}
     {#if setupRunning}<div class="flex items-center justify-center gap-2 py-4 text-sm text-muted"><RefreshCw class="h-4 w-4 animate-spin" />{setupOperation?.stages.at(-1)?.label ?? 'Preparing device setup…'}</div><Button class="w-full" variant="secondary" onclick={() => (setupOpen = false)}>Continue in background</Button>{/if}
@@ -720,7 +720,7 @@
 {/if}
 
 <Dialog open={preflightOpen} onOpenChange={(value) => (preflightOpen = value)} class="max-w-lg">
-  <div class="mb-1 text-sm font-medium">Device preflight</div>{#if preflight}<div class="mb-3 text-xs text-muted">{preflight.device.name} · {preflight.ready ? 'ready for automation' : 'needs attention'}</div><div class="flex flex-col gap-2">{#each preflight.checks as check (check.label)}<div class="border-border flex items-start justify-between gap-3 rounded-lg border p-2.5 text-sm"><div><div>{check.label}</div>{#if check.detail}<div class="mt-0.5 text-xs text-muted">{check.detail}</div>{/if}</div><Badge variant={check.ok ? 'success' : 'destructive'}>{check.ok ? 'ready' : 'attention'}</Badge></div>{/each}</div>{#if preflight.bridge?.bridge.bridgeVersion}<div class="mt-3 text-xs text-muted">autoinstall {preflight.bridge.bridge.bridgeVersion} · {(preflight.bridge.bridge.capabilities ?? []).join(', ') || 'no capabilities reported'}</div>{/if}{/if}
+  <div class="mb-1 text-sm font-medium">Device preflight</div>{#if preflight}<div class="mb-3 text-xs text-muted">{preflight.device.name} · {preflight.ready ? 'ready for decrypts' : 'needs attention'}</div><div class="flex flex-col gap-2">{#each preflight.checks as check (check.label)}<div class="border-border flex items-start justify-between gap-3 rounded-lg border p-2.5 text-sm"><div><div>{check.label}</div>{#if check.detail}<div class="mt-0.5 text-xs text-muted">{check.detail}</div>{/if}</div><Badge variant={check.ok ? 'success' : 'destructive'}>{check.ok ? 'ready' : 'attention'}</Badge></div>{/each}</div>{#if preflight.bridge?.bridge.bridgeVersion}<div class="mt-3 text-xs text-muted">autoinstall {preflight.bridge.bridge.bridgeVersion} · {(preflight.bridge.bridge.capabilities ?? []).join(', ') || 'no capabilities reported'}</div>{/if}{/if}
 </Dialog>
 
 <Dialog open={inventoryOpen} onOpenChange={(value) => (inventoryOpen = value)} class="max-w-lg">

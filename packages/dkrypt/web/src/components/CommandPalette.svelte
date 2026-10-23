@@ -7,7 +7,6 @@
 		fetchUsers,
 		jobHistoryExportUrl,
 		retryJob,
-		triggerWatchDispatch,
 		type JobHistoryEntry,
 		type DashboardQuickSearchResult,
 	} from "#lib/api";
@@ -29,11 +28,9 @@
 		artifactDetailJumpState,
 		deviceDetailJumpState,
 		jobDetailJumpState,
-		watchDetailJumpState,
 		openHelp,
 		paletteState,
 		requestFocusSearch,
-		requestCreateWatch,
 		requestOpenBatch,
 		setActiveTab,
 		setSettingsSubtab,
@@ -243,16 +240,6 @@ import { resolveInterfaceLanguage } from "#lib/locale";
 		showToast(`Retrying ${appDisplayName(job.bundleId)}`, "success");
 	}
 
-	async function runTriggerWatchDispatch(watchId: string): Promise<void> {
-		const { ok, data } = await triggerWatchDispatch(watchId);
-		if (ok)
-			showToast(
-				"Dispatch check triggered - watch Active Jobs / Logs for progress",
-				"success",
-			);
-		else showToast(data.error ?? "Failed to trigger", "error");
-	}
-
 	function navigateQuickResult(result: DashboardQuickSearchResult): void {
 		if (result.projectId) setProjectSelection(result.projectId);
 		if (result.kind === 'app') {
@@ -273,12 +260,6 @@ import { resolveInterfaceLanguage } from "#lib/locale";
 			deviceDetailJumpState.id = result.id;
 			setActiveTab('settings');
 			setSettingsSubtab('devices');
-			return;
-		}
-		if (result.kind === 'watch') {
-			watchDetailJumpState.id = result.id;
-			setActiveTab('settings');
-			setSettingsSubtab('scheduler');
 			return;
 		}
 		if (result.kind === 'user') {
@@ -311,7 +292,7 @@ import { resolveInterfaceLanguage } from "#lib/locale";
 			},
 		];
 		for (const result of quickResults) {
-			const category = translateMessage(`search.${result.kind}` as 'search.app' | 'search.job' | 'search.artifact' | 'search.device' | 'search.watch' | 'search.user' | 'search.settings', interfaceLanguage);
+			const category = translateMessage(`search.${result.kind}` as 'search.app' | 'search.job' | 'search.artifact' | 'search.device' | 'search.user' | 'search.settings', interfaceLanguage);
 			base.push({
 				id: `quick-${result.kind}-${result.id}`,
 				label: result.title,
@@ -320,15 +301,6 @@ import { resolveInterfaceLanguage } from "#lib/locale";
 				subtitle: result.subtitle,
 				run: () => navigateQuickResult(result),
 			});
-			if (result.kind === 'app' && sessionHasPermission(PermissionFlag.manageAutomation)) {
-				base.push({
-					id: `watch-app-${result.id}`,
-					label: `Create watch for ${result.title}`,
-					keywords: `${result.id} automation schedule`,
-					category: 'Automation',
-					run: () => requestCreateWatch(result.id, result.title),
-				});
-			}
 		}
 		if (sessionHasPermission(PermissionFlag.viewLogs)) {
 			base.push({
@@ -414,18 +386,6 @@ import { resolveInterfaceLanguage } from "#lib/locale";
 						run: () => void cancelActiveJob(job.id, job.bundleId),
 					});
 				}
-			}
-		}
-		if (sessionHasPermission(PermissionFlag.manageAutomation)) {
-			for (const w of liveState.overview?.watches ?? []) {
-				if (!w.schedulable) continue;
-				base.push({
-					id: `trigger-dispatch-${w.id}`,
-					label: `Trigger dispatch now: ${appDisplayName(w.bundleId)}`,
-					category: "Actions",
-					keywords: w.bundleId,
-					run: () => void runTriggerWatchDispatch(w.id),
-				});
 			}
 		}
 		base.push({

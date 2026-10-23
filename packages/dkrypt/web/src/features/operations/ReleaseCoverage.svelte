@@ -58,7 +58,7 @@
     <p class="text-sm text-destructive">{error}</p>
     <Button size="sm" variant="secondary" onclick={() => void load(projectSelectionState.id)}>Retry</Button>
   {:else if items.length === 0}
-    <p class="text-sm text-muted">No apps have jobs, watches, or artifacts in this project yet.</p>
+    <p class="text-sm text-muted">No apps have jobs or artifacts in this project yet.</p>
   {:else}
     <div class="space-y-2">
       {#each items as item (item.bundleId)}

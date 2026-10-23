@@ -11,7 +11,7 @@ import { scopedLogger } from '#logger.js';
 const log = scopedLogger('jobs');
 import { sendMailToUser } from '#mail.js';
 import { sendPushToUser } from '#push.js';
-import { DEFAULT_PROJECT_ID, getAllJobHistory, getApiKeyById, getDevice, getEffectiveDevices, getProject, getTestFlightCatalogCache, getUserEffectivePermissions, getUserPrefs, isBundleWatched, recordDeviceActivity, recordJobHistory, updateDevice, type DeviceRecord } from '#store/state.js';
+import { DEFAULT_PROJECT_ID, getAllJobHistory, getApiKeyById, getDevice, getEffectiveDevices, getProject, getTestFlightCatalogCache, getUserEffectivePermissions, getUserPrefs, recordDeviceActivity, recordJobHistory, updateDevice, type DeviceRecord } from '#store/state.js';
 import { hasPermission, PermissionFlag } from '#permissions.js';
 import { uninstallFromDevice } from '#appStoreInstall.js';
 import { getCachedDeviceHealth } from '#deviceHealthCache.js';
@@ -1229,7 +1229,7 @@ export async function reclaimJobFile(job: Job): Promise<void> {
 async function reclaimAndMaybeUninstall(job: Job): Promise<void> {
   const { bundleId, status } = job;
   await cleanupJob(job);
-  if (status === 'done' && !isBundleWatched(bundleId)) {
+  if (status === 'done') {
     await uninstallFromDevice(bundleId, job.deviceId ? getDevice(job.deviceId) : undefined).catch((err: unknown) => {
       log.warn('device uninstall during sweep failed', { bundleId, error: String(err) });
     });

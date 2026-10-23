@@ -43,7 +43,6 @@
 	import PublicStatus from "#components/PublicStatus.svelte";
 	import SessionExpiryBanner from "#components/SessionExpiryBanner.svelte";
 	import SessionsDialog from "#components/SessionsDialog.svelte";
-	import SetupBanner from "#components/SetupBanner.svelte";
 	import OnboardingTour from "#components/OnboardingTour.svelte";
 	import ShortcutsHelp from "#components/ShortcutsHelp.svelte";
 	import Badge from "#lib/components/ui/Badge.svelte";
@@ -1225,7 +1224,6 @@ initDensity();
 			<SessionExpiryBanner />
 			<ConnectionBanner />
 			<UpdateAvailableBanner />
-			<SetupBanner />
 			<div
 				class={tabState.active === "docs" ? "grid grid-cols-1 items-start" : "grid grid-cols-1 items-start gap-4 min-[1440px]:grid-cols-[minmax(0,1fr)_340px] min-[1440px]:gap-5"}
 			>

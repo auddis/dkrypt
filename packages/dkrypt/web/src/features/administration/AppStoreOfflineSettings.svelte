@@ -136,7 +136,7 @@
       <div><h4 class="text-sm font-medium">Apple Account</h4><p class="mt-1 text-xs text-muted">Use the account signed into the paired iPad’s App Store. The password is encrypted using the external vault key and is never placed in a command or environment variable.</p></div>
       <div class="space-y-1.5"><Label for="offline-apple-id">Apple Account email</Label><Input id="offline-apple-id" type="email" autocomplete="username" bind:value={appleId} required maxlength={320} /></div>
       <div class="space-y-1.5"><Label for="offline-apple-password">Password</Label><Input id="offline-apple-password" type="password" autocomplete="new-password" bind:value={password} required maxlength={1024} /></div>
-      <Button size="sm" loading={savingAccount} disabled={!appleId || !password}>Save account</Button>
+      <Button type="submit" size="sm" loading={savingAccount} disabled={!appleId || !password}>Save account</Button>
       {#if status?.vault.accountConfigured}
         <div class="space-y-2 rounded-lg border border-border/70 p-3">
           <p class="text-xs text-muted">Re-authentication may ask for a code sent to the trusted iPad. Approval is not automatic; dkrypt cannot reliably match Apple’s prompt to a specific request.</p>

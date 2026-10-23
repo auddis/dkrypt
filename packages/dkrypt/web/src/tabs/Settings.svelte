@@ -13,7 +13,7 @@
   import DevicesSettings from '#features/devices/DevicesSettings.svelte';
   import ProjectsSettings from '#features/administration/ProjectsSettings.svelte';
   import RolesSettings from '#features/administration/RolesSettings.svelte';
-  import SchedulerSettings from '#features/scheduler/SchedulerSettings.svelte';
+  import NotificationsSettings from '#features/settings/NotificationsSettings.svelte';
   import SystemDoctorSettings from '#features/administration/SystemDoctorSettings.svelte';
   import TestFlightSettings from '#features/testflight/TestFlightSettings.svelte';
   import UsersSettings from '#features/administration/UsersSettings.svelte';
@@ -23,7 +23,7 @@
 
   const ALL_SUBTABS: { id: string; label: string; requires: bigint[]; requiresAll?: bigint[] }[] = [
     { id: 'personalization', label: 'Personalization', requires: [] },
-    { id: 'scheduler', label: 'Automation', requires: [PermissionFlag.viewAutomation, PermissionFlag.manageAutomation] },
+    { id: 'notifications', label: 'Notifications', requires: [PermissionFlag.viewAutomation, PermissionFlag.manageAutomation] },
     { id: 'storage', label: 'Storage', requires: [PermissionFlag.manageAutomation], requiresAll: [PermissionFlag.requestDecrypt] },
     { id: 'devices', label: 'Devices', requires: [PermissionFlag.viewDevices, PermissionFlag.manageDevices] },
     { id: 'doctor', label: 'System', requires: [PermissionFlag.manageDevices] },
@@ -37,7 +37,7 @@
   ];
   const SETTINGS_GROUPS = [
     { id: 'personal', label: 'Personal', subtabs: ['personalization'] },
-    { id: 'operations', label: 'Operations', subtabs: ['scheduler', 'storage', 'devices', 'testflight'] },
+    { id: 'operations', label: 'Operations', subtabs: ['notifications', 'storage', 'devices', 'testflight'] },
     { id: 'team', label: 'Team', subtabs: ['users', 'roles', 'projects'] },
     { id: 'system', label: 'System', subtabs: ['doctor', 'backup', 'reports'] },
     { id: 'billing', label: 'Billing', subtabs: ['billing'] },
@@ -52,7 +52,7 @@
   const activeGroup = $derived(visibleGroups.find((group) => group.visibleSubtabs.some((subtab) => subtab.id === tabState.settingsSubtab)) ?? visibleGroups[0]);
   const searchTerms: Record<string, string> = {
     personalization: 'timezone time zone touch targets navigation favorites artifact columns appearance density',
-    scheduler: 'watch schedule automation cron github webhook testflight',
+    notifications: 'webhook alerts events quiet hours digest',
     storage: 'artifact retention quota cleanup prune',
     devices: 'device usb wifi pairing health setup',
     doctor: 'system diagnostics health configuration',
@@ -125,9 +125,9 @@
   <div class:hidden={tabState.settingsSubtab !== 'personalization'}><PersonalizationSettings /></div>
 {/if}
 
-{#if hasAccess([PermissionFlag.viewAutomation, PermissionFlag.manageAutomation]) && mountedSubtabs.scheduler}
-  <div class:hidden={tabState.settingsSubtab !== 'scheduler'}>
-    <SchedulerSettings />
+{#if hasAccess([PermissionFlag.viewAutomation, PermissionFlag.manageAutomation]) && mountedSubtabs.notifications}
+  <div class:hidden={tabState.settingsSubtab !== 'notifications'}>
+    <NotificationsSettings />
   </div>
 {/if}
 {#if hasAccess([PermissionFlag.manageAutomation], [PermissionFlag.requestDecrypt]) && mountedSubtabs.storage}

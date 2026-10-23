@@ -27,7 +27,6 @@ import { dashboardProjectRoutes } from '#routes/dashboardProjectRoutes.js';
 import { dashboardRoleRoutes } from '#routes/dashboardRoleRoutes.js';
 import { dashboardSettingsRoutes } from '#routes/dashboardSettingsRoutes.js';
 import { dashboardUserRoutes } from '#routes/dashboardUserRoutes.js';
-import { dashboardWatchRoutes } from '#routes/dashboardWatchRoutes.js';
 import { dashboardObservabilityRoutes } from '#routes/dashboardObservabilityRoutes.js';
 import { dashboardArtifactRoutes } from '#routes/dashboardArtifactRoutes.js';
 import { dashboardNotificationRoutes } from '#routes/dashboardNotificationRoutes.js';
@@ -54,8 +53,8 @@ import { billingRoutes, billingWebhookRoutes } from '#routes/billing.js';
 import type { StripeWebhookHealth } from '#stripeWebhookHealth.js';
 import { artifactCatalogRoutes, decryptRoutes, testFlightCatalogRoutes } from '#routes/decrypt.js';
 import { healthRoutes } from '#routes/health.js';
-import { startScheduler, stopScheduler } from '#scheduler/index.js';
-import { closeStateDatabase, startApiKeySweeper, startSessionSweeper, startStateFlusher, stopStateBackgroundServices } from '#store/state.js';
+import { startBackupScheduler, stopBackupScheduler } from '#backupScheduler.js';
+import { closeStateDatabase, disableLegacyAppWatches, startApiKeySweeper, startSessionSweeper, startStateFlusher, stopStateBackgroundServices } from '#store/state.js';
 import { refreshUsbDeviceHealth, startDeviceHealthPoller, stopDeviceHealthPoller } from '#deviceHealth.js';
 import { renderPublicPage } from '#publicPages.js';
 import { startNotificationDigestScheduler } from '#notify.js';
@@ -75,7 +74,6 @@ import { DailyDecryptLimitError } from '#jobs/repository.js';
 import { createHttpErrorEnvelope } from '#util/httpResponse.js';
 import { startRustDeviceEventMonitoring } from '#deviceBridgeEvents.js';
 import { createPublicOpenApiDocument } from '#publicApi.js';
-import { closeWatchWorkflowRepository } from '#store/watchWorkflowRepository.js';
 import { closeIncidentRepository, reconcileOperationalIncidents } from '#store/incidentRepository.js';
 import { closeIntegrationRepository } from '#store/integrationRepository.js';
 import { closeOauthLinkReviewRepository } from '#store/oauthLinkReview.js';
@@ -371,12 +369,13 @@ export async function buildServer(options: {
   await server.register(signedTriggerRoutes);
   await server.register(dashboardDiscordRoutes);
   await server.register(dashboardEventsRoutes);
-  await server.register(dashboardWatchRoutes);
   await server.register(billingRoutes, { stripeClient: options.stripeClient, stripeWebhookHealth: options.stripeWebhookHealth });
   return server;
 }
 
 async function startBackgroundServices(): Promise<void> {
+  const retiredWatches = disableLegacyAppWatches();
+  if (retiredWatches > 0) log.info('disabled legacy scheduled app watches', { count: retiredWatches });
   startTelemetry();
   stopRustDeviceEventMonitoring = startRustDeviceEventMonitoring({
     onUsbDeviceHealthRefresh: (udid) => {
@@ -390,7 +389,7 @@ async function startBackgroundServices(): Promise<void> {
   startLogFlusher();
   startApiKeySweeper();
   startSessionSweeper();
-  startScheduler();
+  startBackupScheduler();
   startDeviceHealthPoller();
   startKeyExpiryPoller();
   startTestFlightSubscriptionPoller();
@@ -420,7 +419,7 @@ export function registerShutdownHandlers(
     }, 140_000);
     drainingServers.add(server);
     stopAcceptingJobs();
-    stopScheduler();
+    stopBackupScheduler();
     void trackBackgroundWork('telemetry-shutdown', stopTelemetry)
       .catch((error: unknown) => log.warn('telemetry shutdown failed', { error: String(error) }));
     stopDeviceHealthPoller();
@@ -466,7 +465,6 @@ export function registerShutdownHandlers(
         closeIdempotencyDatabase();
         closeWebhookInboxDatabase();
         closeArtifactDatabase();
-        closeWatchWorkflowRepository();
         closeIncidentRepository();
         closeIntegrationRepository();
         closeOauthLinkReviewRepository();

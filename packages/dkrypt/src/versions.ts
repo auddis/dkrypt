@@ -1,5 +1,5 @@
 import { scopedLogger } from '#logger.js';
-import { lookupCurrentVersion } from '#scheduler/itunes.js';
+import { lookupCurrentVersion } from '#appStoreMetadata.js';
 import { compareVersions } from '#util/version.js';
 
 const log = scopedLogger('versions');

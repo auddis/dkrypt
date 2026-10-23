@@ -2,7 +2,7 @@
 
 Self-hosted App Store and TestFlight decryption for jailbroken iPhone and iPad devices.
 
-dkrypt provides an authenticated dashboard for managing decrypts, IPA artifacts, devices, automation, and billing, plus a narrow public API for decrypt workflows and IPA artifact access.
+dkrypt provides an authenticated dashboard for managing decrypts, IPA artifacts, devices, TestFlight subscriptions, and billing, plus a narrow public API for decrypt workflows and IPA artifact access.
 
 ## Quick start
 

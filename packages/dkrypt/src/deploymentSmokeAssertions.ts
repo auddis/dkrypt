@@ -31,10 +31,7 @@ export function assertDeploymentPublicStatus(value: unknown): void {
   };
   const serviceReady = componentState('service') === 'operational';
   const automationReady = componentState('automation') === 'operational';
-  const schedulerState = componentState('scheduler');
-  const overallReady = status.status === 'operational'
-    ? schedulerState === 'operational' || schedulerState === 'paused'
-    : status.status === 'degraded' && schedulerState === 'degraded';
+  const overallReady = status.status === 'operational';
 
   if (serviceReady && automationReady && overallReady) return;
   throw new Error(`deployment is not operational after device recovery: ${JSON.stringify(value)}`);

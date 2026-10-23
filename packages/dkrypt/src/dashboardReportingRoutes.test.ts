@@ -8,7 +8,7 @@ import { PermissionFlag } from '#permissions.js';
 import { dashboardRouter } from '#routes/dashboard.js';
 import { createDashboardReportingRoutes } from '#routes/dashboardReportingRoutes.js';
 import { setSessionCookie } from '#session.js';
-import type { AppWatch, DeviceRecord, InsightsSummary, JobHistoryEntry, SchedulerRunEntry, WatchHealthSummary, WebhookDeliveryEntry } from '#store/state.js';
+import type { DeviceRecord, InsightsSummary, JobHistoryEntry, WebhookDeliveryEntry } from '#store/state.js';
 import { LATEST_SQLITE_SCHEMA_VERSION } from '#store/sqlite.js';
 
 function sessionCookie(permissions = 0n): string {
@@ -26,7 +26,7 @@ test('insights is served through the typed dashboard API and preserves bounded q
     successRate: 2 / 3,
     totalSizeBytes: 4096,
     manualCount: 2,
-    schedulerCount: 1,
+    systemCount: 1,
     topApps: [{ bundleId: 'com.example.app', totalRuns: 3, doneCount: 2, failedCount: 1, successRate: 2 / 3, totalSizeBytes: 4096 }],
     trend: [{ date: '2026-09-26', count: 3 }],
     failureBreakdown: [{ category: 'device_transport', count: 1 }],
@@ -236,18 +236,7 @@ test('webhook delivery history remains log-permission gated and clamps the reque
 });
 
 test('support bundles require management permission and redact sensitive diagnostic data', async () => {
-  const watch: AppWatch = {
-    id: 'watch-1',
-    bundleId: 'com.example.app',
-    repo: 'example/app',
-    ghWorkflowFile: 'decrypt.yml',
-    pollCron: '0 * * * *',
-    enabled: true,
-    createdAt: 1,
-    updatedAt: 2,
-  };
   const device: DeviceRecord = { id: 'ipad-1', name: 'iPad', enabled: true, isPrimary: true, createdAt: 1, updatedAt: 2 };
-  const privateWatch: AppWatch = { ...watch, id: 'private-watch', projectId: 'private', bundleId: 'com.example.private' };
   const job: JobHistoryEntry = {
     id: 'failed-job',
     correlationId: 'correlation-job-1',
@@ -269,19 +258,6 @@ test('support bundles require management permission and redact sensitive diagnos
     timeline: [Object.assign({ at: 1, label: 'Queued password=timeline-password', status: 'queued' as const }, { token: 'timeline-extra-token' })],
   };
   const privateJob: JobHistoryEntry = { ...job, id: 'private-job', projectId: 'private', bundleId: 'com.example.private' };
-  const run: SchedulerRunEntry = {
-    id: 'run-1',
-    ts: 2,
-    watchId: 'watch-1',
-    bundleId: 'com.example.app',
-    appStore: { ok: false, triggered: false, reason: 'Authorization: Bearer scheduler-token' },
-    testflight: { ok: true, triggered: false, reason: 'https://private.example/path' },
-  };
-  const privateRun: SchedulerRunEntry = { ...run, id: 'private-run', watchId: 'private-watch', bundleId: 'com.example.private' };
-  const health: WatchHealthSummary[] = [
-    { watchId: 'watch-1', bundleId: 'com.example.app', schedulable: true, dispatchTargetCount: 0, consecutiveFailures: 0, everTriggeredInHistory: false, historyCount: 0, schedulerJobCount: 0 },
-    { watchId: 'private-watch', bundleId: 'com.example.private', schedulable: true, dispatchTargetCount: 0, consecutiveFailures: 0, everTriggeredInHistory: false, historyCount: 0, schedulerJobCount: 0 },
-  ];
   const log: LogEntry = {
     id: 'log-1',
     ts: 3,
@@ -308,10 +284,6 @@ test('support bundles require management permission and redact sensitive diagnos
     getDiskUsage: () => ({ totalBytes: 100, freeBytes: 50, usedBytes: 50, usedPercent: 0.5 }),
     getAppCatalogStats: () => ({ entries: 1, icons: 1 }),
     getEffectiveDevices: () => [device],
-    getEffectiveWatches: () => [watch, privateWatch],
-    getWatchDispatchTargets: () => [],
-    getWatchHealthRollup: () => health,
-    getSchedulerRunHistory: () => [run, privateRun],
     getRecentLogs: (query) => ({ logs: [log, privateLog, transportLog].filter((entry) => query?.filter?.(entry)), total: 3 }),
   }));
 
@@ -329,9 +301,9 @@ test('support bundles require management permission and redact sensitive diagnos
     expect(response.headers['content-disposition']).toBe('attachment; filename="dkrypt-support-bundle.json"');
     expect(bundle.deployment).toMatchObject({ id: expect.any(String), ref: expect.any(String), node: expect.any(String) });
     expect(bundle.devices).toEqual([{ id: 'ipad-1', name: 'iPad', enabled: true, isPrimary: true }]);
-    expect(bundle.watches).toEqual([{ bundleId: 'com.example.app', enabled: true, pollCron: '0 * * * *', destinations: 0 }]);
-    expect(bundle.watchHealth).toHaveLength(1);
-    expect(bundle.schedulerRuns).toHaveLength(1);
+    expect(bundle).not.toHaveProperty('watches');
+    expect(bundle).not.toHaveProperty('watchHealth');
+    expect(bundle).not.toHaveProperty('schedulerRuns');
     expect(bundle.logs).toHaveLength(2);
     expect(bundle.jobs).toHaveLength(1);
     expect(bundle.logs.find((entry: LogEntry) => entry.id === 'log-1')).toMatchObject({
@@ -348,8 +320,6 @@ test('support bundles require management permission and redact sensitive diagnos
       correlationId: 'correlation-transport-1',
     }]);
     expect(bundle.correlationIds).toEqual(['correlation-job-1', 'correlation-transport-1']);
-    expect(bundle.schedulerRuns[0].appStore.reason).toBe('Authorization: Bearer [redacted]');
-    expect(bundle.schedulerRuns[0].testflight.reason).toBe('[redacted-url]');
     expect(bundle.jobs[0].error).toBe('Authorization: Bearer [redacted] password=[redacted] access_token=[redacted] at [redacted-url]');
     expect(bundle.jobs[0]).toMatchObject({
       queueReason: 'Waiting for a compatible device · password=[redacted]',

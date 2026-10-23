@@ -96,7 +96,7 @@ const pageContent: Record<string, string> = {
   '/status': `
     <main>
       <h1>dkrypt service status</h1>
-      <p>View the current service, device automation, and scheduler status.</p>
+      <p>View the current service and device automation status.</p>
       <p><a href="/status">Open the live status page</a> or <a href="/#sign-in">sign in</a> to manage your account.</p>
     </main>
   `,

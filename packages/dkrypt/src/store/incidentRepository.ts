@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { config } from '#config.js';
-import { DEFAULT_PROJECT_ID, getAllJobHistory, getEffectiveDevices, getEffectiveWatches, getSchedulerRunHistory, hasSustainedDeviceHealthFailures } from '#store/state.js';
+import { DEFAULT_PROJECT_ID, getAllJobHistory, getEffectiveDevices, hasSustainedDeviceHealthFailures } from '#store/state.js';
 import { openStateCollectionDatabase } from '#store/sqlite.js';
 import { getRecentLogs } from '#logger.js';
 
@@ -123,22 +123,6 @@ export function reconcileOperationalIncidents(): void {
   for (const job of getAllJobHistory()) {
     if (job.status !== 'failed' || (job.finishedAt ?? job.createdAt) < cutoff) continue;
     openIncident({ projectId: job.projectId ?? DEFAULT_PROJECT_ID, sourceKey: `job:${job.id}`, kind: 'job', sourceId: job.id, title: 'Decrypt failed', detail: job.bundleId });
-  }
-  const watches = new Map(getEffectiveWatches().map((watch) => [watch.id, watch]));
-  const observedWatchSources = new Set<string>();
-  for (const run of getSchedulerRunHistory(500).sort((left, right) => right.ts - left.ts)) {
-    if (run.ts < cutoff || !run.watchId) continue;
-    const watch = watches.get(run.watchId);
-    if (!watch) continue;
-    for (const source of ['appStore', 'testflight'] as const) {
-      const outcome = run[source];
-      const sourceKey = `watch:${watch.id}:${source}`;
-      if (observedWatchSources.has(sourceKey)) continue;
-      if (outcome.runStatus !== 'failed' && outcome.runStatus !== 'timed_out' && outcome.runStatus !== 'succeeded') continue;
-      observedWatchSources.add(sourceKey);
-      if (outcome.runStatus === 'failed' || outcome.runStatus === 'timed_out') openIncident({ projectId: watch.projectId ?? DEFAULT_PROJECT_ID, sourceKey, kind: 'watch', sourceId: watch.id, title: 'Watch run failed', detail: `${watch.bundleId} · ${outcome.failureSummary ?? outcome.reason}` });
-      else if (outcome.runStatus === 'succeeded') recoverIncident(sourceKey);
-    }
   }
   for (const device of getEffectiveDevices().filter((entry) => entry.enabled)) {
     const key = `device:${device.id}`;

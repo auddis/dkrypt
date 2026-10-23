@@ -4,7 +4,7 @@ import { createHmac } from 'node:crypto';
 import { log } from '#logger.js';
 import { sendMailToAllSubscribed, type MailCategory } from '#mail.js';
 import { sendPushToAllSubscribed, type PushCategory } from '#push.js';
-import { getEffectiveSettings, recordWebhookDelivery, type SchedulerSettings } from '#store/state.js';
+import { getEffectiveSettings, recordWebhookDelivery, type DashboardSettings } from '#store/state.js';
 import { postJsonWithRetry } from '#util/webhookRetry.js';
 
 export type NotifyEvent =
@@ -25,7 +25,7 @@ export type NotifyEvent =
   | 'cryptoBillingSuccess'
   | 'cryptoBillingFailure';
 
-const EVENT_SETTING_KEY: Record<NotifyEvent, keyof SchedulerSettings> = {
+const EVENT_SETTING_KEY: Record<NotifyEvent, keyof DashboardSettings> = {
   keyRequest: 'notifyOnKeyRequest',
   appStoreAutomationSuccess: 'notifyOnAutomationSuccess',
   testFlightAutomationSuccess: 'notifyOnAutomationSuccess',
@@ -74,7 +74,7 @@ const WEBHOOK_AVATAR_URL = `${config.publicBaseUrl}/favicon.png`;
 
 interface PendingDigest {
   url: string;
-  format: SchedulerSettings['notifyFormat'];
+  format: DashboardSettings['notifyFormat'];
   entries: string[];
 }
 
@@ -88,7 +88,7 @@ function flattenEmbed(embed: NotifyEmbed): string {
   return lines.join('\n');
 }
 
-function buildPayload(embed: NotifyEmbed, format: SchedulerSettings['notifyFormat']): Record<string, unknown> {
+function buildPayload(embed: NotifyEmbed, format: DashboardSettings['notifyFormat']): Record<string, unknown> {
   if (format === 'plain') {
     const text = truncate(flattenEmbed(embed), 2000);
     return { content: text, text, username: WEBHOOK_USERNAME, icon_url: WEBHOOK_AVATAR_URL };
@@ -163,14 +163,14 @@ function isSuccessNotification(event: NotifyEvent, embed: NotifyEmbed): boolean 
   return event === 'appStoreAutomationSuccess' || event === 'testFlightAutomationSuccess' || event === 'cryptoBillingSuccess' || (event === 'jobCompleted' && embed.color === EMBED_COLOR.ok);
 }
 
-function queueDigest(url: string, format: SchedulerSettings['notifyFormat'], embed: NotifyEmbed): void {
+function queueDigest(url: string, format: DashboardSettings['notifyFormat'], embed: NotifyEmbed): void {
   const key = `${url}|${format}`;
   const digest = pendingDigests.get(key) ?? { url, format, entries: [] };
   digest.entries.push(flattenEmbed(embed));
   pendingDigests.set(key, digest);
 }
 
-function digestKey(mode: SchedulerSettings['notifySuccessMode'], now: Date): string | undefined {
+function digestKey(mode: DashboardSettings['notifySuccessMode'], now: Date): string | undefined {
   if (mode === 'instant') return undefined;
   if (now.getHours() !== 9) return undefined;
   if (mode === 'daily') return `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
@@ -181,7 +181,7 @@ function digestKey(mode: SchedulerSettings['notifySuccessMode'], now: Date): str
 async function postWebhook(
   url: string,
   embed: NotifyEmbed,
-  format: SchedulerSettings['notifyFormat'],
+  format: DashboardSettings['notifyFormat'],
   event: string,
 ): Promise<{ ok: boolean; status?: number; error?: string }> {
   const payload = buildPayload(embed, format);
@@ -192,7 +192,7 @@ async function postWebhook(
     result = { ok: false, error: String(error), durationMs: 0 };
   }
   recordWebhookDelivery({
-    kind: event === 'jobCompleted' ? 'job' : 'scheduler',
+    kind: event === 'jobCompleted' ? 'job' : 'automation',
     event,
     targetHost: targetHost(url),
     ok: result.ok,

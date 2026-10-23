@@ -32,13 +32,9 @@ import {
   createSessionRecord,
   createTestFlightSubscription,
   deleteUserPersonalData,
-  createWatch,
-  acceptWatchBillingOwnerTransfer,
   deleteDevice,
-  deleteRole,
   deletePasskey,
   deleteBackupSnapshot,
-  deleteWatch,
   exportBackup,
   drillBackupSnapshot,
   getAuditLog,
@@ -54,19 +50,13 @@ import {
   getInsightsSummary,
   getEffectiveSettings,
   getProject,
-  getWatchHealthRollup,
   getUserEffectivePermissions,
   getRole,
   getEffectiveDevices,
   getTestFlightSubscription,
-  getWatchDispatchTargets,
-  getWatchConfigIssues,
   isSessionRecordActive,
-  isWatchSchedulable,
   listSessionsForUser,
-  markWatchScheduleRun,
   mergeUserAccounts,
-  requestWatchBillingOwnerTransfer,
   getWebhookDeliveryLog,
   importBackup,
   listAllowedUsers,
@@ -86,7 +76,6 @@ import {
   recordJobResolutionNotice,
   recordNotification,
   setJobResolutionEmailStatus,
-  recordSchedulerRunOutcome,
   revokeSessionRecord,
   revokeApiKey,
   recordWebhookDelivery,
@@ -100,8 +89,6 @@ import {
   userCanAccessProject,
   updateDevice,
   updateSettings,
-  updateSchedulerRunOutcome,
-  updateWatch,
   upsertAppCatalogEntry,
   touchSessionRecord,
   verifyApiKey,
@@ -111,8 +98,24 @@ import {
   previewJobHistoryRetention,
   simulateJobHistoryRetention,
   updateTestFlightSubscriptionDevice,
+  type AppWatch,
 } from '#store/state.js';
 import { openStateCollectionDatabase, openStateDatabase, readStateCollection, replaceStateCollection } from '#store/sqlite.js';
+
+function legacyAppWatch(overrides: Partial<AppWatch> = {}): AppWatch {
+  const now = Date.now();
+  return {
+    id: `legacy-watch-${randomUUID()}`,
+    bundleId: `com.example.legacy-watch.${randomUUID()}`,
+    repo: 'owner/repo',
+    ghWorkflowFile: 'release.yml',
+    pollCron: '0 * * * *',
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
 
 test('app catalog search updates preserve richer App Store metadata', () => {
   const bundleId = `com.example.catalog-${randomUUID()}`;
@@ -588,6 +591,15 @@ describe('Discord role perks', () => {
 });
 
 describe('exportBackup / importBackup', () => {
+  test('restoring legacy app watches preserves them as disabled compatibility records', () => {
+    const watch = legacyAppWatch();
+    const backup = exportBackup();
+    backup.watches = [watch];
+
+    expect(importBackup(backup, 'tester').ok).toBe(true);
+    expect(exportBackup().watches.find((entry) => entry.id === watch.id)).toMatchObject({ enabled: false });
+  });
+
   test('round-trips public TestFlight subscriptions with per-device state', () => {
     const userId = `testflight-${randomUUID()}`;
     const subscription = createTestFlightSubscription({
@@ -686,17 +698,8 @@ describe('exportBackup / importBackup', () => {
   });
 
   test('rejects backup watches with invalid recurring quiet hours', () => {
-    const watch = createWatch({
-      bundleId: `com.example.backup-window.${randomUUID()}`,
-      repo: 'owner/repo',
-      ghWorkflowFile: 'release.yml',
-      pollCron: '0 * * * *',
-      maintenanceWindow: { start: '22:00', end: '06:00' },
-    }, 'tester').watch!;
     const backup = exportBackup();
-    backup.watches = backup.watches.map((entry) => entry.id === watch.id
-      ? { ...entry, maintenanceWindow: { start: '22:00', end: '22:00' } }
-      : entry);
+    backup.watches = [legacyAppWatch({ maintenanceWindow: { start: '22:00', end: '22:00' } })];
 
     const result = importBackup(backup, 'tester');
 
@@ -705,53 +708,13 @@ describe('exportBackup / importBackup', () => {
   });
 
   test('rejects backup watches with an unsupported missed-run policy', () => {
-    const watch = createWatch({
-      bundleId: `com.example.backup-policy.${randomUUID()}`,
-      repo: 'owner/repo',
-      ghWorkflowFile: 'release.yml',
-      pollCron: '0 * * * *',
-    }, 'tester').watch!;
     const backup = exportBackup();
-    backup.watches = backup.watches.map((entry) => entry.id === watch.id
-      ? { ...entry, missedRunPolicy: 'replayAll' as unknown as 'skip' }
-      : entry);
+    backup.watches = [legacyAppWatch({ missedRunPolicy: 'replayAll' as unknown as 'skip' })];
 
     const result = importBackup(backup, 'tester');
 
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/watches/);
-  });
-
-  test('persists schedule checkpoints and resets them when enabling run-once recovery', () => {
-    const watch = createWatch({
-      bundleId: `com.example.schedule-checkpoint.${randomUUID()}`,
-      repo: 'owner/repo',
-      ghWorkflowFile: 'release.yml',
-      pollCron: '0 * * * *',
-    }, 'tester').watch!;
-
-    expect(markWatchScheduleRun(watch.id, 100)).toBe(true);
-    const updated = updateWatch(watch.id, { missedRunPolicy: 'runOnce' }, 'tester').watch!;
-    const backup = exportBackup();
-
-    expect(updated.missedRunPolicy).toBe('runOnce');
-    expect(updated.lastScheduledAt).toBeGreaterThan(100);
-    expect(backup.watches).toContainEqual(expect.objectContaining({ id: watch.id, missedRunPolicy: 'runOnce', lastScheduledAt: updated.lastScheduledAt }));
-  });
-
-  test('resets missed-run recovery checkpoint when the schedule changes', () => {
-    const watch = createWatch({
-      bundleId: `com.example.schedule-change.${randomUUID()}`,
-      repo: 'owner/repo',
-      ghWorkflowFile: 'release.yml',
-      pollCron: '0 * * * *',
-      missedRunPolicy: 'runOnce',
-    }, 'tester').watch!;
-
-    expect(markWatchScheduleRun(watch.id, 100)).toBe(true);
-    const updated = updateWatch(watch.id, { pollCron: '15 * * * *' }, 'tester').watch!;
-
-    expect(updated.lastScheduledAt).toBeGreaterThan(100);
   });
 
   test('preserves project records referenced by persisted jobs during backup import', () => {
@@ -1102,157 +1065,6 @@ describe('paid dashboard entitlement', () => {
   });
 });
 
-describe('getWatchConfigIssues', () => {
-  test('reports nothing for a fully unconfigured watch', () => {
-    expect(getWatchConfigIssues({ id: 'x', bundleId: '', repo: '', ghWorkflowFile: '', pollCron: '', enabled: true, createdAt: 0, updatedAt: 0 })).toEqual([]);
-  });
-
-  test('flags a partially-filled watch as a likely mistake', () => {
-    const { watch } = createWatch({ bundleId: 'com.example.app', repo: '', ghWorkflowFile: '', pollCron: '0 * * * *' }, 'tester');
-    const issues = getWatchConfigIssues(watch!);
-    expect(issues.length).toBe(2);
-    expect(issues.some((issue) => /partially configured/.test(issue))).toBe(true);
-    expect(issues.some((issue) => /repo/.test(issue))).toBe(true);
-    expect(issues.some((issue) => /billing owner no longer has decrypt access/.test(issue))).toBe(true);
-  });
-
-  test('flags a missing GH_TOKEN once the repo is set', () => {
-
-    const { watch } = createWatch({ bundleId: 'com.example.app2', repo: 'me/app', ghWorkflowFile: '', pollCron: '0 * * * *' }, 'tester');
-    const issues = getWatchConfigIssues(watch!);
-    expect(issues.some((i) => i.includes('GH_TOKEN'))).toBe(true);
-  });
-
-  test('requires a train when the TestFlight train policy is selected', () => {
-    const { watch } = createWatch(
-      { bundleId: 'com.example.train', repo: 'me/app', ghWorkflowFile: '', pollCron: '0 * * * *', testFlightPolicy: 'train' },
-      'tester',
-    );
-    expect(getWatchConfigIssues(watch!).some((issue) => issue.includes('TestFlight train'))).toBe(true);
-    deleteWatch(watch!.id, 'tester');
-  });
-});
-
-describe('watch CRUD', () => {
-
-  test('watch billing ownership transfers only after an eligible recipient accepts', () => {
-    const suffix = randomUUID();
-    const username = `watch-owner-${suffix}`;
-    const role = createRole({ name: `watch-owner-role-${suffix}`, color: '#123456', permissions: serializeBits(PermissionFlag.requestDecrypt | PermissionFlag.viewAutomation) }, 'tester');
-    addAllowedUser(username, [role.id], 'tester');
-    const created = createWatch({ bundleId: `com.example.owner.${suffix}`, repo: 'owner/app', ghWorkflowFile: 'update.yml', pollCron: '0 * * * *', enabled: false }, 'root');
-
-    try {
-      const requested = requestWatchBillingOwnerTransfer(created.watch!.id, username, 'root');
-      expect(requested).toMatchObject({ ok: true, watch: { billingOwnerId: 'root', billingOwnerTransfer: { userId: username } } });
-      expect(acceptWatchBillingOwnerTransfer(created.watch!.id, 'another-user')).toMatchObject({ ok: false });
-      const accepted = acceptWatchBillingOwnerTransfer(created.watch!.id, username);
-      expect(accepted).toMatchObject({ ok: true, watch: { billingOwnerId: username } });
-      expect(accepted?.watch?.billingOwnerTransfer).toBeUndefined();
-    } finally {
-      deleteWatch(created.watch!.id, 'tester');
-      deleteUserPersonalData(username);
-      deleteRole(role.id, 'tester');
-    }
-  });
-
-  test('persists complete watch records through the typed SQLite repository', () => {
-    const bundleId = `com.example.watch.repository-${randomUUID()}`;
-    const created = createWatch({
-      bundleId,
-      repo: 'owner/app',
-      ghWorkflowFile: 'update.yml',
-      pollCron: '0 */6 * * *',
-      timezone: 'Europe/Berlin',
-      maintenanceWindow: { start: '23:00', end: '06:00' },
-      missedRunPolicy: 'runOnce',
-    }, 'tester');
-    const database = openStateDatabase({ stateDir: config.stateDir, filename: config.stateDatabaseFile });
-
-    try {
-      expect(readStateCollection(database.db, 'watches')).toContainEqual(created.watch);
-
-      const updated = updateWatch(created.watch!.id, {
-        dispatchTargets: [{ repo: 'owner/release', ghWorkflowFile: 'release.yml', mode: 'workflow_dispatch', ref: 'stable', inputs: { build: 'latest' } }],
-      }, 'tester');
-
-      expect(readStateCollection(database.db, 'watches')).toContainEqual(updated.watch);
-    } finally {
-      database.close();
-      deleteWatch(created.watch!.id, 'tester');
-    }
-  });
-
-  test('keeps unique dispatch destinations for one watch', () => {
-    const targets = getWatchDispatchTargets({
-      repo: 'owner/legacy',
-      ghWorkflowFile: 'legacy.yml',
-      dispatchTargets: [
-        { repo: 'owner/one', ghWorkflowFile: 'dispatch.yml' },
-        { repo: 'owner/two', ghWorkflowFile: 'publish.yml' },
-        { repo: 'owner/one', ghWorkflowFile: 'dispatch.yml' },
-      ],
-    });
-    expect(targets).toEqual([
-      { repo: 'owner/one', ghWorkflowFile: 'dispatch.yml' },
-      { repo: 'owner/two', ghWorkflowFile: 'publish.yml' },
-    ]);
-  });
-
-  test('rejects a second enabled watch targeting the same bundle ID', () => {
-    const first = createWatch({ bundleId: 'com.example.collide', repo: 'me/app', ghWorkflowFile: '', pollCron: '0 * * * *' }, 'tester');
-    expect(first.ok).toBe(true);
-
-    const second = createWatch({ bundleId: 'com.example.collide', repo: 'me/app2', ghWorkflowFile: '', pollCron: '0 * * * *' }, 'tester');
-    expect(second.ok).toBe(false);
-    expect(second.error).toMatch(/already targets/);
-
-    const disabled = createWatch(
-      { bundleId: 'com.example.collide', repo: 'me/app3', ghWorkflowFile: '', pollCron: '0 * * * *', enabled: false },
-      'tester',
-    );
-    expect(disabled.ok).toBe(true);
-
-    deleteWatch(first.watch!.id, 'tester');
-    deleteWatch(disabled.watch!.id, 'tester');
-  });
-
-  test('updateWatch still enforces the collision rule against other enabled watches', () => {
-    const a = createWatch({ bundleId: 'com.example.a', repo: '', ghWorkflowFile: '', pollCron: '0 * * * *' }, 'tester');
-    const b = createWatch({ bundleId: 'com.example.b', repo: '', ghWorkflowFile: '', pollCron: '0 * * * *' }, 'tester');
-    expect(a.ok && b.ok).toBe(true);
-
-    const result = updateWatch(b.watch!.id, { bundleId: 'com.example.a' }, 'tester');
-    expect(result.ok).toBe(false);
-
-    deleteWatch(a.watch!.id, 'tester');
-    deleteWatch(b.watch!.id, 'tester');
-  });
-
-  test('scopes watch uniqueness and scheduled jobs to an active project', () => {
-    const projectA = createProject({ name: `Watch project A ${randomUUID()}` }, 'root').project!;
-    const projectB = createProject({ name: `Watch project B ${randomUUID()}` }, 'root').project!;
-    const bundleId = `com.example.project-watch.${randomUUID()}`;
-    const watchA = createWatch({ projectId: projectA.id, bundleId, repo: 'me/app-a', ghWorkflowFile: 'deploy.yml', pollCron: '0 * * * *' }, 'root');
-    const watchB = createWatch({ projectId: projectB.id, bundleId, repo: 'me/app-b', ghWorkflowFile: 'deploy.yml', pollCron: '0 * * * *' }, 'root');
-    const duplicateA = createWatch({ projectId: projectA.id, bundleId, repo: 'me/app-c', ghWorkflowFile: 'deploy.yml', pollCron: '0 * * * *' }, 'root');
-
-    expect(watchA.ok && watchB.ok).toBe(true);
-    expect(watchA.watch?.projectId).toBe(projectA.id);
-    expect(watchB.watch?.projectId).toBe(projectB.id);
-    expect(duplicateA.ok).toBe(false);
-
-    updateProject(projectA.id, { archived: true }, 'root');
-    expect(isWatchSchedulable(watchA.watch!)).toBe(false);
-    expect(getWatchConfigIssues(watchA.watch!)).toContain('The assigned project is unavailable; restore it or choose an active project.');
-    expect(createWatch({ projectId: projectA.id, bundleId: `${bundleId}.archived`, repo: 'me/app-d', ghWorkflowFile: 'deploy.yml', pollCron: '0 * * * *' }, 'root').ok).toBe(false);
-
-    updateProject(projectA.id, { archived: false }, 'root');
-    deleteWatch(watchA.watch!.id, 'root');
-    deleteWatch(watchB.watch!.id, 'root');
-  });
-});
-
 describe('device CRUD primary invariant', () => {
   test('device updates audit safe structured changes without recording connection identifiers', () => {
     const actor = `device-audit-${randomUUID()}`;
@@ -1380,61 +1192,6 @@ test('backup schedule mutations persist through the typed SQLite collection', ()
   } finally {
     database.close();
     setBackupSchedule(previousSchedule, 'repository-test');
-  }
-});
-
-test('scheduler outcome updates persist through the typed SQLite repository', () => {
-  const entryId = recordSchedulerRunOutcome({
-    watchId: 'typed-repository-watch',
-    bundleId: `com.example.scheduler.repository-${randomUUID()}`,
-    appStore: { ok: true, triggered: true, reason: 'dispatch requested', destinationFailureSummary: 'owner/failing: lookup timeout' },
-    testflight: { ok: false, triggered: false, reason: 'device agent unavailable', failureClass: 'device_transport', retryable: true },
-  });
-  const database = openStateDatabase({ stateDir: config.stateDir, filename: config.stateDatabaseFile });
-
-  try {
-    expect(readStateCollection(database.db, 'scheduler_runs')).toContainEqual(expect.objectContaining({ id: entryId }));
-    updateSchedulerRunOutcome(entryId, 'appStore', { reason: 'workflow completed', runStatus: 'succeeded', failureSummary: 'Build: dependency compile' });
-    expect(readStateCollection(database.db, 'scheduler_runs')).toContainEqual(expect.objectContaining({
-      id: entryId,
-      appStore: expect.objectContaining({
-        reason: 'workflow completed',
-        runStatus: 'succeeded',
-        failureSummary: 'Build: dependency compile',
-        destinationFailureSummary: 'owner/failing: lookup timeout',
-      }),
-      testflight: expect.objectContaining({ failureClass: 'device_transport', retryable: true }),
-    }));
-  } finally {
-    database.close();
-  }
-});
-
-test('watch health counts completed downstream workflow failures', () => {
-  const bundleId = `com.example.scheduler.health.${randomUUID()}`;
-  const watch = createWatch({
-    bundleId,
-    repo: 'owner/repo',
-    ghWorkflowFile: 'release.yml',
-    pollCron: '0 * * * *',
-    enabled: false,
-  }, 'tester').watch!;
-
-  try {
-    const entryId = recordSchedulerRunOutcome({
-      watchId: watch.id,
-      bundleId,
-      appStore: { ok: true, triggered: false, reason: 'no new App Store version' },
-      testflight: { ok: true, triggered: true, runStatus: 'dispatched', reason: 'workflow dispatched' },
-    });
-    updateSchedulerRunOutcome(entryId, 'testflight', { runStatus: 'failed', reason: 'workflow failed' });
-
-    expect(getWatchHealthRollup().find((entry) => entry.watchId === watch.id)).toMatchObject({
-      lastCheckOk: false,
-      consecutiveFailures: 1,
-    });
-  } finally {
-    deleteWatch(watch.id, 'tester');
   }
 });
 

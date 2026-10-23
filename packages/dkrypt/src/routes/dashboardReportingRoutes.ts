@@ -15,12 +15,8 @@ import {
   getAllJobHistory,
   getAppCatalogStats,
   getEffectiveDevices,
-  getEffectiveWatches,
   getInsightsSummary,
-  getSchedulerRunHistory,
   getStateDatabaseStatus,
-  getWatchDispatchTargets,
-  getWatchHealthRollup,
   getWebhookDeliveryLog,
   verifyLatestDatabaseBackup,
 } from '#store/state.js';
@@ -38,10 +34,6 @@ interface DashboardReportingServices {
   verifyLatestDatabaseBackup: typeof verifyLatestDatabaseBackup;
   getAppCatalogStats: typeof getAppCatalogStats;
   getEffectiveDevices: typeof getEffectiveDevices;
-  getEffectiveWatches: typeof getEffectiveWatches;
-  getWatchDispatchTargets: typeof getWatchDispatchTargets;
-  getWatchHealthRollup: typeof getWatchHealthRollup;
-  getSchedulerRunHistory: typeof getSchedulerRunHistory;
   getRecentLogs: typeof getRecentLogs;
   logBelongsToProject: typeof logBelongsToProject;
 }
@@ -57,10 +49,6 @@ const defaultServices: DashboardReportingServices = {
   verifyLatestDatabaseBackup,
   getAppCatalogStats,
   getEffectiveDevices,
-  getEffectiveWatches,
-  getWatchDispatchTargets,
-  getWatchHealthRollup,
-  getSchedulerRunHistory,
   getRecentLogs,
   logBelongsToProject,
 };
@@ -78,7 +66,7 @@ function projectAccessError(session: Session, projectId: string, requestId: stri
 
 export function createDashboardReportingRoutes(overrides: Partial<DashboardReportingServices> = {}): FastifyPluginAsyncTypebox {
   const services = { ...defaultServices, ...overrides };
-  const canViewScheduler = fastifyRequirePermission(PermissionFlag.viewAutomation, PermissionFlag.manageAutomation);
+  const canViewAutomation = fastifyRequirePermission(PermissionFlag.viewAutomation, PermissionFlag.manageAutomation);
 
   return async (server) => {
     server.addHook('preHandler', fastifyRequireSession);
@@ -100,7 +88,7 @@ export function createDashboardReportingRoutes(overrides: Partial<DashboardRepor
 
     server.get<DashboardFailurePatternsRoute>('/v1/dashboard/failure-patterns', {
       schema: getRouteContract('GET', '/v1/dashboard/failure-patterns'),
-      preHandler: canViewScheduler,
+      preHandler: canViewAutomation,
     }, (request, reply) => {
       const session = getFastifySession(request)!;
       const projectId = request.query.projectId ?? DEFAULT_PROJECT_ID;
@@ -132,7 +120,7 @@ export function createDashboardReportingRoutes(overrides: Partial<DashboardRepor
 
     server.get<DashboardStorageForecastRoute>('/v1/dashboard/storage-forecast', {
       schema: getRouteContract('GET', '/v1/dashboard/storage-forecast'),
-      preHandler: canViewScheduler,
+      preHandler: canViewAutomation,
     }, (request, reply) => {
       const session = getFastifySession(request)!;
       const projectId = request.query.projectId ?? DEFAULT_PROJECT_ID;
@@ -181,9 +169,6 @@ export function createDashboardReportingRoutes(overrides: Partial<DashboardRepor
         if (!value || typeof value !== 'object') return value;
         return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, /authorization|token|secret|password|private.?key|cookie|credential|api.?key/i.test(key) ? '[redacted]' : redactSensitiveData(entry)]));
       };
-      const watches = services.getEffectiveWatches().filter((watch) => (watch.projectId ?? DEFAULT_PROJECT_ID) === projectId);
-      const watchIds = new Set(watches.map((watch) => watch.id));
-      const bundleIds = new Set(watches.map((watch) => watch.bundleId));
       const jobs = services.getAllJobHistory()
         .filter((entry) => (entry.projectId ?? DEFAULT_PROJECT_ID) === projectId)
         .slice(0, 100)
@@ -224,7 +209,6 @@ export function createDashboardReportingRoutes(overrides: Partial<DashboardRepor
         ...jobs.flatMap((job) => typeof job.correlationId === 'string' ? [job.correlationId] : []),
         ...logs.flatMap((entry) => typeof entry.meta?.correlationId === 'string' ? [entry.meta.correlationId] : []),
       ])];
-      const schedulerRuns = services.getSchedulerRunHistory(50).filter((run) => run.watchId ? watchIds.has(run.watchId) : Boolean(run.bundleId && bundleIds.has(run.bundleId)));
       reply.header('Content-Disposition', 'attachment; filename="dkrypt-support-bundle.json"');
       return {
         generatedAt: new Date().toISOString(),
@@ -234,9 +218,6 @@ export function createDashboardReportingRoutes(overrides: Partial<DashboardRepor
         disk: services.getDiskUsage(services.artifactDir),
         catalog: services.getAppCatalogStats(),
         devices: services.getEffectiveDevices().map(({ id, name, enabled, isPrimary }) => ({ id, name, enabled, isPrimary })),
-        watches: watches.map((watch) => ({ bundleId: watch.bundleId, enabled: watch.enabled, pollCron: watch.pollCron, destinations: services.getWatchDispatchTargets(watch).length })),
-        watchHealth: services.getWatchHealthRollup().filter((health) => watchIds.has(health.watchId)),
-        schedulerRuns: schedulerRuns.map((run) => ({ ...run, appStore: { ...run.appStore, reason: redactSensitiveText(run.appStore.reason) ?? '' }, testflight: { ...run.testflight, reason: redactSensitiveText(run.testflight.reason) ?? '' } })),
         logs: logs.map((entry) => ({ ...entry, message: redactSensitiveText(entry.message) ?? entry.message, meta: entry.meta ? redactSensitiveData(entry.meta) as Record<string, unknown> : undefined })),
         jobs,
         transportTimeline,

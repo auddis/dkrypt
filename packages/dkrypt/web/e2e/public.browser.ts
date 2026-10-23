@@ -362,7 +362,6 @@ test('status page renders an operational service and remains keyboard accessible
         components: {
           service: { state: 'operational' },
           automation: { state: 'operational' },
-          scheduler: { state: 'operational' },
         },
       }),
     });
@@ -373,6 +372,7 @@ test('status page renders an operational service and remains keyboard accessible
   await expect(page.getByRole('heading', { name: 'All systems operational' })).toBeVisible();
   await expect(page.getByText('Build abcdef0', { exact: true })).toBeVisible();
   await expect(page.getByText('Device automation', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Scheduler' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Pricing' }).first()).toHaveAttribute('href', '/pricing');
 
   await page.keyboard.press('Tab');
@@ -744,14 +744,10 @@ test('regular members see operational Status details without device controls', a
   await page.unroute('**/v1/dashboard/overview*');
   await page.route('**/v1/dashboard/overview*', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
-      schedulerEnabled: true,
       settings: {},
-      watches: [],
-      statusWatches: [{ id: 'watch-discord', bundleId: 'com.hammerandchisel.discord', schedulable: true, nextRunAt: Date.now() + 3600_000 }],
       devices: [],
       statusDevices: [{ id: 'device-1', name: 'Lab iPad', enabled: true, isPrimary: true, reachable: true }],
       deviceStatus: { configured: 1, enabled: 1, online: 1, ready: 1, attention: 0, checking: 0, unavailable: 0 },
-      schedulerRunHistory: [{ id: 'run-1', ts: Date.now() - 60_000, watchId: 'watch-discord', bundleId: 'com.hammerandchisel.discord', appStore: { ok: true, triggered: false, reason: 'Current' }, testflight: { ok: true, triggered: false, reason: 'Current' } }],
       disk: { totalBytes: 1000, freeBytes: 800, usedBytes: 200, usedPercent: 0.2 },
       maintenance: { active: false, manual: false, auto: false },
       activeJobs: [],
@@ -773,16 +769,45 @@ test('regular members see operational Status details without device controls', a
   await page.goto('/?tab=home');
   await page.getByRole('button', { name: 'Open status drawer' }).click();
   const status = page.locator('.status-surface:visible').first();
-  await expect(status.getByText('Scheduler on')).toBeVisible();
+  await expect(status.getByText('Scheduler on')).toHaveCount(0);
   await expect(status.getByText('Device online')).toBeVisible();
   await expect(status.getByText('83%')).toBeVisible();
   await expect(status.getByText('Device reachability · last 24h')).toBeVisible();
-  await expect(status.getByText('Recent scheduler checks')).toBeVisible();
+  await expect(status.getByText('Recent scheduler checks')).toHaveCount(0);
   await expect(status.getByText('Staging disk')).toBeVisible();
   await expect(status.getByRole('button', { name: 'Refresh device status' })).toHaveCount(0);
   await expect(status.getByRole('button', { name: /Copy debug info/ })).toHaveCount(0);
   await status.getByRole('button', { name: 'Internet' }).click();
   await expect(page.getByText('192.0.2.44')).toBeVisible();
+});
+
+test('device ready status expires when its health sample becomes stale', async ({ page }) => {
+  const statusNow = Date.now();
+  await page.clock.install({ time: statusNow });
+  await mockAuthenticatedDashboard(page, '0');
+  await mockStableDashboardEvents(page);
+  await page.unroute('**/v1/dashboard/overview*');
+  await page.route('**/v1/dashboard/overview*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      settings: {},
+      devices: [],
+      statusDevices: [{ id: 'device-1', name: 'Lab iPad', enabled: true, isPrimary: true, reachable: true }],
+      deviceStatus: { configured: 1, enabled: 1, online: 1, ready: 1, attention: 0, checking: 0, unavailable: 0, freshUntil: statusNow + 10_000 },
+      disk: { totalBytes: 1000, freeBytes: 800, usedBytes: 200, usedPercent: 0.2 },
+      maintenance: { active: false, manual: false, auto: false },
+      activeJobs: [],
+    }) });
+  });
+  await page.route('**/v1/dashboard/devices/primary/health', async (route) => {
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'health unavailable' }) });
+  });
+
+  await page.goto('/?tab=home');
+  await page.getByRole('button', { name: 'Open status drawer' }).click();
+  const status = page.locator('.status-surface:visible').first();
+  await expect(status.getByText('1 device ready')).toBeVisible();
+  await page.clock.fastForward(15_000);
+  await expect(status.getByText('Device status outdated')).toBeVisible();
 });
 
 test('live updates suspend while hidden and refresh immediately when visible again', async ({ page }) => {
@@ -1687,7 +1712,7 @@ test('automation managers can inspect queue objective breaches in Insights', asy
         successRate: 0,
         totalSizeBytes: 0,
         manualCount: 0,
-        schedulerCount: 0,
+        systemCount: 0,
         topApps: [],
         trend: [],
         failureBreakdown: [],
@@ -1723,9 +1748,6 @@ test('automation managers can inspect queue objective breaches in Insights', asy
   });
   await page.route('**/v1/dashboard/storage-forecast*', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ freeBytes: 0, bytesPerDay: 0, daysRemaining: null, sampleCount: 0 }) });
-  });
-  await page.route('**/v1/dashboard/watches/health*', async (route) => {
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ watches: [] }) });
   });
 
   await page.goto('/');
@@ -2021,133 +2043,6 @@ test('pricing plan checkout actions share a bottom baseline', async ({ page }) =
       expect(row.every((card) => Math.abs(card.buttonWidth - card.paymentDetailsWidth) <= 2)).toBe(true);
     }
   }
-});
-
-test('scheduler watch time zone selection is searchable and defaults to the browser zone', async ({ page }) => {
-  await mockStableDashboardEvents(page);
-  await mockAuthenticatedDashboard(page, '1');
-
-  await page.goto('/?tab=settings&stab=scheduler');
-  await page.evaluate(() => localStorage.setItem('dkrypt-form-draft:watch:member:new', JSON.stringify({ savedAt: Date.now(), values: { editingWatchId: null, watchForm: { bundleId: 'com.example.test', repo: 'example/repo', ghWorkflowFile: 'remote-ipa-update.yml', dispatchTargets: [{ repo: 'example/repo', ghWorkflowFile: 'remote-ipa-update.yml' }] }, maintenanceWindowStart: '', maintenanceWindowEnd: '', dispatchTargets: [{ repo: 'example/repo', ghWorkflowFile: 'remote-ipa-update.yml' }] } })));
-  await page.getByRole('button', { name: 'Add watch', exact: true }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-
-  const timezone = page.getByRole('combobox', { name: 'Schedule time zone' });
-  const browserTimezone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
-  await expect(timezone).toHaveValue(browserTimezone);
-  await timezone.fill('Europe/Berlin');
-  await page.getByRole('option', { name: 'Europe/Berlin', exact: true }).click();
-  await expect(timezone).toHaveValue('Europe/Berlin');
-  await page.getByRole('button', { name: 'Hourly · quiet 22–06' }).click();
-  await expect(page.locator('#w-maintenance-start')).toHaveValue('22:00');
-  await expect(page.locator('#w-maintenance-end')).toHaveValue('06:00');
-  const missedRunPolicy = page.getByRole('button', { name: 'Missed checks' });
-  await expect(missedRunPolicy).toContainText('Skip missed checks');
-  await missedRunPolicy.click();
-  await page.getByRole('option', { name: 'Run one check after restart' }).click();
-  await expect(missedRunPolicy).toContainText('Run one check after restart');
-  await expectAccessible(page);
-});
-
-test('watch drafts recover after reload without persisting webhook secrets', async ({ page }) => {
-  await mockStableDashboardEvents(page);
-  await mockAuthenticatedDashboard(page, '1');
-
-  await page.goto('/?tab=settings&stab=scheduler');
-  await page.evaluate(() => localStorage.setItem('dkrypt-form-draft:watch:member:new', JSON.stringify({ savedAt: Date.now(), values: { editingWatchId: null, watchForm: { bundleId: 'com.example.test', repo: 'example/repo', ghWorkflowFile: 'remote-ipa-update.yml', dispatchTargets: [{ repo: 'example/repo', ghWorkflowFile: 'remote-ipa-update.yml' }] }, maintenanceWindowStart: '', maintenanceWindowEnd: '', dispatchTargets: [{ repo: 'example/repo', ghWorkflowFile: 'remote-ipa-update.yml' }] } })));
-  await page.getByRole('button', { name: 'Add watch', exact: true }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.locator('#w-pollCron').fill('15 */4 * * *');
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.locator('#w-webhookUrl').fill('https://hooks.example.test/private-token');
-
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('dkrypt-form-draft:watch:member:new'))).toBeTruthy();
-  const savedDraft = await page.evaluate(() => localStorage.getItem('dkrypt-form-draft:watch:member:new'));
-  expect(savedDraft).toContain('15 */4 * * *');
-  expect(savedDraft).not.toContain('private-token');
-
-  await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Close form', exact: true }).click();
-  await page.reload();
-  await page.getByRole('button', { name: 'Add watch', exact: true }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-
-  await expect(page.locator('#w-pollCron')).toHaveValue('15 */4 * * *');
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page.locator('#w-webhookUrl')).toHaveValue('');
-});
-
-test('watch editor keeps invalid values and focuses its error field', async ({ page }) => {
-  await mockStableDashboardEvents(page);
-  await mockAuthenticatedDashboard(page, '1');
-
-  await page.goto('/?tab=settings&stab=scheduler');
-  await page.evaluate(() => localStorage.setItem('dkrypt-form-draft:watch:member:new', JSON.stringify({ savedAt: Date.now(), values: { editingWatchId: null, watchForm: { bundleId: 'com.example.test', repo: 'example/repo', ghWorkflowFile: 'remote-ipa-update.yml', dispatchTargets: [{ repo: 'example/repo', ghWorkflowFile: 'remote-ipa-update.yml' }] }, maintenanceWindowStart: '', maintenanceWindowEnd: '', dispatchTargets: [{ repo: 'example/repo', ghWorkflowFile: 'remote-ipa-update.yml' }] } })));
-  await page.getByRole('button', { name: 'Add watch', exact: true }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.locator('#w-webhookUrl').fill('not-a-url');
-  await page.getByRole('button', { name: 'Create watch' }).click();
-  await expect(page.getByRole('alert')).toContainText('Fix the invalid fields before saving');
-  await expect(page.locator('#w-webhookUrl')).toBeFocused();
-  await expect(page.locator('#w-webhookUrl')).toHaveValue('not-a-url');
-});
-
-test('scheduler calendar preview labels checks deferred by quiet hours', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('formattingLocale', 'de'));
-  await mockStableDashboardEvents(page);
-  await mockAuthenticatedDashboard(page, '1');
-  await page.route('**/v1/dashboard/me/prefs', async (route) => {
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ formattingLocale: 'de', theme: 'dark', accent: 'violet' }) });
-  });
-  await page.route('**/v1/dashboard/overview*', async (route) => {
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        schedulerEnabled: false,
-        settings: {},
-        watches: [{ id: 'watch-quiet', bundleId: 'com.example.quiet', repo: 'example/repo', ghWorkflowFile: 'dispatch.yml', pollCron: '0 * * * *', timezone: 'America/Los_Angeles', enabled: true, createdAt: 1, updatedAt: 1, schedulable: true, configIssues: [] }],
-        devices: [],
-        schedulerRunHistory: [],
-        disk: { totalBytes: 1, freeBytes: 1, usedBytes: 0, usedPercent: 0 },
-        isPaidPlan: false,
-        maintenance: { active: false, manual: false, auto: false },
-        activeJobs: [],
-      }),
-    });
-  });
-  const scheduledAt = Date.parse('2026-10-25T09:00:00.000Z');
-  await page.route('**/v1/dashboard/watches/calendar*', async (route) => {
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        fromAt: Date.parse('2026-10-25T08:00:00.000Z'),
-        untilAt: Date.parse('2026-10-26T08:00:00.000Z'),
-        runs: [{ watchId: 'watch-quiet', bundleId: 'com.example.quiet', at: scheduledAt, deferred: true }],
-        truncated: false,
-      }),
-    });
-  });
-
-  await page.goto('/?tab=settings&stab=scheduler');
-  await page.getByRole('button', { name: 'Preview next 24 hours' }).click();
-  await expect(page.getByRole('heading', { name: 'Next 24 hours' })).toBeVisible();
-  await expect(page.getByText('After quiet hours')).toBeVisible();
-  await expect(page.getByText('com.example.quiet').first()).toBeVisible();
-  const expectedScheduleTime = await page.evaluate((at) => new Intl.DateTimeFormat('de-DE', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: 'America/Los_Angeles',
-  }).format(new Date(at)), scheduledAt);
-  await expect(page.getByRole('main').locator('time')).toContainText(`${expectedScheduleTime} · America/Los_Angeles`);
-  await expectAccessible(page, 'main div.max-h-64.divide-border');
 });
 
 test('settings panels load on first visit and remain mounted after revisiting', async ({ page }) => {
@@ -2531,6 +2426,48 @@ test('device managers can run on-demand service health checks', async ({ page })
   await expect(page.getByRole('region', { name: 'Self-hosting browser check' })).toContainText('PUBLIC_BASE_URL matches this browser.');
   await expect(page.getByRole('region', { name: 'Self-hosting browser check' })).toContainText('Confirm the provider dashboard has this exact callback URL');
   await expectAccessible(page);
+});
+
+test('Apple Account save submits its form and shows the saved state', async ({ page }) => {
+  await mockAuthenticatedDashboard(page, '1');
+  const status = {
+    enabled: false,
+    ready: false,
+    downloaderAvailable: false,
+    decryptorAvailable: false,
+    terminalAvailable: false,
+    fairPlayAuthorized: false,
+    vault: { encryptionReady: true, accountConfigured: false, credentialConfigured: false },
+    blockers: ['Apple Account credentials are not configured'],
+    credentialRetrieval: { state: 'idle' },
+  };
+  await page.route('**/v1/dashboard/appstore-offline/status', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(status) });
+  });
+  await page.route('**/v1/dashboard/devices*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ devices: [] }) });
+  });
+  let saveRequests = 0;
+  await page.route('**/v1/dashboard/appstore-offline/account', async (route) => {
+    if (route.request().method() !== 'PUT') return route.fulfill({ status: 404 });
+    saveRequests += 1;
+    const submitted = route.request().postDataJSON() as { appleId: string; password: string };
+    expect(submitted.appleId).toBe('apple@example.test');
+    expect(submitted.password).toBe('test-only-password');
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ...status, vault: { ...status.vault, accountConfigured: true, accountHint: 'configured' }, blockers: [] }),
+    });
+  });
+
+  await page.goto('/?tab=settings&stab=doctor');
+  await page.getByLabel('Apple Account email').fill('apple@example.test');
+  await page.getByLabel('Password', { exact: true }).fill('test-only-password');
+  await page.getByRole('button', { name: 'Save account' }).click();
+
+  await expect(page.locator('[role="status"]').filter({ hasText: 'Apple Account details were encrypted and saved.' })).toBeVisible();
+  await expect.poll(() => saveRequests).toBe(1);
+  await expect(page.getByLabel('Password', { exact: true })).toHaveValue('');
 });
 
 test('device managers without automation permission cannot download support bundles', async ({ page }) => {
@@ -3091,7 +3028,7 @@ test('populated device management and preflight dialog meet accessibility checks
 
   await page.getByRole('button', { name: 'Preflight' }).click();
   await expect(page.getByText('Device preflight')).toBeVisible();
-  await expect(page.getByText('ready for automation')).toBeVisible();
+  await expect(page.getByText('ready for decrypts')).toBeVisible();
   await expectAccessible(page);
 });
 

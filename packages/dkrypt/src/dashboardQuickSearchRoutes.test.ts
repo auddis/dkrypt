@@ -60,7 +60,6 @@ test('quick search is session-only, bounded, cached, and project-scoped', async 
     getActiveJobs: () => [],
     listArtifacts: () => ({ artifacts: [], total: 0, totalBytes: 0, maxBytes: 1 }),
     getEffectiveDevices: () => [],
-    listWatches: () => [],
     listAuthProfiles: () => [],
     listAllowedUsers: () => [],
   }));
@@ -109,7 +108,6 @@ test('quick search hides devices, users, and settings without their permissions'
       deviceLookups += 1;
       return [{ id: 'device-1', name: 'Example iPad', transport: 'usb', enabled: true, createdAt: 1, updatedAt: 1 }];
     },
-    listWatches: () => [],
     listAuthProfiles: () => [],
     listAllowedUsers: () => [],
   }));

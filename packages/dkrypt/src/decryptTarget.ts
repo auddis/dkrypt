@@ -1,4 +1,4 @@
-import { lookupAppMetadata } from '#scheduler/itunes.js';
+import { lookupAppMetadata } from '#appStoreMetadata.js';
 import { listAppVersions, type AppVersionEntry } from '#versions.js';
 import { compareVersions } from '#util/version.js';
 import { listBuilds, listTrains, type TFBuild } from '#testflight.js';
