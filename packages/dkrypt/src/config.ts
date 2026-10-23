@@ -102,6 +102,8 @@ export const config = {
   appStoreOfflineDecryptEnabled: optionalBool('APPSTORE_OFFLINE_DECRYPT_ENABLED', false),
   appStoreOfflineFairPlayAuthorized: optionalBool('APPSTORE_OFFLINE_FAIRPLAY_AUTHORIZED', false),
   appStoreOfflineMaxWorkers: Math.max(1, optionalInt('APPSTORE_OFFLINE_MAX_WORKERS', 1)),
+  appStoreOfflineWorkerMemoryMb: Math.min(32768, Math.max(512, optionalInt('APPSTORE_OFFLINE_WORKER_MEMORY_MB', 8192))),
+  appStoreOfflineInspectTimeoutSeconds: Math.min(3600, Math.max(1, optionalInt('APPSTORE_OFFLINE_INSPECT_TIMEOUT_SECONDS', 300))),
   appStoreOfflineDownloaderBin: optional('APPSTORE_OFFLINE_DOWNLOADER_BIN', '/usr/local/bin/ipatool'),
   appStoreOfflineDecryptorBin: optional('APPSTORE_OFFLINE_DECRYPTOR_BIN', ''),
   appStoreOfflineVaultKey: optional('APPSTORE_OFFLINE_VAULT_KEY', ''),

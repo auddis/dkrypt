@@ -10,6 +10,7 @@ import { installBuild } from '#testflight.js';
 import { getDeviceHealth, getDeviceInstallBlocker } from '#deviceHealth.js';
 import { lookupCurrentVersion, type ItunesLookupResult } from '#scheduler/itunes.js';
 import { extractIpaMetadata } from '#util/ipaMetadata.js';
+import type { ExtractedIpaMetadata } from '#util/ipaMetadata.js';
 import { classifyIpaDecryptOutput } from '#util/ipadecryptOutput.js';
 import { artifactKeyForJob, promoteArtifact } from '#artifacts.js';
 import { withIpadecrypt } from '#idevice.js';
@@ -242,7 +243,7 @@ export async function runOfflineAppStoreDecrypt(job: Job, signal?: AbortSignal):
       job.progress = 'Verifying and saving the server-decrypted IPA';
       appendJobTimelineEvent(job, 'Server-side FairPlay decryption verified', 'running');
       setExecutionStage('finalizing');
-      await finalizeDecryptedIpa(job, result.outputPath, signal, ensureNotCancelled);
+      await finalizeDecryptedIpa(job, result.outputPath, signal, ensureNotCancelled, result.metadata);
       span.end();
     } catch (error) {
       if (job.filePath?.includes('/.staging/')) await rm(job.filePath, { force: true }).catch(() => {});
@@ -260,13 +261,14 @@ async function finalizeDecryptedIpa(
   outputPath: string,
   signal: AbortSignal | undefined,
   ensureNotCancelled: () => void,
+  extractedMetadata?: ExtractedIpaMetadata,
 ): Promise<void> {
   ensureNotCancelled();
   const st = await stat(outputPath);
   job.fileSizeBytes = st.size;
 
   try {
-    const metadata = await extractIpaMetadata(outputPath);
+    const metadata = extractedMetadata ?? await extractIpaMetadata(outputPath);
     job.ipaMetadata = metadata.summary;
     job.ipaInfoPlist = metadata.infoPlist;
   } catch (err) {

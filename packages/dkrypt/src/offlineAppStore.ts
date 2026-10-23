@@ -8,7 +8,11 @@ import type { Writable } from 'node:stream';
 import { config } from '#config.js';
 import { clearAppleAccountSessionSnapshot, markAppleAccountAuthenticated, markAppleAccountAuthenticationError, readAppleAccountSecrets, readAppleAccountSessionSnapshot, saveAppleAccountSessionSnapshot, getAppleAccountVaultStatus } from '#appleAccountVault.js';
 import type { AppleAccountSecrets, AppleAccountVaultStatus } from '#appleAccountVault.js';
-import { verifyIpaFairPlayDecrypted, type FairPlayVerificationResult } from '#util/ipaFairPlay.js';
+import type { FairPlayVerificationResult } from '#util/ipaFairPlay.js';
+import type { ExtractedIpaMetadata } from '#util/ipaMetadata.js';
+import { compareVersions } from '#util/version.js';
+import { inspectIpaInIsolatedProcess } from '#jobs/ipaInspection.js';
+import { commandWithResourceLimits } from '#jobs/resourceLimits.js';
 import type { Job, JobExecutionStage } from '#jobs/types.js';
 import { throwIfAborted } from '#util/abort.js';
 import { terminateChildProcess } from '#jobs/process.js';
@@ -28,6 +32,7 @@ export interface OfflineAppStoreResult {
   outputPath: string;
   warnings: string[];
   verification: FairPlayVerificationResult;
+  metadata: ExtractedIpaMetadata;
 }
 
 export interface OfflineAppStoreProcessor {
@@ -46,7 +51,7 @@ export interface OfflineAppStoreDependencies {
   getVaultStatus(): AppleAccountVaultStatus;
   runDownload(job: Job, secrets: AppleAccountSecrets, outputPath: string, signal?: AbortSignal): Promise<void>;
   runDecrypt(job: Job, secrets: AppleAccountSecrets, inputPath: string, outputPath: string, signal?: AbortSignal): Promise<void>;
-  verify(path: string): FairPlayVerificationResult;
+  inspect(path: string, signal?: AbortSignal, onChildProcess?: (child: ChildProcess | undefined) => void): Promise<{ verification: FairPlayVerificationResult; metadata: ExtractedIpaMetadata }>;
 }
 
 export class OfflineAppStoreUnavailableError extends Error {
@@ -84,7 +89,9 @@ function runTerminalCommand(
   respond: PromptResponder,
 ): Promise<{ output: string; code: number | null }> {
   const command = [commandPath, ...args].map(shellQuote).join(' ');
-  const child = spawn(terminalPath, ['--quiet', '--return', '--echo=never', '--command', command, '/dev/null'], {
+  const terminalArgs = ['--quiet', '--return', '--echo=never', '--command', command, '/dev/null'];
+  const limited = commandWithResourceLimits(terminalPath, terminalArgs, config.appStoreOfflineWorkerMemoryMb, config.jobMaxWaitSeconds);
+  const child = spawn(limited.command, limited.args, {
     cwd: homeDirectory,
     env: {
       PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
@@ -172,6 +179,19 @@ function statusBlockers(input: {
   return blockers;
 }
 
+function verifyOfflinePackageIdentity(job: Job, metadata: ExtractedIpaMetadata): void {
+  const actualBundleId = metadata.infoPlist.CFBundleIdentifier;
+  if (actualBundleId !== job.bundleId) {
+    throw new Error(`downloaded IPA bundle identifier ${String(actualBundleId ?? 'missing')} does not match requested ${job.bundleId}`);
+  }
+  const expectedVersion = job.versionLabel?.match(/^v?(\d+(?:\.\d+)*)$/i)?.[1];
+  if (!expectedVersion) return;
+  const actualVersion = metadata.summary.shortVersion;
+  if (!actualVersion || compareVersions(actualVersion, expectedVersion) !== 0) {
+    throw new Error(`downloaded IPA version ${actualVersion ?? 'missing'} does not match requested ${expectedVersion}`);
+  }
+}
+
 export function createOfflineAppStoreProcessor(dependencies: OfflineAppStoreDependencies): OfflineAppStoreProcessor {
   const isExecutable = (filePath: string): boolean => {
     try {
@@ -224,7 +244,10 @@ export function createOfflineAppStoreProcessor(dependencies: OfflineAppStoreDepe
         setStage?.('offline_decrypting');
         await dependencies.runDecrypt(job, secrets, encryptedPath, outputPath, signal);
         throwIfAborted(signal);
-        const verification = dependencies.verify(outputPath);
+        const inspection = await dependencies.inspect(outputPath, signal, (child) => { job.childProcess = child; });
+        job.childProcess = undefined;
+        const { verification, metadata } = inspection;
+        verifyOfflinePackageIdentity(job, metadata);
         if (verification.primaryEncrypted || (verification.encryptedPaths.length > 0 && !verification.extensionOnly)) {
           throw new Error(`FairPlay verification found encrypted executable paths: ${verification.encryptedPaths.join(', ')}`);
         }
@@ -234,8 +257,9 @@ export function createOfflineAppStoreProcessor(dependencies: OfflineAppStoreDepe
         const output = await stat(outputPath);
         if (!output.isFile() || output.size <= 0 || output.size > config.artifactMaxBytes) throw new Error('decrypted IPA has an invalid size');
         await rm(encryptedPath, { force: true });
-        return { outputPath, warnings: job.warnings ?? [], verification };
+        return { outputPath, warnings: job.warnings ?? [], verification, metadata };
       } catch (error) {
+        job.childProcess = undefined;
         await Promise.all([rm(encryptedPath, { force: true }), rm(outputPath, { force: true })]);
         throw error;
       }
@@ -398,7 +422,9 @@ async function runDefaultDownload(job: Job, secrets: AppleAccountSecrets, output
 async function runDefaultDecrypt(job: Job, secrets: AppleAccountSecrets, inputPath: string, outputPath: string, signal?: AbortSignal): Promise<void> {
   const credential = Buffer.from(secrets.fairPlayCredential ?? '', 'base64');
   if (credential.length !== 16) throw new Error('stored FairPlay credential is invalid');
-  const child = spawn(config.appStoreOfflineDecryptorBin, [inputPath, outputPath, '--credential', '/proc/self/fd/3'], {
+  const decryptArgs = [inputPath, outputPath, '--credential', '/proc/self/fd/3'];
+  const limited = commandWithResourceLimits(config.appStoreOfflineDecryptorBin, decryptArgs, config.appStoreOfflineWorkerMemoryMb, config.jobMaxWaitSeconds);
+  const child = spawn(limited.command, limited.args, {
     env: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' },
     stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
@@ -491,7 +517,7 @@ export const offlineAppStoreProcessor = createOfflineAppStoreProcessor({
   getVaultStatus: getAppleAccountVaultStatus,
   runDownload: runDefaultDownload,
   runDecrypt: runDefaultDecrypt,
-  verify: verifyIpaFairPlayDecrypted,
+  inspect: (ipaPath, signal, onChildProcess) => inspectIpaInIsolatedProcess(ipaPath, signal, onChildProcess),
 });
 
 const defaultProcessor = offlineAppStoreProcessor;
