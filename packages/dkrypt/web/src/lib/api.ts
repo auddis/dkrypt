@@ -1,10 +1,11 @@
 import { markLoggedOut, type Role } from '#lib/session.svelte';
-import { apiErrorMessage } from '#lib/apiErrors.js';
+import { ApiError, apiErrorMessage } from '#lib/apiErrors.js';
 import { rateLimitState } from '#lib/rateLimit.svelte';
 import { showToast } from '#lib/ui.svelte';
 import { projectSelectionState } from '#lib/projectSelection.svelte';
 import { serverStateCache, type ServerQueryListener } from '#lib/serverStateCache.svelte';
 import { isUnauthenticatedResponse } from '#lib/apiAuthResponse.js';
+import { saveOfflineAppStoreAccountRequest } from '#lib/offlineAppStoreAccountSave.js';
 
 export type { Role };
 export { rateLimitState, type RateLimitInfo } from '#lib/rateLimit.svelte';
@@ -26,6 +27,7 @@ async function request(path: string, opts: RequestInit = {}, bucket?: string): P
       headers: { 'Content-Type': 'application/json', ...(opts.headers ?? {}) },
     });
   } catch {
+    if (opts.signal?.aborted) throw opts.signal.reason instanceof Error ? opts.signal.reason : new Error('request aborted');
     showToast("Couldn't reach the server - check your connection", 'error', { id: 'network-error', track: false });
     throw new Error('network error');
   }
@@ -45,7 +47,11 @@ export async function apiJson<T>(path: string, opts?: RequestInit, bucket?: stri
   } catch {
     throw new Error('invalid response from server');
   }
-  if (!res.ok) throw new Error(apiErrorMessage(data, res.status));
+  if (!res.ok) {
+    const payloadCode = typeof data === 'object' && data !== null && !Array.isArray(data) ? (data as { code?: unknown }).code : undefined;
+    const code = typeof payloadCode === 'string' ? payloadCode : undefined;
+    throw new ApiError(apiErrorMessage(data, res.status), res.status, code);
+  }
   return data as T;
 }
 
@@ -1739,7 +1745,7 @@ export function fetchOfflineAppStoreStatus(): Promise<OfflineAppStoreStatus> {
 }
 
 export function saveOfflineAppStoreAccount(appleId: string, password: string): Promise<OfflineAppStoreStatus> {
-  return apiJson('/v1/dashboard/appstore-offline/account', { method: 'PUT', body: JSON.stringify({ appleId, password }) });
+  return saveOfflineAppStoreAccountRequest(apiJson, appleId, password);
 }
 
 export function authenticateOfflineAppStoreAccount(verificationCode?: string): Promise<OfflineAppStoreStatus> {

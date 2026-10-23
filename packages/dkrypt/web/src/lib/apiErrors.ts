@@ -1,3 +1,10 @@
+export class ApiError extends Error {
+  constructor(message: string, readonly statusCode: number, readonly code?: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 export function apiErrorMessage(data: unknown, statusCode: number): string {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) return `Request failed (${statusCode})`;
   const payload = data as Record<string, unknown>;

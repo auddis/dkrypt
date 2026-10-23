@@ -5,7 +5,10 @@
   import Card from '#lib/components/ui/Card.svelte';
   import Input from '#lib/components/ui/Input.svelte';
   import Label from '#lib/components/ui/Label.svelte';
-  import { authenticateOfflineAppStoreAccount, fetchDevices, fetchOfflineAppStoreStatus, retrieveOfflineAppStoreCredential, saveOfflineAppStoreAccount, type DeviceRecord, type OfflineAppStoreStatus } from '#lib/api';
+  import { authenticateOfflineAppStoreAccount, fetchDevices, fetchOfflineAppStoreStatus, reauthenticate, retrieveOfflineAppStoreCredential, saveOfflineAppStoreAccount, type DeviceRecord, type OfflineAppStoreStatus } from '#lib/api';
+  import { retryAfterReauthentication } from '#lib/reauthenticatedRequest.js';
+  import { sessionState } from '#lib/session.svelte';
+  import { promptDialog } from '#lib/ui.svelte';
 
   let status = $state<OfflineAppStoreStatus | null>(null);
   let appleId = $state('');
@@ -20,6 +23,20 @@
   let retrievingCredential = $state(false);
   let error = $state('');
   let notice = $state('');
+
+  async function confirmRecentAuthentication(): Promise<void> {
+    const isRootAdministrator = sessionState.sub === 'root';
+    if (!isRootAdministrator && !sessionState.mfa?.enabled) {
+      throw new Error('Sign out and sign in again to confirm this action.');
+    }
+    const proof = await promptDialog(
+      isRootAdministrator ? 'Enter the administrator password to continue.' : 'Enter your authenticator or recovery code to continue.',
+      { type: 'password', confirmLabel: 'Continue' },
+    );
+    if (!proof) throw new Error('Reauthentication was canceled.');
+    const result = await reauthenticate(isRootAdministrator ? { password: proof } : { mfaToken: proof });
+    if (!result.ok) throw new Error(result.error ?? 'Reauthentication failed.');
+  }
 
   async function refresh(): Promise<void> {
     loading = true;
@@ -42,7 +59,10 @@
     error = '';
     notice = '';
     try {
-      status = await saveOfflineAppStoreAccount(appleId, password);
+      status = await retryAfterReauthentication(
+        () => saveOfflineAppStoreAccount(appleId, password),
+        confirmRecentAuthentication,
+      );
       password = '';
       verificationCode = '';
       verificationRequested = false;
@@ -50,6 +70,9 @@
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Could not save Apple Account details.';
       if (error.includes('sign out and sign in again')) password = '';
+      if (error.includes('timed out')) {
+        password = '';
+      }
     } finally {
       savingAccount = false;
     }
@@ -60,7 +83,10 @@
     error = '';
     notice = '';
     try {
-      status = await authenticateOfflineAppStoreAccount(verificationCode || undefined);
+      status = await retryAfterReauthentication(
+        () => authenticateOfflineAppStoreAccount(verificationCode || undefined),
+        confirmRecentAuthentication,
+      );
       verificationCode = '';
       verificationRequested = false;
       notice = 'Apple Account sign-in was verified.';
@@ -78,7 +104,10 @@
     error = '';
     notice = '';
     try {
-      status = await retrieveOfflineAppStoreCredential(selectedDeviceId);
+      status = await retryAfterReauthentication(
+        () => retrieveOfflineAppStoreCredential(selectedDeviceId),
+        confirmRecentAuthentication,
+      );
       notice = 'Credential retrieval started. The selected iPad is temporarily reserved while Apple’s FairPlay service restarts.';
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Could not retrieve the FairPlay credential.';
