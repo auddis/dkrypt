@@ -52,7 +52,7 @@ RUN set -eu; \
 
 FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS fairplay-decrypt
 ARG FAIRPLAY_DECRYPT_REV=1bad106ee1698c6d9c483f67d898183ffa4c6eb3
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gcc make python3 python3-venv tar && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev make python3 python3-venv tar && rm -rf /var/lib/apt/lists/*
 RUN set -eu; \
   mkdir -p /opt/fairplay-decrypt; \
   curl --fail --silent --show-error --location "https://codeload.github.com/EthanArbuckle/fairplay-decrypt/tar.gz/${FAIRPLAY_DECRYPT_REV}" --output /tmp/fairplay-decrypt.tar.gz; \
