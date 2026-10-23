@@ -19,6 +19,7 @@ import {
   billingCheckoutControlBodySchema,
   billingIdempotencyKeyHeadersSchema,
   billingProviderStatusQuerySchema,
+  billingRevenueQuerySchema,
   billingSubscriptionBodySchema,
   billingSubscriptionsQuerySchema,
   billingWebhookInboxParamsSchema,
@@ -382,6 +383,9 @@ const BillingResponse = object({
   quota: object({ limit: Type.Union([Type.Number(), Type.Null()]), used: Type.Number(), remaining: Type.Union([Type.Number(), Type.Null()]), nextAvailableAt: Type.Optional(Type.Number()), legacy: Type.Optional(Type.Boolean()), apiRatePerMinute: Type.Optional(Type.Number()) }),
 });
 const BillingSubscriptionPage = object({ subscriptions: Type.Array(JsonObject), total: Type.Integer({ minimum: 0 }), nextCursor: PageCursor });
+const BillingRevenueCurrencyTotal = object({ currency: Type.String({ minLength: 3, maxLength: 3 }), gross: Type.Number({ minimum: 0 }), refunded: Type.Number({ minimum: 0 }), net: Type.Number({ minimum: 0 }) });
+const BillingRevenueProviderSummary = object({ state: Type.Union([Type.Literal('ready'), Type.Literal('unavailable'), Type.Literal('not_configured')]), totals: Type.Array(BillingRevenueCurrencyTotal), paymentCount: Type.Integer({ minimum: 0 }) });
+const BillingRevenueResponse = object({ updatedAt: Type.String({ format: 'date-time' }), complete: Type.Boolean(), totals: Type.Array(BillingRevenueCurrencyTotal), providers: object({ stripe: BillingRevenueProviderSummary, nowpayments: BillingRevenueProviderSummary }), warnings: Type.Array(Type.String()) });
 const ArtifactPage = object({ artifacts: Type.Array(JsonObject), total: Type.Integer({ minimum: 0 }), totalBytes: Type.Number(), maxBytes: Type.Number(), nextCursor: PageCursor });
 const DeviceListResponse = object({ devices: Type.Array(DeviceResponse) });
 const DeviceDisableImpactResponse = object({ deviceId: Identifier, queuedJobCount: Type.Integer({ minimum: 0 }), runningJobCount: Type.Integer({ minimum: 0 }) });
@@ -1121,6 +1125,7 @@ register('POST', '/v1/nowpayments/webhook', { headers: object({ 'x-nowpayments-s
 register('GET', '/v1/health', { response: { 200: HealthResponse, 401: ErrorEnvelope, 403: ErrorEnvelope, 429: ErrorEnvelope } });
 register('GET', '/v1/billing', { response: { 200: BillingResponse } });
 register('GET', '/v1/billing/subscriptions', { response: { 200: BillingSubscriptionPage } });
+register('GET', '/v1/billing/revenue', { querystring: billingRevenueQuerySchema, response: { 200: BillingRevenueResponse, 401: ErrorEnvelope, 403: ErrorEnvelope } });
 register('GET', '/v1/dashboard/overview', { querystring: dashboardOverviewQuerySchema, response: { 200: dashboardOverviewResponseSchema } });
 register('GET', '/v1/dashboard/jobs', { response: { 200: dashboardJobHistoryPageSchema, 404: ErrorEnvelope } });
 register('GET', '/v1/dashboard/artifacts', { response: { 200: ArtifactPage } });

@@ -6,7 +6,7 @@
   import Card from '#lib/components/ui/Card.svelte';
   import EmptyState from '#components/EmptyState.svelte';
   import Input from '#lib/components/ui/Input.svelte';
-  import { fetchBillingProviderStatus, fetchBillingSubscriptions, fetchBillingWebhookInbox, quarantineBillingWebhook, replayBillingWebhook, setBillingCheckoutPaused, syncStripeBillingWebhookEvents, type BillingManagerSubscription, type BillingProviderStatus, type BillingWebhookInboxRecord } from '#lib/api';
+  import { fetchBillingProviderStatus, fetchBillingRevenue, fetchBillingSubscriptions, fetchBillingWebhookInbox, quarantineBillingWebhook, replayBillingWebhook, setBillingCheckoutPaused, syncStripeBillingWebhookEvents, type BillingManagerSubscription, type BillingProviderStatus, type BillingRevenueSummary, type BillingWebhookInboxRecord } from '#lib/api';
   import { PermissionFlag } from '#lib/permissions';
   import { sessionHasPermission } from '#lib/session.svelte';
   import { liveState } from '#lib/live.svelte';
@@ -17,6 +17,10 @@
   const canManage = $derived(sessionHasPermission(PermissionFlag.manageBilling));
   let subscriptions = $state<BillingManagerSubscription[]>([]);
   let providerStatus = $state<BillingProviderStatus | null>(null);
+  let revenue = $state<BillingRevenueSummary | null>(null);
+  let revenueLoading = $state(true);
+  let revenueRefreshing = $state(false);
+  let revenueError = $state<string | undefined>(undefined);
   let loading = $state(true);
   let refreshing = $state(false);
   let search = $state('');
@@ -112,6 +116,21 @@
     }
   }
 
+  async function loadRevenue(refresh = false): Promise<void> {
+    if (!canManage) return;
+    revenueRefreshing = refresh;
+    revenueLoading = true;
+    try {
+      revenue = await fetchBillingRevenue(refresh);
+      revenueError = undefined;
+    } catch (error) {
+      revenueError = error instanceof Error ? error.message : "Couldn't load revenue summary";
+    } finally {
+      revenueLoading = false;
+      revenueRefreshing = false;
+    }
+  }
+
   async function loadWebhooks(cursor?: string): Promise<void> {
     if (!canManage) return;
     webhookLoading = true;
@@ -201,7 +220,10 @@
     return value.length > 20 ? `${value.slice(0, 9)}…${value.slice(-7)}` : value;
   }
 
-  onMount(() => void load());
+  onMount(() => {
+    void load();
+    void loadRevenue();
+  });
 
   $effect(() => {
     const revision = liveState.billingRevision;
@@ -211,6 +233,7 @@
     refreshTimer = setTimeout(() => {
       refreshTimer = undefined;
       void load();
+      void loadRevenue();
     }, 150);
     return () => {
       if (refreshTimer) clearTimeout(refreshTimer);
@@ -220,6 +243,51 @@
 </script>
 
 <div class="flex flex-col gap-4">
+  {#if canManage}
+    <Card title="Revenue to date">
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p class="text-sm text-muted">Customer subscription payments after refunds, before provider fees and tax remittance.</p>
+        <Button size="sm" variant="secondary" loading={revenueRefreshing} onclick={() => void loadRevenue(true)}><RefreshCw class="h-4 w-4" /> Refresh totals</Button>
+      </div>
+      {#if revenueLoading && !revenue}
+        <div class="flex min-h-24 items-center justify-center"><LoaderCircle class="h-5 w-5 animate-spin text-muted" /></div>
+      {:else if revenue}
+        <div class="mb-3 flex items-center gap-2">
+          <Badge variant={revenue.complete ? 'success' : 'warning'}>{revenue.complete ? 'Complete totals' : 'Partial totals'}</Badge>
+          <span class="text-xs text-muted">Updated {new Date(revenue.updatedAt).toLocaleTimeString()}</span>
+        </div>
+        {#if revenue.totals.length}
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {#each revenue.totals as total (total.currency)}
+              <div class="rounded-xl border border-border/70 bg-panel/50 p-4">
+                <div class="text-xs font-medium uppercase tracking-wide text-muted">Collected after refunds · {total.currency}</div>
+                <div class="mt-1 text-2xl font-semibold tabular-nums text-text">{money(total.net, total.currency)}</div>
+                <div class="mt-2 text-xs text-muted">{money(total.gross, total.currency)} paid · {money(total.refunded, total.currency)} refunded</div>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="rounded-lg border border-border/70 px-3 py-4 text-sm text-muted">No paid subscription payments were found.</p>
+        {/if}
+        <div class="mt-3 grid gap-2 text-xs text-muted sm:grid-cols-2">
+          <div><span class="font-medium text-text">Stripe:</span> {revenue.providers.stripe.state === 'ready' ? `${revenue.providers.stripe.paymentCount} paid invoice payments` : revenue.providers.stripe.state === 'not_configured' ? 'Not configured' : 'History unavailable'}{#if revenue.providers.stripe.totals.length} · {revenue.providers.stripe.totals.map((total) => `${money(total.net, total.currency)} ${total.currency}`).join(', ')}{/if}</div>
+          <div><span class="font-medium text-text">NOWPayments:</span> {revenue.providers.nowpayments.state === 'ready' ? `${revenue.providers.nowpayments.paymentCount} paid crypto payments` : 'History unavailable'}{#if revenue.providers.nowpayments.totals.length} · {revenue.providers.nowpayments.totals.map((total) => `${money(total.net, total.currency)} ${total.currency}`).join(', ')}{/if}</div>
+        </div>
+        {#if revenue.warnings.length || revenueError}
+          <div class="mt-3 space-y-1 rounded-lg border border-warning/30 bg-panel-muted/50 p-3 text-xs text-muted">
+            {#if revenueError}<div class="flex items-center gap-2"><AlertTriangle class="h-4 w-4 shrink-0 text-warning" /> Refresh failed: {revenueError}</div>{/if}
+            {#each revenue.warnings as warning}<div class="flex items-start gap-2"><AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-warning" /> <span>{warning}</span></div>{/each}
+          </div>
+        {/if}
+      {:else}
+        <div class="flex items-center justify-between gap-3 rounded-lg border border-warning/30 bg-panel-muted/50 p-3 text-sm">
+          <span class="text-muted">{revenueError ?? 'Revenue totals are temporarily unavailable.'}</span>
+          <Button size="sm" variant="secondary" onclick={() => void loadRevenue(true)}>Try again</Button>
+        </div>
+      {/if}
+    </Card>
+  {/if}
+
   <Card title="Billing subscriptions">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-2 text-sm text-muted"><span class="flex items-center gap-2"><CreditCard class="h-4 w-4" /> View active, pending, failed, and canceled member subscriptions across billing providers.</span><Button size="sm" variant="secondary" loading={refreshing} onclick={() => void load(true)}><RefreshCw class="h-4 w-4" /> Refresh</Button></div>
     <div class="grid gap-2 md:grid-cols-[minmax(0,1fr)_10rem_10rem_auto]">

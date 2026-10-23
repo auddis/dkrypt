@@ -7,6 +7,7 @@ import type {
   BillingCheckoutControlRoute,
   BillingCheckoutRoute,
   BillingProviderStatusRoute,
+  BillingRevenueRoute,
   BillingSubscriptionRoute,
   BillingSubscriptionsRoute,
   BillingWebhookInboxParamsRoute,
@@ -38,6 +39,7 @@ import {
   recordStripeCheckoutIdempotencyAttempt,
 } from '#billing.js';
 import { config, stripeEnabled, stripeEnvironment, stripeMissingConfiguration, stripeNewCatalogMissingConfiguration } from '#config.js';
+import { createBillingRevenueReader, getBillingRevenueSummary, type BillingRevenueReader } from '#billingRevenue.js';
 import {
   cancelCryptoSubscription,
   createCryptoCheckout,
@@ -451,6 +453,7 @@ export const billingWebhookRoutes: FastifyPluginAsyncTypebox<{ stripeClient?: ()
 export const billingRoutes: FastifyPluginAsyncTypebox<{
   stripeClient?: () => Stripe;
   stripeWebhookHealth?: (forceRefresh: boolean) => Promise<StripeWebhookHealth>;
+  billingRevenue?: BillingRevenueReader;
 }> = async (server, options) => {
   const callStripe = <T>(request: (client: Stripe) => Promise<T>): Promise<T> => options.stripeClient
     ? request(options.stripeClient())
@@ -633,6 +636,20 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{
   });
 
   const requireBillingManager = fastifyRequirePermission(PermissionFlag.manageBilling);
+
+  const readRevenue = options.billingRevenue ?? (options.stripeClient
+    ? createBillingRevenueReader({
+      stripeConfigured: true,
+      runStripe: (operation) => operation(options.stripeClient!()),
+    })
+    : getBillingRevenueSummary);
+
+  server.get<BillingRevenueRoute>('/v1/billing/revenue', {
+    schema: getRouteContract('GET', '/v1/billing/revenue'),
+    preHandler: requireBillingManager,
+  }, async (request, reply) => {
+    return reply.send(await readRevenue(request.query.refresh === 'true'));
+  });
 
   server.put<BillingCheckoutControlRoute>('/v1/billing/checkouts', {
     schema: getRouteContract('PUT', '/v1/billing/checkouts'),

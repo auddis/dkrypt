@@ -2473,6 +2473,34 @@ export interface BillingProviderStatus {
   crypto: { enabled: boolean; configured: boolean; ready: boolean; environment: 'test' | 'live'; settlementType?: string; settlementCurrency: string; supportedChains: string[]; supportedAssets: string[]; missingConfiguration: string[]; issues: string[]; checkedAt?: string };
 }
 
+export interface BillingRevenueCurrencyTotal {
+  currency: string;
+  gross: number;
+  refunded: number;
+  net: number;
+}
+
+export interface BillingRevenueProviderSummary {
+  state: 'ready' | 'unavailable' | 'not_configured';
+  totals: BillingRevenueCurrencyTotal[];
+  paymentCount: number;
+}
+
+export interface BillingRevenueSummary {
+  updatedAt: string;
+  complete: boolean;
+  totals: BillingRevenueCurrencyTotal[];
+  providers: {
+    stripe: BillingRevenueProviderSummary;
+    nowpayments: BillingRevenueProviderSummary;
+  };
+  warnings: string[];
+}
+
+export function fetchBillingRevenue(refresh = false): Promise<BillingRevenueSummary> {
+  return apiJson(`/v1/billing/revenue${refresh ? '?refresh=true' : ''}`);
+}
+
 export function fetchBillingProviderStatus(refresh = false): Promise<BillingProviderStatus> {
   return apiJson(`/v1/billing/provider-status${refresh ? '?refresh=true' : ''}`);
 }

@@ -67,6 +67,7 @@ test('generated API keys are rejected outside the decrypt and artifact API allow
       ['GET', '/v1/metrics'],
       ['GET', '/v1/billing'],
       ['GET', '/v1/billing/subscriptions'],
+      ['GET', '/v1/billing/revenue'],
       ['GET', '/v1/billing/provider-status'],
       ['POST', '/v1/billing/checkout'],
       ['POST', '/v1/billing/cancel'],
