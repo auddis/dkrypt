@@ -5,6 +5,7 @@ import { showToast } from '#lib/ui.svelte';
 import { projectSelectionState } from '#lib/projectSelection.svelte';
 import { serverStateCache, type ServerQueryListener } from '#lib/serverStateCache.svelte';
 import { isUnauthenticatedResponse } from '#lib/apiAuthResponse.js';
+import { parseApiResponse } from '#lib/apiResponse.js';
 import { saveOfflineAppStoreAccountRequest } from '#lib/offlineAppStoreAccountSave.js';
 import { authenticateOfflineAppStoreAccountRequest } from '#lib/offlineAppStoreAuthentication.js';
 
@@ -42,12 +43,7 @@ async function request(path: string, opts: RequestInit = {}, bucket?: string): P
 
 export async function apiJson<T>(path: string, opts?: RequestInit, bucket?: string): Promise<T> {
   const res = await request(path, opts, bucket);
-  let data: unknown;
-  try {
-    data = await res.json();
-  } catch {
-    throw new Error('invalid response from server');
-  }
+  const data = await parseApiResponse(res);
   if (!res.ok) {
     const payloadCode = typeof data === 'object' && data !== null && !Array.isArray(data) ? (data as { code?: unknown }).code : undefined;
     const code = typeof payloadCode === 'string' ? payloadCode : undefined;

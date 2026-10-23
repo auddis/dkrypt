@@ -4,7 +4,7 @@ import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { PermissionFlag } from '#permissions.js';
 import { setSessionCookie } from '#session.js';
 import type { Response } from '#http.js';
-import { createDashboardOfflineAppStoreRoutes } from '#routes/dashboardOfflineAppStoreRoutes.js';
+import { createDashboardOfflineAppStoreRoutes, DEFAULT_AUTHENTICATION_TIMEOUT_MS } from '#routes/dashboardOfflineAppStoreRoutes.js';
 import type { OfflineAppStoreReadiness } from '#offlineAppStore.js';
 import type { CredentialRetrievalStatus } from '#offlineAppStoreCredential.js';
 
@@ -101,6 +101,7 @@ test('offline App Store authentication accepts only a six-digit one-time code', 
 });
 
 test('Apple Account authentication aborts and returns a timeout when the provider never responds', async () => {
+  expect(DEFAULT_AUTHENTICATION_TIMEOUT_MS).toBe(30_000);
   let receivedSignal: AbortSignal | undefined;
   let releaseProvider: () => void = () => {};
   let abortObserved = false;

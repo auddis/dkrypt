@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test';
-import { authenticateOfflineAppStoreAccountRequest } from './offlineAppStoreAuthentication';
+import { authenticateOfflineAppStoreAccountRequest, OFFLINE_APP_STORE_AUTHENTICATION_TIMEOUT_MS } from './offlineAppStoreAuthentication';
+
+test('Apple Account verification times out before the gateway deadline', () => {
+  expect(OFFLINE_APP_STORE_AUTHENTICATION_TIMEOUT_MS).toBe(40_000);
+  expect(OFFLINE_APP_STORE_AUTHENTICATION_TIMEOUT_MS).toBeLessThan(45_000);
+});
 
 test('Apple Account verification aborts a request that never settles and reports a timeout', async () => {
   let aborted = false;

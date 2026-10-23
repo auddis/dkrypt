@@ -23,7 +23,7 @@ interface DashboardOfflineAppStoreRouteOptions {
   authenticationTimeoutMs?: number;
 }
 
-const DEFAULT_AUTHENTICATION_TIMEOUT_MS = 45_000;
+export const DEFAULT_AUTHENTICATION_TIMEOUT_MS = 30_000;
 const AUTHENTICATION_TIMEOUT_MESSAGE = 'Apple Account verification timed out. Try again after checking Apple Account status.';
 
 const defaultServices: DashboardOfflineAppStoreServices = {
