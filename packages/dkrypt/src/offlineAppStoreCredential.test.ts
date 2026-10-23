@@ -72,6 +72,60 @@ test('credential retrieval targets the requested paired USB iPad, drains it, and
   }
 });
 
+test('failed credential retrieval retains a redacted helper diagnostic and releases the iPad', async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), 'dkrypt-device-credential-diagnostic-'));
+  directories.push(stateDir);
+  const database = openStateCollectionDatabase({ stateDir, filename: 'state.sqlite' }, ['appstore_offline_account', 'appstore_offline_credential_operations']);
+  const vault = createAppleAccountVault(createAppleAccountRepository(database), Buffer.alloc(32, 7).toString('base64url'));
+  const operationRepository = createOfflineCredentialRetrievalRepository(openStateCollectionDatabase({ stateDir, filename: 'state.sqlite' }, ['appstore_offline_credential_operations']));
+  vault.saveAccount('admin@icloud.com', 'account-password');
+  vault.markAuthenticated(1234);
+  let device: DeviceRecord = {
+    id: 'diagnostic-ipad',
+    name: 'Diagnostic iPad',
+    transport: 'usb',
+    udid: 'd'.repeat(40),
+    productType: 'iPad14,3',
+    enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const retriever = createFairPlayCredentialRetriever({
+    getDevice: (id) => id === device.id ? device : undefined,
+    getActiveJobs: () => [],
+    getVaultStatus: vault.status,
+    updateDevice: (id, patch) => {
+      if (id !== device.id) return { ok: false, error: 'device not found' };
+      device = { ...device, ...patch };
+      return { ok: true, device };
+    },
+    saveCredential: vault.saveCredential,
+    runRetriever: async () => {
+      throw new Error(`device command failed: no installed App Store app for admin@icloud.com at /var/containers/Bundle/Application/12345678-1234-1234-1234-123456789abc/Example.app/${'a'.repeat(40)}`);
+    },
+    operationRepository,
+  });
+
+  try {
+    retriever.start(device.id);
+    for (let attempt = 0; attempt < 50 && retriever.status().state === 'running'; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    const status = retriever.status();
+    expect(status.state).toBe('failed');
+    expect(status.error).toContain('no installed App Store app');
+    expect(status.error).not.toContain('admin@icloud.com');
+    expect(status.error).not.toContain('/var/containers/Bundle/Application');
+    expect(status.error).not.toContain('Example.app');
+    expect(status.error).not.toContain('12345678-1234-1234-1234-123456789abc');
+    expect(status.error).not.toContain('a'.repeat(40));
+    expect(device.draining).toBe(false);
+  } finally {
+    operationRepository.close();
+    vault.close();
+  }
+});
+
 test('credential retrieval rejects devices that are not the exact enabled USB iPad or when a job is running', () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), 'dkrypt-device-credential-validation-'));
   directories.push(stateDir);

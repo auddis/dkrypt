@@ -19,6 +19,7 @@ import type { DeviceConnection } from '#idevice.js';
 import { terminateChildProcess } from '#jobs/process.js';
 
 const log = scopedLogger('appstore-offline-credential');
+const MAX_HELPER_DIAGNOSTIC_LENGTH = 4_096;
 
 export interface CredentialRetrievalStatus {
   state: 'idle' | 'running' | 'succeeded' | 'failed' | 'interrupted';
@@ -82,6 +83,21 @@ function sshWrapper(): string {
   ].join('\n');
 }
 
+function safeCredentialRetrievalDiagnostic(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const safeMessage = message
+    .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, '[email]')
+    .replace(/\/(?:private\/)?var\/containers\/Bundle\/Application\/[^\s:]+/g, '[app path]')
+    .replace(/\/(?:dev\/shm|tmp)\/[^\s:]+/g, '[temporary path]')
+    .replace(/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi, '[device id]')
+    .replace(/\b[0-9a-f]{40}\b/gi, '[device id]')
+    .replace(/\b[A-Za-z0-9+/_=-]{64,}\b/g, '[redacted value]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_HELPER_DIAGNOSTIC_LENGTH);
+  return safeMessage || 'The credential helper failed without a diagnostic message.';
+}
+
 async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
   const temporaryRoot = await mkdtemp(path.join(existsSync('/dev/shm') ? '/dev/shm' : tmpdir(), 'dkrypt-fairplay-credential-'));
   try {
@@ -117,8 +133,13 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
       ], {
         cwd: path.dirname(config.appStoreOfflineCredentialRetriever),
         env: environment,
-        stdio: 'ignore',
+        stdio: ['ignore', 'ignore', 'pipe'],
         detached: process.platform !== 'win32',
+      });
+      let stderr = '';
+      child.stderr?.on('data', (chunk: Buffer | string) => {
+        const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : chunk;
+        stderr = (stderr + text).slice(-MAX_HELPER_DIAGNOSTIC_LENGTH);
       });
       let timedOut = false;
       let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
@@ -131,9 +152,15 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
       try {
         await new Promise<void>((resolve, reject) => {
           child.once('error', reject);
-          child.once('close', (code) => {
+          child.once('close', (code, signal) => {
             if (code === 0 && !timedOut) resolve();
-            else reject(new Error(timedOut ? 'FairPlay credential retrieval timed out' : 'FairPlay credential retrieval failed'));
+            else {
+              const exit = code === null ? `signal ${signal ?? 'unknown'}` : `code ${code}`;
+              const diagnostic = stderr.trim();
+              reject(new Error(timedOut
+                ? 'FairPlay credential retrieval timed out'
+                : `FairPlay credential helper exited with ${exit}${diagnostic ? `: ${diagnostic}` : ''}`));
+            }
           });
         });
         const credentialPath = path.join(outputDirectory, 'credential.bin');
@@ -240,8 +267,10 @@ export function createFairPlayCredentialRetriever(overrides: Partial<FairPlayCre
           if (credential.length !== 16) throw new Error('retrieved FairPlay credential has an invalid length');
           dependencies.saveCredential(credential.toString('base64'));
           setStatus({ ...started, state: 'succeeded', completedAt: Date.now() });
-        } catch {
-          setStatus({ ...started, state: 'failed', completedAt: Date.now(), error: 'Credential retrieval failed. Check that the iPad is available and has an App Store app for the configured Apple Account.' });
+        } catch (error) {
+          const diagnostic = safeCredentialRetrievalDiagnostic(error);
+          log.error('FairPlay credential retrieval failed', { operationId: started.operationId, deviceId: device.id, diagnostic });
+          setStatus({ ...started, state: 'failed', completedAt: Date.now(), error: diagnostic });
         } finally {
           credential?.fill(0);
           restoreDevice(device.id, drained.device?.updatedAt);
