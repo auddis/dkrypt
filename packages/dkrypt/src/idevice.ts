@@ -539,6 +539,7 @@ interface DeviceAgentSession {
 }
 
 const deviceAgentSessions = new Map<string, DeviceAgentSession>();
+const bridgeSecretLoads = new Map<string, Promise<string>>();
 
 export interface DeviceConnection {
   id?: string;
@@ -598,10 +599,25 @@ function connectionIdentity(connection: DeviceConnection): string {
 }
 
 function connectionRuntimeRoot(connection: DeviceConnection): string {
+  if (connection.udid) {
+    const digest = createHash('sha256').update(`udid:${connection.udid.toLowerCase()}`).digest('hex').slice(0, 24);
+    return path.join(config.deviceRuntimeDir, digest);
+  }
   const transport = connection.transport ?? (connection.udid ? connection.usbmuxNetwork ? 'wifi' : 'usb' : 'wifi');
   const identity = `${transport}:${connectionIdentity(connection)}`;
   const digest = createHash('sha256').update(identity).digest('hex').slice(0, 24);
   return path.join(config.deviceRuntimeDir, digest);
+}
+
+function legacyConnectionRuntimeRoots(connection: DeviceConnection): string[] {
+  if (!connection.udid) return [];
+  const transport = connection.transport ?? (connection.usbmuxNetwork ? 'wifi' : 'usb');
+  const transports = [transport, transport === 'usb' ? 'wifi' : 'usb'];
+  const identities = [...new Set([connection.id, connection.udid].filter((identity): identity is string => Boolean(identity)))];
+  return transports.flatMap((candidateTransport) => identities.map((identity) => {
+    const digest = createHash('sha256').update(`${candidateTransport}:${identity}`).digest('hex').slice(0, 24);
+    return path.join(config.deviceRuntimeDir, digest);
+  }));
 }
 
 function directDeviceAuth(connection: DeviceConnection): DeviceAuth {
@@ -628,7 +644,7 @@ async function openDeviceAgentSession(connection: DeviceConnection, key: string,
   if (!isRustDeviceConnection(connection)) throw new Error('the autoinstall device agent requires a paired Rust device connection');
   if (!connection.udid) throw new Error('the autoinstall device agent requires a device identifier');
   const runtimeDir = connectionRuntimeRoot(connection);
-  const secret = await loadBridgeSecret(runtimeDir);
+  const secret = await loadBridgeSecret(runtimeDir, legacyConnectionRuntimeRoots(connection));
   const capabilities = await new RustDeviceBridgeClient().capabilities(signal);
   const supported = Array.isArray(capabilities.capabilities) && capabilities.capabilities.includes('agent');
   if (!supported) throw new DeviceAgentUnavailableError('the Rust device bridge does not support the autoinstall agent capability');
@@ -1270,23 +1286,54 @@ export async function setupDeviceConnection(connection: DeviceConnection, onStag
   return { ...result, ready: result.steps.every((step) => step.status === 'ready') };
 }
 
-async function loadBridgeSecret(runtimeDir: string): Promise<string> {
+async function loadBridgeSecret(runtimeDir: string, legacyRuntimeDirs: string[] = []): Promise<string> {
   const cached = bridgeSecretCache.get(runtimeDir);
   if (cached) return cached;
-  const secretPath = path.join(runtimeDir, BRIDGE_SECRET_FILE_NAME);
+  const pending = bridgeSecretLoads.get(runtimeDir);
+  if (pending) return pending;
+  const loading = loadOrCreateBridgeSecret(runtimeDir, legacyRuntimeDirs);
+  bridgeSecretLoads.set(runtimeDir, loading);
   try {
-    const secret = (await readFile(secretPath, 'utf8')).trim();
-    if (secret.length >= 32) {
-      bridgeSecretCache.set(runtimeDir, secret);
-      return secret;
+    return await loading;
+  } finally {
+    if (bridgeSecretLoads.get(runtimeDir) === loading) bridgeSecretLoads.delete(runtimeDir);
+  }
+}
+
+async function loadOrCreateBridgeSecret(runtimeDir: string, legacyRuntimeDirs: string[]): Promise<string> {
+  const secretPath = path.join(runtimeDir, BRIDGE_SECRET_FILE_NAME);
+  const existing = await readValidBridgeSecret(secretPath);
+  if (existing) {
+    bridgeSecretCache.set(runtimeDir, existing);
+    return existing;
+  }
+  for (const legacyRuntimeDir of legacyRuntimeDirs) {
+    const legacySecret = await readValidBridgeSecret(path.join(legacyRuntimeDir, BRIDGE_SECRET_FILE_NAME));
+    if (legacySecret) {
+      await persistBridgeSecret(secretPath, legacySecret);
+      bridgeSecretCache.set(runtimeDir, legacySecret);
+      return legacySecret;
     }
-  } catch {}
-  await mkdir(runtimeDir, { recursive: true });
+  }
   const secret = randomBytes(32).toString('base64url');
-  await writeFile(secretPath, `${secret}\n`, { mode: 0o600 });
-  await chmod(secretPath, 0o600);
+  await persistBridgeSecret(secretPath, secret);
   bridgeSecretCache.set(runtimeDir, secret);
   return secret;
+}
+
+async function readValidBridgeSecret(secretPath: string): Promise<string | undefined> {
+  try {
+    const secret = (await readFile(secretPath, 'utf8')).trim();
+    return secret.length >= 32 ? secret : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function persistBridgeSecret(secretPath: string, secret: string): Promise<void> {
+  await mkdir(path.dirname(secretPath), { recursive: true });
+  await writeFile(secretPath, `${secret}\n`, { mode: 0o600 });
+  await chmod(secretPath, 0o600);
 }
 
 function bridgeSignature(secret: string, channel: BridgeChannel, requestId: string, issuedAt: number, payload: string): string {

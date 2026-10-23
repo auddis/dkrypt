@@ -204,12 +204,13 @@ export const dashboardDeviceRoutes: FastifyPluginAsyncTypebox = async (server) =
   };
 
   const performDeviceSetup = async (input: NonNullable<ReturnType<typeof parseDeviceConnection>>, userId: string, onStage?: (id: string, label: string) => void) => {
-    const setup = await setupDeviceConnection(input.connection, onStage);
-    if (closing) throw new Error('device setup interrupted by service shutdown');
     const existingId = input.existingId ?? getEffectiveDevices().find((candidate) => {
       if (input.connection.udid && candidate.udid === input.connection.udid) return true;
       return Boolean(input.connection.host && candidate.host === input.connection.host && (candidate.port ?? config.deviceSshPort) === (input.connection.port ?? config.deviceSshPort));
     })?.id;
+    const setupConnection = existingId ? { ...input.connection, id: existingId } : input.connection;
+    const setup = await setupDeviceConnection(setupConnection, onStage);
+    if (closing) throw new Error('device setup interrupted by service shutdown');
     const connectionFields: Pick<DeviceInput, 'transport' | 'host' | 'port' | 'user' | 'udid' | 'usbmuxNetwork' | 'productType' | 'iosVersion'> = {
       transport: input.connection.transport as DeviceTransport,
       host: input.connection.host,

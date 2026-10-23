@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { createHmac, generateKeyPairSync } from 'node:crypto';
+import { createHash, createHmac, generateKeyPairSync } from 'node:crypto';
 import { createServer, type AddressInfo } from 'node:net';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Client } from 'ssh2';
@@ -723,6 +723,46 @@ test('recovers the Rust USB agent without an SSH key after dropped RPC and trans
     config.deviceSshKeyPath = originalSshKeyPath;
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(runtimeDir, { recursive: true, force: true });
+  }
+});
+
+test('uses one migrated bridge secret for a physical device across saved IDs and transports', async () => {
+  const runtimeDir = await mkdtemp(path.join(tmpdir(), 'dkrypt-device-agent-identity-'));
+  const originalRuntimeDir = config.deviceRuntimeDir;
+  const udid = 'fixture-stable-device-udid';
+  const savedId = 'fixture-saved-device-record';
+  const legacyDigest = createHash('sha256').update(`usb:${savedId}`).digest('hex').slice(0, 24);
+  const legacyDirectory = path.join(runtimeDir, legacyDigest);
+  const savedDeviceSecret = 'saved-device-bridge-secret-0123456789';
+  const receivedSecrets: string[] = [];
+  config.deviceRuntimeDir = runtimeDir;
+
+  try {
+    await mkdir(legacyDirectory, { recursive: true });
+    await writeFile(path.join(legacyDirectory, 'autoinstall-bridge-secret'), `${savedDeviceSecret}\n`, { mode: 0o600 });
+
+    await withRustBridgeFixture((request) => {
+      if (request.operation === 'capabilities') return { protocolVersion: 1, capabilities: ['agent'] };
+      if (request.operation !== 'agent') return {};
+      const envelope = request.payload as Record<string, unknown>;
+      const secret = String(request.agentSecret);
+      receivedSecrets.push(secret);
+      return signedAgentResponse(secret, String(envelope.requestId), { agentVersion: '1.4.12' });
+    }, async () => {
+      await withSSH({ id: savedId, transport: 'wifi', udid, usbmuxNetwork: true }, async (client: DeviceClient) => {
+        (client as DeviceSession).close();
+      });
+      await withSSH({ id: 'fixture-other-record', transport: 'usb', udid }, async (client: DeviceClient) => {
+        (client as DeviceSession).close();
+      });
+    });
+
+    expect(receivedSecrets).toEqual([savedDeviceSecret, savedDeviceSecret]);
+    const canonicalDigest = createHash('sha256').update(`udid:${udid}`).digest('hex').slice(0, 24);
+    await expect(readFile(path.join(runtimeDir, canonicalDigest, 'autoinstall-bridge-secret'), 'utf8')).resolves.toBe(`${savedDeviceSecret}\n`);
+  } finally {
+    config.deviceRuntimeDir = originalRuntimeDir;
     await rm(runtimeDir, { recursive: true, force: true });
   }
 });
