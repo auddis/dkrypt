@@ -63,6 +63,7 @@ test('offline App Store management is manager-only and does not expose account s
       payload: { appleId: 'admin@example.test', password: 'sensitive-password' },
     });
     expect(reauthenticationRequired.statusCode).toBe(401);
+    expect(reauthenticationRequired.json()).toMatchObject({ code: 'reauthentication_required' });
 
     const saved = await server.inject({
       method: 'PUT',

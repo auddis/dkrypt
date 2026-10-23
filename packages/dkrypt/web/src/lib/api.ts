@@ -4,6 +4,7 @@ import { rateLimitState } from '#lib/rateLimit.svelte';
 import { showToast } from '#lib/ui.svelte';
 import { projectSelectionState } from '#lib/projectSelection.svelte';
 import { serverStateCache, type ServerQueryListener } from '#lib/serverStateCache.svelte';
+import { isUnauthenticatedResponse } from '#lib/apiAuthResponse.js';
 
 export type { Role };
 export { rateLimitState, type RateLimitInfo } from '#lib/rateLimit.svelte';
@@ -29,7 +30,7 @@ async function request(path: string, opts: RequestInit = {}, bucket?: string): P
     throw new Error('network error');
   }
   captureRateLimitHeaders(bucket, res);
-  if (res.status === 401) {
+  if (await isUnauthenticatedResponse(res)) {
     markLoggedOut();
     throw new Error('unauthorized');
   }

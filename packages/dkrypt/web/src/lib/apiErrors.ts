@@ -1,6 +1,8 @@
 export function apiErrorMessage(data: unknown, statusCode: number): string {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) return `Request failed (${statusCode})`;
   const payload = data as Record<string, unknown>;
+  if (payload.code === 'reauthentication_required') return 'Please sign out and sign in again before retrying this sensitive action.';
+  if (payload.code === 'mfa_required') return 'Complete multi-factor authentication to continue.';
   const error = typeof payload.error === 'string' ? payload.error : `Request failed (${statusCode})`;
   if (error !== 'internal server error' || typeof payload.remediation !== 'object' || payload.remediation === null || Array.isArray(payload.remediation)) {
     return error;

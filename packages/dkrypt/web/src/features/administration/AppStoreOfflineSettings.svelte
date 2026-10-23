@@ -49,6 +49,7 @@
       notice = 'Apple Account details were encrypted and saved.';
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Could not save Apple Account details.';
+      if (error.includes('sign out and sign in again')) password = '';
     } finally {
       savingAccount = false;
     }

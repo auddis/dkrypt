@@ -17,3 +17,8 @@ test('apiErrorMessage preserves client errors and falls back safely for incomple
   expect(apiErrorMessage({ error: 'internal server error', remediation: { action: ' ' } }, 500)).toBe('internal server error');
   expect(apiErrorMessage(null, 503)).toBe('Request failed (503)');
 });
+
+test('apiErrorMessage explains authentication challenges without implying the session ended', () => {
+  expect(apiErrorMessage({ error: 'reauthentication is required for this action', code: 'reauthentication_required' }, 401)).toBe('Please sign out and sign in again before retrying this sensitive action.');
+  expect(apiErrorMessage({ error: 'multi-factor authentication is required', code: 'mfa_required' }, 401)).toBe('Complete multi-factor authentication to continue.');
+});
