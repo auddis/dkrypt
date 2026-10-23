@@ -46,7 +46,7 @@ RUN set -eu; \
   go mod tidy; \
   go generate ./...; \
   go test ./...; \
-  go build -trimpath -ldflags "-X github.com/majd/ipatool/v2/cmd.version=v${IPTATOOL_VERSION}" -o /go/bin/ipatool .
+  go build -trimpath -ldflags "-X github.com/majd/ipatool/v2/cmd.version=v${IPTATOOL_VERSION}" -o /usr/local/bin/ipatool .
 
 FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS fairplay-decrypt
 ARG FAIRPLAY_DECRYPT_REV=1bad106ee1698c6d9c483f67d898183ffa4c6eb3
