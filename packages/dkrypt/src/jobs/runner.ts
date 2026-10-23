@@ -17,6 +17,7 @@ import { terminateChildProcess } from '#jobs/process.js';
 import { currentCorrelation, withCorrelation } from '#correlation.js';
 import { startSpan } from '#telemetry.js';
 import { abortedOperationError, throwIfAborted } from '#util/abort.js';
+import { offlineAppStoreProcessor } from '#offlineAppStore.js';
 
 const log = scopedLogger('jobs');
 import { appendJobTimelineEvent, type Job, type JobExecutionStage } from '#jobs/types.js';
@@ -200,6 +201,66 @@ async function runDecryptOperation(job: Job, device: DeviceRecord, signal?: Abor
     });
   }, signal);
 
+  await finalizeDecryptedIpa(job, outputPath, signal, ensureNotCancelled);
+}
+
+export async function runOfflineAppStoreDecrypt(job: Job, signal?: AbortSignal): Promise<void> {
+  const parentContext = currentCorrelation();
+  const span = startSpan('job.decrypt.offline_appstore', { 'job.id': job.id, 'job.bundle_id': job.bundleId }, parentContext?.traceContext);
+  return withCorrelation({
+    correlationId: parentContext?.correlationId ?? job.correlationId ?? job.id,
+    parentCorrelationId: parentContext?.parentCorrelationId ?? job.parentCorrelationId,
+    traceId: span.context.traceId,
+    traceContext: span.context,
+  }, async () => {
+    const setExecutionStage = (stage: JobExecutionStage) => {
+      if (job.executionStage === stage) return;
+      job.executionStage = stage;
+      emitJobsChanged();
+    };
+    const ensureNotCancelled = () => {
+      if (job.cancelledBy) throw new Error(`cancelled by ${job.cancelledBy}`);
+      throwIfAborted(signal);
+      if (job.deadlineExceeded || (job.deadlineAt !== undefined && Date.now() >= job.deadlineAt)) {
+        job.deadlineExceeded = true;
+        throw new Error('job deadline exceeded');
+      }
+    };
+    try {
+      ensureNotCancelled();
+      job.warnings = undefined;
+      job.executionPath = 'appstore_offline';
+      job.progress = 'Downloading the App Store package on the server';
+      appendJobTimelineEvent(job, 'Server-side App Store download started', 'running');
+      emitJobsChanged();
+      setExecutionStage('offline_download');
+      const result = await offlineAppStoreProcessor.run(job, signal, setExecutionStage);
+      ensureNotCancelled();
+      job.filePath = result.outputPath;
+      job.warnings = result.warnings.length > 0 ? result.warnings : undefined;
+      for (const warning of result.warnings) appendJobTimelineEvent(job, `Warning: ${warning}`, 'done');
+      job.progress = 'Verifying and saving the server-decrypted IPA';
+      appendJobTimelineEvent(job, 'Server-side FairPlay decryption verified', 'running');
+      setExecutionStage('finalizing');
+      await finalizeDecryptedIpa(job, result.outputPath, signal, ensureNotCancelled);
+      span.end();
+    } catch (error) {
+      if (job.filePath?.includes('/.staging/')) await rm(job.filePath, { force: true }).catch(() => {});
+      span.end(error);
+      throw error;
+    } finally {
+      job.executionStage = undefined;
+      emitJobsChanged();
+    }
+  });
+}
+
+async function finalizeDecryptedIpa(
+  job: Job,
+  outputPath: string,
+  signal: AbortSignal | undefined,
+  ensureNotCancelled: () => void,
+): Promise<void> {
   ensureNotCancelled();
   const st = await stat(outputPath);
   job.fileSizeBytes = st.size;

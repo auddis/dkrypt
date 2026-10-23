@@ -12,6 +12,7 @@
   import AdvancedSection from '#components/AdvancedSection.svelte';
   import SignedTriggerSettings from '#features/administration/SignedTriggerSettings.svelte';
   import GithubOidcSettings from '#features/administration/GithubOidcSettings.svelte';
+  import AppStoreOfflineSettings from '#features/administration/AppStoreOfflineSettings.svelte';
 
   const checkTitles: Record<string, string> = {
     'session-secret': 'Session signing secret',
@@ -229,6 +230,7 @@
 
   {#if sessionHasPermission(PermissionFlag.administrator)}<SignedTriggerSettings />{/if}
   {#if sessionHasPermission(PermissionFlag.administrator)}<GithubOidcSettings />{/if}
+  {#if sessionHasPermission(PermissionFlag.administrator)}<AppStoreOfflineSettings />{/if}
 
   <AdvancedSection label="settings.serviceHealthChecks">
   <section class="mt-5 border-t border-border/70 pt-4" aria-labelledby="system-probes-heading">

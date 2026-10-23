@@ -34,6 +34,22 @@ RUN set -eu; \
   tar --extract --file /tmp/netmuxd.tar.gz --directory /usr/local/bin; \
   chmod 0755 /usr/local/bin/netmuxd
 
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS appstore-downloader
+ARG IPTATOOL_VERSION=2.6.0
+ARG TARGETARCH=amd64
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tar && rm -rf /var/lib/apt/lists/*
+RUN set -eu; \
+  case "${TARGETARCH}" in \
+    amd64) asset=ipatool-${IPTATOOL_VERSION}-linux-amd64.tar.gz; checksum=a8bbd8a5a6515d0b858c6cfe6c2baf70943a4235b7fa65d5bd01a42a7d5bedbb; binary=ipatool-${IPTATOOL_VERSION}-linux-amd64 ;; \
+    arm64) asset=ipatool-${IPTATOOL_VERSION}-linux-arm64.tar.gz; checksum=7c7ce6c54379683d77b99d39f1d1a766fd8de3ae09ae8c4c64f5d04232e6ae80; binary=ipatool-${IPTATOOL_VERSION}-linux-arm64 ;; \
+    *) echo "unsupported target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+  esac; \
+  curl --fail --silent --show-error --location "https://github.com/majd/ipatool/releases/download/v${IPTATOOL_VERSION}/${asset}" --output /tmp/ipatool.tar.gz; \
+  echo "${checksum}  /tmp/ipatool.tar.gz" | sha256sum --check; \
+  tar --extract --file /tmp/ipatool.tar.gz --directory /usr/local/bin; \
+  cp "/usr/local/bin/bin/${binary}" /usr/local/bin/ipatool; \
+  chmod 0755 /usr/local/bin/ipatool
+
 FROM oven/bun:1.4.3-slim@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52a3288 AS web
 WORKDIR /web
 COPY packages/dkrypt/web/package.json packages/dkrypt/web/bun.lock ./
@@ -56,6 +72,7 @@ RUN groupadd --system --gid 10001 dkrypt && useradd --system --uid 10001 --gid 1
 COPY --from=ipadecrypt /go/bin/ipadecrypt /usr/local/bin/ipadecrypt
 COPY --from=device-bridge /bridge/target/release/dkrypt-device-bridge /usr/local/bin/dkrypt-device-bridge
 COPY --from=netmuxd /usr/local/bin/netmuxd /usr/local/bin/netmuxd
+COPY --from=appstore-downloader /usr/local/bin/ipatool /usr/local/bin/ipatool
 COPY packages/dkrypt/package.json packages/dkrypt/bun.lock packages/dkrypt/tsconfig.json ./
 RUN bun install --production --frozen-lockfile
 COPY packages/dkrypt/src ./src

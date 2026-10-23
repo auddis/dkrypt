@@ -99,6 +99,13 @@ export const config = {
   nowpaymentsPriceCurrency: optional('NOWPAYMENTS_PRICE_CURRENCY', 'EUR').toUpperCase(),
 
   ipadecryptBin: optional('IPADECRYPT_BIN', 'ipadecrypt'),
+  appStoreOfflineDecryptEnabled: optionalBool('APPSTORE_OFFLINE_DECRYPT_ENABLED', false),
+  appStoreOfflineFairPlayAuthorized: optionalBool('APPSTORE_OFFLINE_FAIRPLAY_AUTHORIZED', false),
+  appStoreOfflineMaxWorkers: Math.max(1, optionalInt('APPSTORE_OFFLINE_MAX_WORKERS', 1)),
+  appStoreOfflineDownloaderBin: optional('APPSTORE_OFFLINE_DOWNLOADER_BIN', '/usr/local/bin/ipatool'),
+  appStoreOfflineDecryptorBin: optional('APPSTORE_OFFLINE_DECRYPTOR_BIN', ''),
+  appStoreOfflineVaultKey: optional('APPSTORE_OFFLINE_VAULT_KEY', ''),
+  appStoreOfflineTerminalBin: optional('APPSTORE_OFFLINE_TERMINAL_BIN', '/usr/bin/script'),
   outputDir: optional('OUTPUT_DIR', '/data/tmp'),
   deviceRuntimeDir: optional('DEVICE_RUNTIME_DIR', '/data/state/device-runtime'),
   deviceSshKeyPath: optional('DEVICE_SSH_KEY_PATH', '/data/device-ssh/id_ed25519'),

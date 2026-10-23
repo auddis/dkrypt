@@ -13,6 +13,7 @@ const decryptGate = new Promise<void>((resolve) => { releaseDecrypt = resolve; }
 const runnerStarted = new Promise<void>((resolve) => { markRunnerStarted = resolve; });
 
 mock.module('#jobs/runner.js', () => ({
+  runOfflineAppStoreDecrypt: async () => {},
   runDecrypt: async (job: Job) => {
     markRunnerStarted?.();
     await decryptGate;

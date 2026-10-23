@@ -12,14 +12,30 @@ import { createDevice, createProject, deleteDevice, getJobHistoryEntryById, reco
 import { traceContextFromHeader } from '#telemetry.js';
 import { getRecentLogs } from '#logger.js';
 import { loadPersistedJobs } from '#jobs/repository.js';
+import { getDecryptQuotaUsage } from '#jobs/repository.js';
 import { setCachedDeviceHealth } from '#deviceHealthCache.js';
 import type { Job } from '#jobs/types.js';
 
 let retryDeadlineAttempts = 0;
 let actionRequiredAttempts = 0;
 let observedWorkerCorrelation: ReturnType<typeof currentCorrelation>;
+let offlineWorkerEnabled = false;
+let offlineWorkerAttempts = 0;
+
+mock.module('#offlineAppStore.js', () => ({
+  offlineAppStoreProcessor: {
+    readiness: (job?: Pick<Job, 'testflight'>) => ({ ready: offlineWorkerEnabled && !job?.testflight }),
+  },
+}));
 
 mock.module('./runner.js', () => ({
+  runOfflineAppStoreDecrypt: (job: Job) => {
+    if (job.bundleId.includes('offline-fallback')) {
+      offlineWorkerAttempts += 1;
+      return Promise.reject(new Error('App Store provider download failed'));
+    }
+    return Promise.reject(new Error('unexpected server-side App Store test job'));
+  },
   runDecrypt: (job: Job, _device: unknown, signal?: AbortSignal) => {
     if (job.bundleId === 'com.test.trace-propagation') observedWorkerCorrelation = currentCorrelation();
     if (job.bundleId === 'com.test.appstore-action-required') {
@@ -224,6 +240,37 @@ describe('enqueueDecryptJob', () => {
     }
 
     expect(getJobHistoryEntryById(job.id)).toMatchObject({ deviceId: testDeviceId, transport: 'wifi' });
+  });
+
+  test('falls back to the device on the same job and keeps its quota reservation', async () => {
+    await clearActiveTestJobs();
+    const previousBilling = exportBillingSnapshot();
+    const ownerId = `offline-fallback-${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    replaceBillingSnapshot({
+      ...previousBilling,
+      subscriptions: [...previousBilling.subscriptions, { provider: 'stripe', subscriptionId: `sub_${ownerId}`, customerId: `cus_${ownerId}`, userId: ownerId, status: 'active', planId: 'access', priceId: 'price_access', productId: 'prod_access', occurredAt: now, updatedAt: now }],
+    });
+    offlineWorkerEnabled = true;
+    offlineWorkerAttempts = 0;
+    const bundleId = `com.test.offline-fallback.${crypto.randomUUID()}`;
+    const job = enqueueDecryptJob(bundleId, 'manual', { queuedBy: ownerId, preferredDeviceId: testDeviceId });
+
+    try {
+      for (let attempt = 0; attempt < 200 && (job.executionPath !== 'device_fallback' || job.status !== 'running'); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+      expect(offlineWorkerAttempts).toBe(1);
+      expect(getJob(job.id)).toMatchObject({ id: job.id, status: 'running', attempt: 2, executionPath: 'device_fallback', deviceId: testDeviceId });
+      expect(job.timeline?.some((event) => event.label.includes('App Store provider download failed'))).toBe(true);
+      expect(getDecryptQuotaUsage(ownerId, 2).used).toBe(1);
+    } finally {
+      offlineWorkerEnabled = false;
+      if (job.status === 'queued') cancelQueuedJob(job.id, 'offline fallback test cleanup');
+      if (job.status === 'running') cancelJob(job.id, 'offline fallback test cleanup');
+      await waitForJob(job, 1_000);
+      replaceBillingSnapshot(previousBilling);
+    }
   });
 
   test('scheduler jumps queued dashboard jobs, dedupes same bundle, never overtakes a running job', () => {

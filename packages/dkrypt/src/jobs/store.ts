@@ -15,7 +15,7 @@ import { DEFAULT_PROJECT_ID, getAllJobHistory, getApiKeyById, getDevice, getEffe
 import { hasPermission, PermissionFlag } from '#permissions.js';
 import { uninstallFromDevice } from '#appStoreInstall.js';
 import { getCachedDeviceHealth } from '#deviceHealthCache.js';
-import { runDecrypt } from '#jobs/runner.js';
+import { runDecrypt, runOfflineAppStoreDecrypt } from '#jobs/runner.js';
 import { appendJobTimelineEvent, type Job, type JobSource, type TestFlightJobSource } from '#jobs/types.js';
 import { artifactKeyForJob, buildDashboardArtifactFileUrl, getArtifactById, getArtifactByKey, getArtifactForJob, linkArtifactToProject, migrateLegacyPath, type ArtifactRecord } from '#artifacts.js';
 import { admitQuotaJob, closePersistedJobs, findPersistedActiveJobId, findPersistedReusableCompletedJobIds, loadPersistedJobs, mergeDecryptQuotaOwner, reconcileDecryptQuota, replacePersistedJobs, settleDecryptQuota, type JobBuildLookup } from '#jobs/repository.js';
@@ -30,6 +30,7 @@ import { runWithJobDeadline } from '#jobs/deadline.js';
 import { SCHEDULER_JOB_TIMEOUT_MS } from '#jobs/timeouts.js';
 import { delayWithSignal } from '#util/abort.js';
 import { getJobDeviceBlocker, minimumOsVersionForBuild } from '#jobs/deviceDispatch.js';
+import { offlineAppStoreProcessor } from '#offlineAppStore.js';
 
 const jobs = new Map<string, Job>();
 
@@ -37,6 +38,7 @@ const donePath = path.join(config.stateDir, 'done-jobs.json');
 const activePath = path.join(config.stateDir, 'active-jobs.json');
 const queue: string[] = [];
 const busyDeviceIds = new Set<string>();
+const busyOfflineWorkers = new Set<string>();
 const runningJobs = new Map<string, Promise<void>>();
 const runningJobControllers = new Map<string, AbortController>();
 const queuedDeadlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -346,9 +348,9 @@ function failExpiredQueuedJob(job: Job, now = Date.now()): void {
   job.status = 'failed';
   job.deadlineExceeded = true;
   job.progress = 'job deadline exceeded';
-  job.error = queueReason
-    ? `job deadline exceeded while waiting in the queue: ${queueReason}`
-    : 'job deadline exceeded while waiting in the queue';
+  const offlineFailure = job.offlineFailureReason ? `; server-side attempt failed: ${job.offlineFailureReason}` : '';
+  const separateOfflineFailure = offlineFailure && !queueReason?.includes(job.offlineFailureReason ?? '') ? offlineFailure : '';
+  job.error = `job deadline exceeded while waiting in the queue${queueReason ? `: ${queueReason}` : ''}${separateOfflineFailure}`;
   job.failureClass = classifyJobFailure(job.error);
   job.finishedAt = now;
   appendJobTimelineEvent(job, `Failed: ${job.error}`, 'failed', now);
@@ -447,7 +449,7 @@ export class AutomationOwnerUnavailableError extends Error {
 }
 
 function deferScheduledJobIfUnavailable(source: JobSource, job: Job, enabled: boolean | undefined): void {
-  if (source !== 'scheduler' || !enabled || job.status !== 'queued' || getJobDispatchableDeviceCount(job) > 0) return;
+  if (source !== 'scheduler' || !enabled || job.status !== 'queued' || getJobDispatchableDeviceCount(job) > 0 || (canStartOfflineAttempt(job) && !getJobConcurrencyBlocker(job))) return;
   throw new ScheduledJobDeferredError(getQueueReason(job) ?? 'No enabled device is available for this job');
 }
 
@@ -657,7 +659,11 @@ export function getJobQueueSummaries(sourceJobs: readonly Job[], now = Date.now(
 function getCurrentQueueReason(job: Job): string | undefined {
   if (job.status !== 'queued') return undefined;
   const enabledDevices = getEffectiveDevices().filter((device) => device.enabled && !device.draining);
-  if (enabledDevices.length === 0) return 'Waiting for a device accepting jobs';
+  if (enabledDevices.length === 0) {
+    if (canStartOfflineAttempt(job)) return busyOfflineWorkers.size >= config.appStoreOfflineMaxWorkers ? 'Waiting for a server-side App Store worker' : undefined;
+    const fallback = job.offlineFailureReason ? `Server-side attempt failed: ${job.offlineFailureReason} · ` : '';
+    return `${fallback}Waiting for a device accepting jobs`;
+  }
   const devices = job.preferredDeviceId
     ? enabledDevices.filter((device) => device.id === job.preferredDeviceId)
     : enabledDevices;
@@ -742,6 +748,9 @@ function toHistoryEntry(job: Job) {
     finishedAt: job.finishedAt ?? Date.now(),
     deviceId: job.deviceId,
     transport: job.transport,
+    executionPath: job.executionPath,
+    offlineAttemptedAt: job.offlineAttemptedAt,
+    offlineFailureReason: job.offlineFailureReason,
     ipaMetadata: job.ipaMetadata,
     ipaInfoPlist: job.ipaInfoPlist,
     artifactId: job.artifactId,
@@ -871,12 +880,23 @@ export function isJobDispatchable(job: Job, device: DeviceRecord): boolean {
 }
 
 export function getJobEligibleDeviceCount(job: Job): number {
-  return getEffectiveDevices().filter((device) => device.enabled && !device.draining && isJobDispatchable(job, device)).length;
+  const deviceCount = getEffectiveDevices().filter((device) => device.enabled && !device.draining && isJobDispatchable(job, device)).length;
+  return deviceCount + (canStartOfflineAttempt(job) ? config.appStoreOfflineMaxWorkers : 0);
 }
 
 function getJobDispatchableDeviceCount(job: Job): number {
   if (getJobConcurrencyBlocker(job)) return 0;
-  return getEffectiveDevices().filter((device) => device.enabled && !device.draining && !busyDeviceIds.has(device.id) && isJobDispatchable(job, device)).length;
+  const deviceCount = getEffectiveDevices().filter((device) => device.enabled && !device.draining && !busyDeviceIds.has(device.id) && isJobDispatchable(job, device)).length;
+  return deviceCount + offlineWorkerSlots(job);
+}
+
+function canStartOfflineAttempt(job: Job): boolean {
+  return !job.testflight && !job.offlineAttemptedAt && offlineAppStoreProcessor.readiness(job).ready;
+}
+
+function offlineWorkerSlots(job: Job): number {
+  if (!canStartOfflineAttempt(job)) return 0;
+  return Math.max(0, config.appStoreOfflineMaxWorkers - busyOfflineWorkers.size);
 }
 
 export function notifyDeviceDispatchStateChanged(): void {
@@ -940,6 +960,34 @@ function takeNextDispatchableJobId(device: DeviceRecord): string | undefined {
   return undefined;
 }
 
+function takeNextOfflineJobId(): string | undefined {
+  for (let i = 0; i < queue.length; i++) {
+    const job = jobs.get(queue[i]);
+    if (!job || !canStartOfflineAttempt(job) || getJobConcurrencyBlocker(job)) continue;
+    queue.splice(i, 1);
+    return job.id;
+  }
+  return undefined;
+}
+
+function startJobWorker(job: Job, device?: DeviceRecord): void {
+  if (device) busyDeviceIds.add(device.id);
+  else busyOfflineWorkers.add(job.id);
+  const run = withCorrelation({
+    correlationId: job.correlationId ?? job.id,
+    parentCorrelationId: job.parentCorrelationId,
+    traceId: job.traceContext?.traceId,
+    traceContext: job.traceContext,
+  }, () => runOneJob(device, job));
+  runningJobs.set(job.id, run);
+  void run.finally(() => {
+    runningJobs.delete(job.id);
+    if (device) busyDeviceIds.delete(device.id);
+    else busyOfflineWorkers.delete(job.id);
+    pumpWorkers();
+  });
+}
+
 function pumpWorkers(): void {
   for (const device of getEffectiveDevices()) {
     if (device.draining && !busyDeviceIds.has(device.id)) updateDevice(device.id, { enabled: false }, 'system');
@@ -947,6 +995,12 @@ function pumpWorkers(): void {
   captureQueuedBlockers();
   expireOverdueQueuedJobs();
   if (!acceptingJobs) return;
+  while (busyOfflineWorkers.size < config.appStoreOfflineMaxWorkers) {
+    const jobId = takeNextOfflineJobId();
+    if (!jobId) break;
+    const job = jobs.get(jobId);
+    if (job) startJobWorker(job);
+  }
   const devices = getEffectiveDevices().filter((d) => d.enabled && !d.draining);
   if (devices.length === 0) return;
   const primary = devices.find((d) => d.isPrimary) ?? devices[0];
@@ -959,42 +1013,39 @@ function pumpWorkers(): void {
     const job = jobs.get(jobId);
     if (!job) continue;
 
-    busyDeviceIds.add(device.id);
-    const run = withCorrelation({
-      correlationId: job.correlationId ?? job.id,
-      parentCorrelationId: job.parentCorrelationId,
-      traceId: job.traceContext?.traceId,
-      traceContext: job.traceContext,
-    }, () => runOneJob(device, job));
-    runningJobs.set(job.id, run);
-    void run.finally(() => {
-      runningJobs.delete(job.id);
-      busyDeviceIds.delete(device.id);
-      pumpWorkers();
-    });
+    startJobWorker(job, device);
   }
 }
 
-async function runOneJob(device: DeviceRecord, job: Job): Promise<void> {
+async function runOneJob(device: DeviceRecord | undefined, job: Job): Promise<void> {
   clearQueuedDeadline(job.id);
   job.status = 'running';
   const controller = new AbortController();
   runningJobControllers.set(job.id, controller);
-  job.startedAt = Date.now();
-  job.deviceId = device.id;
-  job.transport = device.transport;
-  job.attempt = (job.retryCount ?? 0) + 1;
+  const startedAt = Date.now();
+  job.startedAt ??= startedAt;
+  job.attempt = (job.retryCount ?? 0) + 1 + Number(Boolean(job.offlineFailureReason));
+  if (device) {
+    job.executionPath = job.offlineFailureReason ? 'device_fallback' : 'device';
+    job.deviceId = device.id;
+    job.transport = device.transport;
+  } else {
+    job.executionPath = 'appstore_offline';
+    job.offlineAttemptedAt = startedAt;
+    job.deviceId = undefined;
+    job.transport = undefined;
+  }
   recordJobStarted(job, job.startedAt);
-  appendJobTimelineEvent(job, `Started on ${device.name}`, 'running', job.startedAt);
-  log.info('job started', { jobId: job.id, bundleId: job.bundleId, deviceId: device.id });
-  recordDeviceActivity({ deviceId: device.id, kind: 'job', bundleId: job.bundleId, message: `Started ${job.testflight ? 'TestFlight' : 'App Store'} decrypt` });
+  appendJobTimelineEvent(job, device ? `Started on ${device.name}` : 'Started server-side App Store processing', 'running', startedAt);
+  log.info(device ? 'job started' : 'job started on server-side App Store worker', { jobId: job.id, bundleId: job.bundleId, deviceId: device?.id });
+  if (device) recordDeviceActivity({ deviceId: device.id, kind: 'job', bundleId: job.bundleId, message: `Started ${job.testflight ? 'TestFlight' : 'App Store'} decrypt` });
   persistActiveJobs();
   emitJobsChanged();
 
   try {
     const remainingMs = job.deadlineAt === undefined ? undefined : Math.max(1, job.deadlineAt - Date.now());
     await runWithJobDeadline(
-      (signal) => runDecrypt(job, device, signal),
+      (signal) => device ? runDecrypt(job, device, signal) : runOfflineAppStoreDecrypt(job, signal),
       controller,
       {
         timeoutMs: remainingMs,
@@ -1009,7 +1060,7 @@ async function runOneJob(device: DeviceRecord, job: Job): Promise<void> {
         onForceStopTimeout: (error) => {
           job.progress = 'deadline exceeded; waiting for device work to stop';
           appendJobTimelineEvent(job, job.progress, 'running');
-          log.error('device work did not stop after force-kill; keeping the device worker reserved', { jobId: job.id, bundleId: job.bundleId, deviceId: device.id, error: error ? String(error) : undefined });
+          log.error('job work did not stop after force-kill; keeping its worker reserved', { jobId: job.id, bundleId: job.bundleId, deviceId: device?.id, error: error ? String(error) : undefined });
           emitJobsChanged();
         },
       },
@@ -1022,19 +1073,36 @@ async function runOneJob(device: DeviceRecord, job: Job): Promise<void> {
     incrementMetric('jobs_completed_total', { source: job.source });
     observeMetric('job_duration_ms', Math.max(0, job.finishedAt - (job.startedAt ?? job.createdAt)), { source: job.source });
     appendJobTimelineEvent(job, 'Finished', 'done', job.finishedAt);
-    log.info('job done', { jobId: job.id, bundleId: job.bundleId, deviceId: device.id, sizeBytes: job.fileSizeBytes });
-    recordDeviceActivity({ deviceId: device.id, kind: 'job', bundleId: job.bundleId, message: 'Decrypt completed' });
+    log.info('job done', { jobId: job.id, bundleId: job.bundleId, deviceId: device?.id, executionPath: job.executionPath, sizeBytes: job.fileSizeBytes });
+    if (device) recordDeviceActivity({ deviceId: device.id, kind: 'job', bundleId: job.bundleId, message: 'Decrypt completed' });
     persistDoneJobs();
     persistActiveJobs();
     settleDecryptQuota(job.id, true);
   } catch (err) {
     let message = job.cancelledBy ? `cancelled by ${job.cancelledBy}` : err instanceof Error ? err.message : String(err);
+    if (device && job.offlineFailureReason) message = `${message}; earlier server-side attempt failed: ${job.offlineFailureReason}`;
     if (job.filePath?.startsWith(`${config.artifactDir}/.staging/`)) {
       await rm(job.filePath, { force: true }).catch(() => {});
       job.filePath = undefined;
     }
     if (job.shutdownRecoveryPending) {
       persistShutdownRecovery(job);
+      return;
+    }
+    if (!device && !job.cancelledBy && !job.deadlineExceeded && (job.deadlineAt === undefined || Date.now() < job.deadlineAt)) {
+      job.offlineFailureReason = message.replace(/\s+/g, ' ').slice(0, 600);
+      job.executionPath = 'device_fallback';
+      job.executionStage = undefined;
+      job.status = 'queued';
+      job.progress = 'Server-side attempt failed; waiting for device fallback';
+      job.error = undefined;
+      job.failureClass = undefined;
+      appendJobTimelineEvent(job, `Server-side attempt failed: ${job.offlineFailureReason}`, 'queued');
+      if (job.source === 'scheduler') queue.unshift(job.id);
+      else insertByPriority(job.id, job.priority);
+      scheduleQueuedDeadline(job);
+      persistActiveJobs();
+      emitJobsChanged();
       return;
     }
     job.failureClass = classifyJobFailure(message);
@@ -1049,7 +1117,7 @@ async function runOneJob(device: DeviceRecord, job: Job): Promise<void> {
     if (canRetry) {
       job.progress = 'retrying after a transient failure…';
       appendJobTimelineEvent(job, job.progress, 'running');
-      log.warn('job failed, retrying once after backoff', { jobId: job.id, bundleId: job.bundleId, deviceId: device.id, error: message });
+      log.warn('job failed, retrying once after backoff', { jobId: job.id, bundleId: job.bundleId, deviceId: device?.id, error: message });
       persistActiveJobs();
       emitJobsChanged();
       runningJobControllers.set(job.id, controller);
@@ -1095,8 +1163,8 @@ async function runOneJob(device: DeviceRecord, job: Job): Promise<void> {
     observeMetric('job_duration_ms', Math.max(0, job.finishedAt - (job.startedAt ?? job.createdAt)), { source: job.source });
     job.error = message;
     appendJobTimelineEvent(job, `Failed: ${message}`, 'failed', job.finishedAt);
-    log.error('job failed', { jobId: job.id, bundleId: job.bundleId, deviceId: device.id, error: job.error, retried: (job.retryCount ?? 0) > 0 });
-    recordDeviceActivity({ deviceId: device.id, kind: 'job', bundleId: job.bundleId, message: 'Decrypt failed' });
+    log.error('job failed', { jobId: job.id, bundleId: job.bundleId, deviceId: device?.id, executionPath: job.executionPath, error: job.error, retried: (job.retryCount ?? 0) > 0 });
+    if (device) recordDeviceActivity({ deviceId: device.id, kind: 'job', bundleId: job.bundleId, message: 'Decrypt failed' });
     persistActiveJobs();
     settleDecryptQuota(job.id, false);
   }

@@ -22,6 +22,7 @@ const childProcess = {
 } as unknown as ChildProcess;
 
 mock.module('#jobs/runner.js', () => ({
+  runOfflineAppStoreDecrypt: async () => {},
   runDecrypt: (job: Job) => {
     markRunnerStarted?.();
     job.childProcess = childProcess;

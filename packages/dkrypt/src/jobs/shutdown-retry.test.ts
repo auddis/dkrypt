@@ -5,6 +5,7 @@ let markRunnerStarted: (() => void) | undefined;
 const runnerStarted = new Promise<void>((resolve) => { markRunnerStarted = resolve; });
 
 mock.module('./runner.js', () => ({
+  runOfflineAppStoreDecrypt: async () => {},
   runDecrypt: () => {
     markRunnerStarted?.();
     return Promise.reject(new Error('network unavailable'));

@@ -18,6 +18,9 @@ type TimelineSource = {
   bundleId: string;
   status: Job['status'];
   executionStage?: JobExecutionStage;
+  executionPath?: Job['executionPath'];
+  offlineAttemptedAt?: number;
+  offlineFailureReason?: string;
   shutdownRecoveryAt?: number;
   versionLabel?: string;
   deviceId?: string;
@@ -49,6 +52,9 @@ function dashboardJobTimeline(source: TimelineSource) {
     bundleId: source.bundleId,
     status: source.status,
     executionStage: source.status === 'running' ? source.executionStage : undefined,
+    executionPath: source.executionPath,
+    offlineAttemptedAt: source.offlineAttemptedAt,
+    offlineFailureReason: source.offlineFailureReason,
     shutdownRecoveryAt: source.shutdownRecoveryAt,
     versionLabel: source.versionLabel,
     deviceId: source.deviceId,

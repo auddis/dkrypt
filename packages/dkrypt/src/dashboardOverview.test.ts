@@ -4,6 +4,7 @@ import { DEFAULT_PROJECT_ID, createDevice, createProject, deleteDevice, recordJo
 import { setCachedDeviceHealth } from '#deviceHealthCache.js';
 
 mock.module('./jobs/runner.js', () => ({
+  runOfflineAppStoreDecrypt: async () => {},
   runDecrypt: (_job: Job, _device: unknown, signal?: AbortSignal) => new Promise<void>((_resolve, reject) => {
     const abort = () => reject(signal?.reason instanceof Error ? signal.reason : new Error('operation aborted'));
     if (signal?.aborted) abort();

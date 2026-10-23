@@ -24,7 +24,7 @@ import {
   type IdentitySnapshot,
 } from '#identity.js';
 import { log } from '#logger.js';
-import type { JobTimelineEvent, TestFlightJobSource } from '#jobs/types.js';
+import type { JobExecutionPath, JobTimelineEvent, TestFlightJobSource } from '#jobs/types.js';
 import { exportDecryptQuotaLedger } from '#jobs/repository.js';
 import { createAccountRepository, isAllowedUserRecord, isRoleRecord, isUserMfaRecord, validateAccountCollections, type AccountCollections } from '#store/accountRepository.js';
 import { createBillingRepository } from '#store/billingRepository.js';
@@ -410,6 +410,9 @@ export interface JobHistoryEntry {
   finishedAt: number;
   deviceId?: string;
   transport?: DeviceTransport;
+  executionPath?: JobExecutionPath;
+  offlineAttemptedAt?: number;
+  offlineFailureReason?: string;
   ipaMetadata?: IpaMetadata;
   ipaInfoPlist?: Record<string, unknown>;
   timeline?: JobTimelineEvent[];

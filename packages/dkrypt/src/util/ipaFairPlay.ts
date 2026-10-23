@@ -1,0 +1,120 @@
+import AdmZip from 'adm-zip';
+import { parse as parseXmlPlist } from 'plist';
+import { parseBuffer as parseBinaryPlist } from 'bplist-parser';
+
+export interface FairPlayVerificationResult {
+  encryptedPaths: string[];
+  primaryExecutable: string;
+  primaryEncrypted: boolean;
+  extensionOnly: boolean;
+}
+
+interface MachOSlice {
+  offset: number;
+  size: number;
+  cpuType: number;
+}
+
+function readUInt32(buffer: Buffer, offset: number, littleEndian: boolean): number | undefined {
+  if (offset < 0 || offset + 4 > buffer.length) return undefined;
+  return littleEndian ? buffer.readUInt32LE(offset) : buffer.readUInt32BE(offset);
+}
+
+function readSlices(buffer: Buffer): MachOSlice[] {
+  const magic = readUInt32(buffer, 0, false);
+  if (magic === 0xcafebabe || magic === 0xbebafeca || magic === 0xcafebabf || magic === 0xbfbafeca) {
+    const littleEndian = magic === 0xbebafeca || magic === 0xbfbafeca;
+    const is64 = magic === 0xcafebabf || magic === 0xbfbafeca;
+    const count = readUInt32(buffer, 4, littleEndian);
+    if (count === undefined || count < 1 || count > 128) return [];
+    const stride = is64 ? 32 : 20;
+    const slices: MachOSlice[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const base = 8 + index * stride;
+      if (base + stride > buffer.length) return [];
+      const offset = is64
+        ? littleEndian ? Number(buffer.readBigUInt64LE(base + 8)) : Number(buffer.readBigUInt64BE(base + 8))
+        : readUInt32(buffer, base + 8, littleEndian);
+      const size = is64
+        ? littleEndian ? Number(buffer.readBigUInt64LE(base + 16)) : Number(buffer.readBigUInt64BE(base + 16))
+        : readUInt32(buffer, base + 12, littleEndian);
+      if (offset === undefined || size === undefined || !Number.isSafeInteger(offset) || !Number.isSafeInteger(size) || offset + size > buffer.length) return [];
+      const cpuType = readUInt32(buffer, base, littleEndian);
+      if (cpuType === undefined) return [];
+      slices.push({ offset, size, cpuType });
+    }
+    return slices;
+  }
+  if ([0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe].includes(magic ?? -1)) {
+    const cpuType = readUInt32(buffer, 4, magic === 0xcefaedfe || magic === 0xcffaedfe);
+    return cpuType === undefined ? [] : [{ offset: 0, size: buffer.length, cpuType }];
+  }
+  return [];
+}
+
+function hasEncryptedLoadCommand(buffer: Buffer, slice: MachOSlice): boolean | undefined {
+  const magic = readUInt32(buffer, slice.offset, false);
+  const littleEndian = magic === 0xcefaedfe || magic === 0xcffaedfe;
+  const is64 = magic === 0xfeedfacf || magic === 0xcffaedfe;
+  if (![0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe].includes(magic ?? -1)) return undefined;
+  const headerSize = is64 ? 32 : 28;
+  const commandCount = readUInt32(buffer, slice.offset + 16, littleEndian);
+  const commandBytes = readUInt32(buffer, slice.offset + 20, littleEndian);
+  if (commandCount === undefined || commandBytes === undefined || commandCount > 65_536 || slice.offset + headerSize + commandBytes > slice.offset + slice.size) return undefined;
+  let commandOffset = slice.offset + headerSize;
+  for (let index = 0; index < commandCount; index += 1) {
+    const command = readUInt32(buffer, commandOffset, littleEndian);
+    const commandSize = readUInt32(buffer, commandOffset + 4, littleEndian);
+    if (command === undefined || commandSize === undefined || commandSize < 8 || commandOffset + commandSize > slice.offset + slice.size) return undefined;
+    if ((command === 0x21 || command === 0x2c) && commandSize >= 20) {
+      const cryptId = readUInt32(buffer, commandOffset + 16, littleEndian);
+      if (cryptId === undefined) return undefined;
+      if (cryptId !== 0) return true;
+    }
+    commandOffset += commandSize;
+  }
+  return false;
+}
+
+function isEncryptedMachO(buffer: Buffer): boolean | undefined {
+  const slices = readSlices(buffer);
+  if (slices.length === 0) return undefined;
+  let parsed = false;
+  for (const slice of slices) {
+    const encrypted = hasEncryptedLoadCommand(buffer, slice);
+    if (encrypted === undefined) continue;
+    parsed = true;
+    if (encrypted) return true;
+  }
+  return parsed ? false : undefined;
+}
+
+function parseInfoPlist(buffer: Buffer): Record<string, unknown> {
+  if (buffer.subarray(0, 8).equals(Buffer.from('bplist00', 'ascii'))) {
+    return (parseBinaryPlist(buffer) as Record<string, unknown>[])[0] ?? {};
+  }
+  return parseXmlPlist(buffer.toString('utf8')) as Record<string, unknown>;
+}
+
+export function verifyIpaFairPlayDecrypted(ipaPath: string): FairPlayVerificationResult {
+  const archive = new AdmZip(ipaPath);
+  const entries = archive.getEntries().filter((entry) => !entry.isDirectory);
+  const appInfo = entries.find((entry) => /^Payload\/[^/]+\.app\/Info\.plist$/.test(entry.entryName));
+  if (!appInfo) throw new Error('downloaded IPA does not contain Payload/*.app/Info.plist');
+  const info = parseInfoPlist(appInfo.getData());
+  const appRoot = /^Payload\/([^/]+\.app)\/Info\.plist$/.exec(appInfo.entryName)?.[1];
+  if (!appRoot || typeof info.CFBundleExecutable !== 'string' || !info.CFBundleExecutable) {
+    throw new Error('downloaded IPA has no primary app executable metadata');
+  }
+  const primaryExecutable = `Payload/${appRoot}/${info.CFBundleExecutable}`;
+  const primaryEntry = entries.find((entry) => entry.entryName === primaryExecutable);
+  if (!primaryEntry) throw new Error('downloaded IPA is missing its primary app executable');
+  const primaryBuffer = primaryEntry.getData();
+  const primarySlices = readSlices(primaryBuffer);
+  if (!primarySlices.some((slice) => slice.cpuType === 0x0100000c)) throw new Error('downloaded IPA primary executable has no arm64 Mach-O slice');
+  if (isEncryptedMachO(primaryBuffer) === undefined) throw new Error('downloaded IPA primary executable is malformed');
+  const encryptedPaths = entries.flatMap((entry) => isEncryptedMachO(entry.getData()) === true ? [entry.entryName] : []);
+  const primaryEncrypted = encryptedPaths.includes(primaryExecutable);
+  const extensionOnly = encryptedPaths.length > 0 && encryptedPaths.every((entry) => /(?:^|\/)(?:Extensions|PlugIns)\/|\.appex(?:\/|$)/i.test(entry));
+  return { encryptedPaths, primaryExecutable, primaryEncrypted, extensionOnly };
+}

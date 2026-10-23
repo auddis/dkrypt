@@ -142,6 +142,9 @@ export interface JobSummary {
   transport?: 'usb' | 'wifi';
   attempt?: number;
   retryCount?: number;
+  executionPath?: 'appstore_offline' | 'device' | 'device_fallback';
+  offlineAttemptedAt?: number;
+  offlineFailureReason?: string;
   deadlineAt?: string;
   deadlineExceeded?: boolean;
   failureClass?: string;
@@ -183,6 +186,9 @@ export interface ActiveJob {
   retryCount?: number;
   deadlineAt?: number;
   deadlineExceeded?: boolean;
+  executionPath?: 'appstore_offline' | 'device' | 'device_fallback';
+  offlineAttemptedAt?: number;
+  offlineFailureReason?: string;
   failureClass?: string;
   queueReason?: string;
 }
@@ -558,6 +564,10 @@ export interface JobTimeline {
   correlationId: string;
   bundleId: string;
   status: 'queued' | 'running' | 'done' | 'failed';
+  executionStage?: 'preparing' | 'installing' | 'decrypting' | 'offline_download' | 'offline_decrypting' | 'finalizing';
+  executionPath?: 'appstore_offline' | 'device' | 'device_fallback';
+  offlineAttemptedAt?: number;
+  offlineFailureReason?: string;
   events: JobTimelineEvent[];
   warnings?: string[];
   queueReason?: string;
@@ -2005,6 +2015,37 @@ export interface CompatibilityMatrix {
 
 export function fetchCompatibilityMatrix(): Promise<CompatibilityMatrix> {
   return apiJson('/v1/dashboard/compatibility');
+}
+
+export interface OfflineAppStoreStatus {
+  enabled: boolean;
+  ready: boolean;
+  downloaderAvailable: boolean;
+  decryptorAvailable: boolean;
+  terminalAvailable: boolean;
+  fairPlayAuthorized: boolean;
+  vault: { encryptionReady: boolean; accountConfigured: boolean; credentialConfigured: boolean; authenticatedAt?: number; accountHint?: string; authenticationError?: string };
+  blockers: string[];
+}
+
+export function fetchOfflineAppStoreStatus(): Promise<OfflineAppStoreStatus> {
+  return apiJson('/v1/dashboard/appstore-offline/status');
+}
+
+export function saveOfflineAppStoreAccount(appleId: string, password: string): Promise<OfflineAppStoreStatus> {
+  return apiJson('/v1/dashboard/appstore-offline/account', { method: 'PUT', body: JSON.stringify({ appleId, password }) });
+}
+
+export function authenticateOfflineAppStoreAccount(verificationCode?: string): Promise<OfflineAppStoreStatus> {
+  return apiJson('/v1/dashboard/appstore-offline/authenticate', { method: 'POST', body: JSON.stringify(verificationCode ? { verificationCode } : {}) });
+}
+
+export function saveOfflineAppStoreCredential(credential: string): Promise<OfflineAppStoreStatus> {
+  return apiJson('/v1/dashboard/appstore-offline/credential', { method: 'PUT', body: JSON.stringify({ credential }) });
+}
+
+export function clearOfflineAppStoreAccount(): Promise<OfflineAppStoreStatus> {
+  return apiJson('/v1/dashboard/appstore-offline/account', { method: 'DELETE' });
 }
 
 export function runDashboardSyntheticProbes(): Promise<DashboardSyntheticReport> {

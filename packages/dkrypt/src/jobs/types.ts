@@ -9,7 +9,8 @@ export type JobStatus = 'queued' | 'running' | 'done' | 'failed';
 
 export type JobSource = 'manual' | 'scheduler';
 
-export type JobExecutionStage = 'preparing' | 'installing' | 'decrypting' | 'finalizing';
+export type JobExecutionStage = 'preparing' | 'installing' | 'decrypting' | 'offline_download' | 'offline_decrypting' | 'finalizing';
+export type JobExecutionPath = 'appstore_offline' | 'device' | 'device_fallback';
 
 export type { JobFailureClass } from '#util/failureCategory.js';
 
@@ -43,6 +44,9 @@ export interface Job {
   priority: number;
   status: JobStatus;
   executionStage?: JobExecutionStage;
+  executionPath?: JobExecutionPath;
+  offlineAttemptedAt?: number;
+  offlineFailureReason?: string;
   progress: string;
   timeline?: JobTimelineEvent[];
   warnings?: string[];

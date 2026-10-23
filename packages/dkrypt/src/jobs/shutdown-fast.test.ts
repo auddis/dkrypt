@@ -7,6 +7,7 @@ let markRunnerStarted: (() => void) | undefined;
 const runnerStarted = new Promise<void>((resolve) => { markRunnerStarted = resolve; });
 
 mock.module('./runner.js', () => ({
+  runOfflineAppStoreDecrypt: async () => {},
   runDecrypt: (_job: Job, _device: unknown, signal?: AbortSignal) => {
     markRunnerStarted?.();
     return new Promise<void>((resolve, reject) => {

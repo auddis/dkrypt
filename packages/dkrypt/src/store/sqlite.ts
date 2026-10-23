@@ -763,6 +763,12 @@ const migrations = [
       CREATE INDEX IF NOT EXISTS decrypt_quota_by_owner_time ON decrypt_quota_ledger(owner_id, admitted_at);
     `,
   },
+  {
+    version: 27,
+    sql: `
+      CREATE TABLE IF NOT EXISTS appstore_offline_account (id TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL, updated_at INTEGER NOT NULL);
+    `,
+  },
 ] as const;
 
 export const LATEST_SQLITE_SCHEMA_VERSION = migrations.at(-1)?.version ?? 0;
@@ -819,6 +825,7 @@ const collectionTables = new Set([
   'pending_oauth_links',
   'device_setup_operations',
   'decrypt_quota_ledger',
+  'appstore_offline_account',
 ]);
 
 function assertCollectionTable(table: string): void {

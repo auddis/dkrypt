@@ -12,6 +12,7 @@ let priorRecoveryAt = 0;
 const runnerStarted = new Promise<void>((resolve) => { markRunnerStarted = resolve; });
 
 mock.module('#jobs/runner.js', () => ({
+  runOfflineAppStoreDecrypt: async () => {},
   runDecrypt: (job: Job, _device: unknown, signal?: AbortSignal) => {
     priorRecoveryAt = Date.now() - 60_000;
     appendJobTimelineEvent(job, 'Requeued after graceful shutdown', 'queued', priorRecoveryAt);
