@@ -269,9 +269,9 @@
         {:else}
           <p class="rounded-lg border border-border/70 px-3 py-4 text-sm text-muted">No paid subscription payments were found.</p>
         {/if}
-        <div class="mt-3 grid gap-2 text-xs text-muted sm:grid-cols-2">
-          <div><span class="font-medium text-text">Stripe:</span> {revenue.providers.stripe.state === 'ready' ? `${revenue.providers.stripe.paymentCount} paid invoice payments` : revenue.providers.stripe.state === 'not_configured' ? 'Not configured' : 'History unavailable'}{#if revenue.providers.stripe.totals.length} · {revenue.providers.stripe.totals.map((total) => `${money(total.net, total.currency)} ${total.currency}`).join(', ')}{/if}</div>
-          <div><span class="font-medium text-text">NOWPayments:</span> {revenue.providers.nowpayments.state === 'ready' ? `${revenue.providers.nowpayments.paymentCount} paid crypto payments` : 'History unavailable'}{#if revenue.providers.nowpayments.totals.length} · {revenue.providers.nowpayments.totals.map((total) => `${money(total.net, total.currency)} ${total.currency}`).join(', ')}{/if}</div>
+        <div class="mt-3 grid min-w-0 gap-2 text-xs text-muted sm:grid-cols-2">
+          <div class="min-w-0 break-words"><span class="font-medium text-text">Stripe:</span> {revenue.providers.stripe.state === 'ready' ? `${revenue.providers.stripe.paymentCount} paid invoice payments` : revenue.providers.stripe.state === 'not_configured' ? 'Not configured' : 'History unavailable'}{#if revenue.providers.stripe.totals.length} · {revenue.providers.stripe.totals.map((total) => `${money(total.net, total.currency)} ${total.currency}`).join(', ')}{/if}</div>
+          <div class="min-w-0 break-words"><span class="font-medium text-text">NOWPayments:</span> {revenue.providers.nowpayments.state === 'ready' ? `${revenue.providers.nowpayments.paymentCount} paid crypto payments` : 'History unavailable'}{#if revenue.providers.nowpayments.totals.length} · {revenue.providers.nowpayments.totals.map((total) => `${money(total.net, total.currency)} ${total.currency}`).join(', ')}{/if}</div>
         </div>
         {#if revenue.warnings.length || revenueError}
           <div class="mt-3 space-y-1 rounded-lg border border-warning/30 bg-panel-muted/50 p-3 text-xs text-muted">
