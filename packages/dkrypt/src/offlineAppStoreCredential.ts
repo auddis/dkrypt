@@ -82,7 +82,7 @@ export function sshWrapper(): string {
     'done',
     'printf -v quoted_remote "%q" "$remote"',
     'args[$last]="sudo -n env PATH=/var/jb/usr/bin:/var/jb/bin:/usr/bin:/bin:/sbin sh -c $quoted_remote"',
-    'exec /usr/bin/ssh -i "$DKRYPT_DEVICE_SSH_KEY" -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR "${args[@]}"',
+    'exec /usr/bin/ssh -i "$DKRYPT_DEVICE_SSH_KEY" -o HostKeyAlias=dkrypt-device -o UserKnownHostsFile="${DKRYPT_DEVICE_SSH_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}" -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR "${args[@]}"',
     '',
   ].join('\n');
 }
@@ -133,7 +133,7 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
   try {
     wrapperRoot = await mkdtemp(path.join(tmpdir(), 'dkrypt-fairplay-ssh-'));
     const executableRoot = wrapperRoot;
-    const runAtPort = async (port: number, keyPath: string): Promise<Buffer> => {
+    const runAtPort = async (port: number, keyPath: string, knownHostsPath: string): Promise<Buffer> => {
       if (!Number.isInteger(port) || port < 1 || port > 65535 || !path.isAbsolute(keyPath)) throw new Error('The managed device tunnel configuration is invalid');
       const binDirectory = path.join(executableRoot, 'bin');
       const sshHomeDirectory = path.join(temporaryRoot, '.ssh');
@@ -148,6 +148,7 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
         HOME: temporaryRoot,
         LANG: 'C.UTF-8',
         DKRYPT_DEVICE_SSH_KEY: keyPath,
+        DKRYPT_DEVICE_SSH_KNOWN_HOSTS: knownHostsPath,
       };
       const child = spawn(config.appStoreOfflinePythonBin, [
         config.appStoreOfflineCredentialRetriever,
@@ -215,7 +216,7 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
       if (host !== '127.0.0.1' || typeof port !== 'number' || typeof keyPath !== 'string') {
         throw new Error('The managed device tunnel configuration is invalid');
       }
-      return runAtPort(port, keyPath);
+      return runAtPort(port, keyPath, path.join(runtimeDirectory, 'ssh_known_hosts'));
     });
   } finally {
     await Promise.all([

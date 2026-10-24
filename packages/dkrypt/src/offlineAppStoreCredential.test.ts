@@ -33,12 +33,17 @@ test('credential SSH wrapper converts upstream root access to the paired mobile 
     'if command -v jbroot >/dev/null 2>&1; then jbroot /var/tmp; fi',
   ], {
     encoding: 'utf8',
-    env: { ...process.env, DKRYPT_DEVICE_SSH_KEY: '/tmp/device-key' },
+    env: {
+      ...process.env,
+      DKRYPT_DEVICE_SSH_KEY: '/tmp/device-key',
+      DKRYPT_DEVICE_SSH_KNOWN_HOSTS: '/tmp/device-runtime/ssh_known_hosts',
+    },
   });
 
   expect(result.status).toBe(0);
   expect(result.stdout).toContain('mobile@127.0.0.1');
-  expect(result.stdout).toContain('.ssh/known_hosts');
+  expect(result.stdout).toContain('HostKeyAlias=dkrypt-device');
+  expect(result.stdout).toContain('UserKnownHostsFile=/tmp/device-runtime/ssh_known_hosts');
   expect(result.stdout).toContain('StrictHostKeyChecking=accept-new');
   expect(result.stdout).not.toContain('UserKnownHostsFile=/dev/null');
   expect(result.stdout).not.toContain('StrictHostKeyChecking=no');
