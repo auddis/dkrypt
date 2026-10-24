@@ -19,6 +19,10 @@ import { throwIfAborted } from '#util/abort.js';
 import { terminateChildProcess } from '#jobs/process.js';
 import { createOfflineAppStoreAuthenticationRepository } from '#store/offlineAppStoreAuthenticationRepository.js';
 import { openStateCollectionDatabase } from '#store/sqlite.js';
+import { scopedLogger } from '#logger.js';
+import { sanitizeAppStoreDownloadDiagnostic } from '#offlineAppStoreDiagnostic.js';
+
+const log = scopedLogger('appstore-offline');
 
 export interface OfflineAppStoreReadiness {
   enabled: boolean;
@@ -438,6 +442,12 @@ async function runDefaultDownload(job: Job, secrets: AppleAccountSecrets, output
       },
     ), signal).finally(() => { job.childProcess = undefined; });
   if (result.code !== 0) {
+    log.warn('server-side App Store download failed', {
+      jobId: job.id,
+      bundleId: job.bundleId,
+      exitCode: result.code,
+      diagnostic: sanitizeAppStoreDownloadDiagnostic(result.output, secrets),
+    });
     const twoFactorRequired = /2fa code|verification code|two-factor/i.test(result.output);
     if (twoFactorRequired) {
       clearAppleAccountSessionSnapshot();
