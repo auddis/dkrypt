@@ -10,6 +10,14 @@ const shutdownRecoveryWorkflow = readFileSync(path.resolve(import.meta.dir, '../
 const decryptRunner = readFileSync(path.resolve(import.meta.dir, 'jobs/runner.ts'), 'utf8');
 const composeUpCommand = 'DKRYPT_IMAGE="$IMAGE" docker compose --env-file /home/adrian/.local/share/dkrypt/.env --project-name dkrypt -f /home/adrian/.local/share/dkrypt/compose.yml up -d --no-build';
 
+test('FairPlay Python environment uses the same pinned runtime image as the API', () => {
+  const fairPlayBase = dockerfile.match(/^FROM (\S+) AS fairplay-decrypt$/m)?.[1];
+  const runtimeBase = [...dockerfile.matchAll(/^FROM (\S+)(?: AS [\w-]+)?$/gm)].at(-1)?.[1];
+
+  expect(fairPlayBase).toMatch(/^oven\/bun:[^@]+@sha256:/);
+  expect(runtimeBase).toBe(fairPlayBase);
+});
+
 test('every device bridge launch runs with USB access and API socket group access', () => {
   const launchCommands = entrypoint
     .split('\n')

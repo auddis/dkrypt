@@ -44,7 +44,7 @@ COPY packages/appstore-downloader/tests ./packages/appstore-downloader/tests
 WORKDIR /src/packages/appstore-downloader
 RUN cargo test --locked && cargo build --release --locked
 
-FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8 AS fairplay-decrypt
+FROM oven/bun:1.4.3-slim@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52a3288 AS fairplay-decrypt
 ARG FAIRPLAY_DECRYPT_REV=1bad106ee1698c6d9c483f67d898183ffa4c6eb3
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev make python3 python3-venv tar && rm -rf /var/lib/apt/lists/*
 RUN set -eu; \
