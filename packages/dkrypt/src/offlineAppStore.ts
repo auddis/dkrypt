@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import type { Writable } from 'node:stream';
 import { config } from '#config.js';
+import { createAppleAccountAuthenticationOperation } from '#offlineAppStoreAuthOperation.js';
 import { clearAppleAccountSessionSnapshot, markAppleAccountAuthenticated, markAppleAccountAuthenticationError, readAppleAccountSecrets, readAppleAccountSessionSnapshot, saveAppleAccountSessionSnapshot, getAppleAccountVaultStatus } from '#appleAccountVault.js';
 import type { AppleAccountSecrets, AppleAccountVaultStatus } from '#appleAccountVault.js';
 import type { FairPlayVerificationResult } from '#util/ipaFairPlay.js';
@@ -16,6 +17,8 @@ import { commandWithResourceLimits } from '#jobs/resourceLimits.js';
 import type { Job, JobExecutionStage } from '#jobs/types.js';
 import { throwIfAborted } from '#util/abort.js';
 import { terminateChildProcess } from '#jobs/process.js';
+import { createOfflineAppStoreAuthenticationRepository } from '#store/offlineAppStoreAuthenticationRepository.js';
+import { openStateCollectionDatabase } from '#store/sqlite.js';
 
 export interface OfflineAppStoreReadiness {
   enabled: boolean;
@@ -532,6 +535,20 @@ export async function authenticateAppleAccount(authCode?: string, signal?: Abort
   }
   markAppleAccountAuthenticated();
 }
+
+const appleAccountAuthenticationOperation = createAppleAccountAuthenticationOperation({
+  authenticate: authenticateAppleAccount,
+  repository: createOfflineAppStoreAuthenticationRepository(openStateCollectionDatabase({
+    stateDir: config.stateDir,
+    filename: config.stateDatabaseFile,
+    busyTimeoutMs: config.stateDbBusyTimeoutMs,
+  }, ['appstore_offline_authentication_operations'])),
+  timeoutMs: config.appStoreOfflineAuthenticationTimeoutSeconds * 1000,
+});
+
+export const getAppleAccountAuthenticationStatus = appleAccountAuthenticationOperation.status;
+export const startAppleAccountAuthentication = appleAccountAuthenticationOperation.start;
+export const resetAppleAccountAuthentication = appleAccountAuthenticationOperation.reset;
 
 export function getOfflineAppStoreReadiness(job?: Pick<Job, 'testflight'>): OfflineAppStoreReadiness {
   return defaultProcessor.readiness(job);

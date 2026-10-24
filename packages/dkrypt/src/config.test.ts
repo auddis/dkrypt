@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-async function loadDefaultRetention(): Promise<{ jobRetentionMinutes: number; nowpaymentsSupportedAssets: string[]; nowpaymentsDefaultAsset: string; nowpaymentsOutcomeCurrency: string }> {
+async function loadDefaultRetention(): Promise<{ jobRetentionMinutes: number; nowpaymentsSupportedAssets: string[]; nowpaymentsDefaultAsset: string; nowpaymentsOutcomeCurrency: string; appStoreOfflineAuthenticationTimeoutSeconds: number }> {
   const child = Bun.spawn(
     [
       process.execPath,
       '-e',
-      "const { config } = await import('./src/config.ts'); console.log(JSON.stringify({ jobRetentionMinutes: config.jobRetentionMinutes, nowpaymentsSupportedAssets: config.nowpaymentsSupportedAssets, nowpaymentsDefaultAsset: config.nowpaymentsDefaultAsset, nowpaymentsOutcomeCurrency: config.nowpaymentsOutcomeCurrency }));",
+      "const { config } = await import('./src/config.ts'); console.log(JSON.stringify({ jobRetentionMinutes: config.jobRetentionMinutes, nowpaymentsSupportedAssets: config.nowpaymentsSupportedAssets, nowpaymentsDefaultAsset: config.nowpaymentsDefaultAsset, nowpaymentsOutcomeCurrency: config.nowpaymentsOutcomeCurrency, appStoreOfflineAuthenticationTimeoutSeconds: config.appStoreOfflineAuthenticationTimeoutSeconds }));",
     ],
     {
       cwd: process.cwd(),
@@ -24,7 +24,7 @@ async function loadDefaultRetention(): Promise<{ jobRetentionMinutes: number; no
     child.exited,
   ]);
   if (exitCode !== 0) throw new Error(`config defaults lookup failed: ${stderr}`);
-  return JSON.parse(stdout) as { jobRetentionMinutes: number; nowpaymentsSupportedAssets: string[]; nowpaymentsDefaultAsset: string; nowpaymentsOutcomeCurrency: string };
+  return JSON.parse(stdout) as { jobRetentionMinutes: number; nowpaymentsSupportedAssets: string[]; nowpaymentsDefaultAsset: string; nowpaymentsOutcomeCurrency: string; appStoreOfflineAuthenticationTimeoutSeconds: number };
 }
 
 async function loadStripeMissingConfiguration(): Promise<string[]> {
@@ -115,6 +115,7 @@ describe('config defaults', () => {
       nowpaymentsSupportedAssets: ['USDC', 'USDT'],
       nowpaymentsDefaultAsset: 'USDC',
       nowpaymentsOutcomeCurrency: 'USDC',
+      appStoreOfflineAuthenticationTimeoutSeconds: 300,
     });
   });
 

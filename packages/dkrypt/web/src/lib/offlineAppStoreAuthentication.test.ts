@@ -1,9 +1,8 @@
 import { expect, test } from 'bun:test';
 import { authenticateOfflineAppStoreAccountRequest, OFFLINE_APP_STORE_AUTHENTICATION_TIMEOUT_MS } from './offlineAppStoreAuthentication';
 
-test('Apple Account verification times out before the gateway deadline', () => {
-  expect(OFFLINE_APP_STORE_AUTHENTICATION_TIMEOUT_MS).toBe(40_000);
-  expect(OFFLINE_APP_STORE_AUTHENTICATION_TIMEOUT_MS).toBeLessThan(45_000);
+test('Apple Account verification only waits for the short background-operation start response', () => {
+  expect(OFFLINE_APP_STORE_AUTHENTICATION_TIMEOUT_MS).toBe(10_000);
 });
 
 test('Apple Account verification aborts a request that never settles and reports a timeout', async () => {
@@ -20,7 +19,7 @@ test('Apple Account verification aborts a request that never settles and reports
   ).then(() => 'resolved', (error: unknown) => error instanceof Error ? error.message : String(error));
 
   expect(aborted).toBe(true);
-  expect(result).toBe('Apple Account verification timed out. Check status before trying again; Apple may still be processing sign-in.');
+  expect(result).toBe('Could not start Apple Account verification. Refresh status before trying again.');
 });
 
 test('Apple Account verification sends the optional one-time code through the authenticated API', async () => {

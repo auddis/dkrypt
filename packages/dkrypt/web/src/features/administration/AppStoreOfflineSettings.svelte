@@ -17,7 +17,6 @@
   let verificationCode = $state('');
   let devices = $state<DeviceRecord[]>([]);
   let selectedDeviceId = $state('');
-  let verificationRequested = $state(false);
   let loading = $state(false);
   let savingAccount = $state(false);
   let authenticating = $state(false);
@@ -34,11 +33,18 @@
     if (statusRefresh) return statusRefresh;
     statusRefresh = (async () => {
       try {
-        status = await withRequestTimeout(
+        const previousAuthenticationState = status?.authentication?.state;
+        const refreshed = await withRequestTimeout(
           (signal) => fetchOfflineAppStoreStatus({ signal }),
           STATUS_REQUEST_TIMEOUT_MS,
           STATUS_TIMEOUT_MESSAGE,
         );
+        status = refreshed;
+        if (previousAuthenticationState === 'running' && refreshed.authentication?.state === 'succeeded') {
+          notice = 'Apple Account sign-in was verified.';
+        } else if (previousAuthenticationState === 'running' && ['failed', 'interrupted', 'verification_required'].includes(refreshed.authentication?.state ?? '')) {
+          notice = '';
+        }
         if (error.startsWith('Could not refresh App Store processing status:')) error = '';
       } catch (cause) {
         error = `Could not refresh App Store processing status: ${cause instanceof Error ? cause.message : 'request failed'}`;
@@ -92,7 +98,6 @@
       );
       password = '';
       verificationCode = '';
-      verificationRequested = false;
       notice = 'Apple Account details were encrypted and saved.';
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Could not save Apple Account details.';
@@ -115,12 +120,11 @@
         confirmRecentAuthentication,
       );
       verificationCode = '';
-      verificationRequested = false;
-      notice = 'Apple Account sign-in was verified.';
+      notice = status.authentication?.state === 'verification_required'
+        ? 'Check the trusted iPad for Apple’s six-digit code, then enter it here.'
+        : 'Apple Account verification started. It may take a few minutes; this page will update automatically.';
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : 'Apple Account authentication failed.';
-      if (message.toLowerCase().includes('verification code')) verificationRequested = true;
-      error = message;
+      error = cause instanceof Error ? cause.message : 'Apple Account authentication failed.';
     } finally {
       authenticating = false;
     }
@@ -147,7 +151,7 @@
   onMount(() => {
     void refresh();
     const timer = setInterval(() => {
-      if (status?.credentialRetrieval.state === 'running') void refreshStatus();
+      if (status?.credentialRetrieval.state === 'running' || status?.authentication?.state === 'running') void refreshStatus();
     }, 3000);
     return () => clearInterval(timer);
   });
@@ -182,6 +186,13 @@
         {#if status.credentialRetrieval.error}<p class="mt-1 text-xs text-muted">{status.credentialRetrieval.error}</p>{/if}
       </div>
     {/if}
+    {#if status.authentication && status.authentication.state !== 'idle'}
+      <div class="mt-3 rounded-lg border border-border/70 bg-muted/20 p-3 text-sm" role={['failed', 'interrupted'].includes(status.authentication.state) ? 'alert' : 'status'}>
+        <div class="font-medium">{status.authentication.state === 'running' ? 'Verifying Apple Account' : status.authentication.state === 'verification_required' ? 'Apple verification code required' : status.authentication.state === 'succeeded' ? 'Apple Account verified' : status.authentication.state === 'interrupted' ? 'Apple verification interrupted' : 'Apple Account verification failed'}</div>
+        {#if status.authentication.state === 'running' && status.authentication.startedAt}<p class="mt-1 text-xs text-muted">Started {new Date(status.authentication.startedAt).toLocaleTimeString()}. Apple sign-in can take a few minutes; this status updates automatically.</p>{/if}
+        {#if status.authentication.error}<p class="mt-1 text-xs text-muted">{status.authentication.error}</p>{/if}
+      </div>
+    {/if}
     {#if status.blockers.length > 0}
       <ul class="mt-3 list-disc space-y-1 pl-5 text-xs text-muted" aria-label="Setup requirements">
         {#each status.blockers as blocker (blocker)}<li>{blocker}</li>{/each}
@@ -198,8 +209,8 @@
       {#if status?.vault.accountConfigured}
         <div class="space-y-2 rounded-lg border border-border/70 p-3">
           <p class="text-xs text-muted">Re-authentication may ask for a code sent to the trusted iPad. Approval is not automatic; dkrypt cannot reliably match Apple’s prompt to a specific request.</p>
-          {#if verificationRequested}<div class="space-y-1.5"><Label for="offline-apple-code">Six-digit verification code</Label><Input id="offline-apple-code" inputmode="numeric" autocomplete="one-time-code" bind:value={verificationCode} pattern="[0-9]{6}" maxlength={6} /></div>{/if}
-          <Button size="sm" variant="secondary" loading={authenticating} disabled={verificationRequested && verificationCode.length !== 6} onclick={() => void authenticate()}>{verificationRequested ? 'Verify code' : 'Verify Apple Account'}</Button>
+          {#if status.authentication?.state === 'verification_required'}<div class="space-y-1.5"><Label for="offline-apple-code">Six-digit verification code</Label><Input id="offline-apple-code" inputmode="numeric" autocomplete="one-time-code" bind:value={verificationCode} pattern="[0-9]{6}" maxlength={6} /></div>{/if}
+          <Button size="sm" variant="secondary" loading={authenticating || status.authentication?.state === 'running'} disabled={status.authentication?.state === 'running' || status.authentication?.state === 'verification_required' && verificationCode.length !== 6} onclick={() => void authenticate()}>{status.authentication?.state === 'verification_required' ? 'Verify code' : 'Verify Apple Account'}</Button>
         </div>
       {/if}
     </form>

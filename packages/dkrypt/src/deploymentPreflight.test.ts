@@ -41,6 +41,7 @@ test('deployment preflight dry-runs and restores a database without changing the
       DROP TABLE watch_revisions;
       DROP TABLE watch_drafts;
       DROP TABLE appstore_offline_credential_operations;
+      DROP TABLE appstore_offline_authentication_operations;
       DROP TABLE appstore_offline_account;
       DROP INDEX billing_events_by_provider_event;
       DROP INDEX billing_events_by_processed_at;
@@ -48,7 +49,7 @@ test('deployment preflight dry-runs and restores a database without changing the
       ALTER TABLE billing_events DROP COLUMN event_id;
       ALTER TABLE billing_events DROP COLUMN occurred_at;
       ALTER TABLE billing_events DROP COLUMN processed_at;
-      DELETE FROM schema_migrations WHERE version IN (17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28);
+      DELETE FROM schema_migrations WHERE version IN (17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29);
     `);
 
     const result = runDeploymentPreflight(path.join(stateDir, 'dkrypt.sqlite'), root);

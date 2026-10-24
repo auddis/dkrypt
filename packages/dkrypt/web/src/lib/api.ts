@@ -1735,6 +1735,7 @@ export interface OfflineAppStoreStatus {
   fairPlayAuthorized: boolean;
   vault: { encryptionReady: boolean; accountConfigured: boolean; credentialConfigured: boolean; authenticatedAt?: number; accountHint?: string; authenticationError?: string };
   blockers: string[];
+  authentication?: { state: 'idle' | 'running' | 'verification_required' | 'succeeded' | 'failed' | 'interrupted'; operationId?: string; startedAt?: number; completedAt?: number; error?: string };
   credentialRetrieval: { state: 'idle' | 'running' | 'succeeded' | 'failed' | 'interrupted'; operationId?: string; deviceId?: string; startedAt?: number; completedAt?: number; error?: string };
 }
 

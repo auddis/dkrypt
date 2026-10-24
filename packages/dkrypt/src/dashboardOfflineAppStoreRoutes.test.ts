@@ -4,7 +4,7 @@ import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { PermissionFlag } from '#permissions.js';
 import { setSessionCookie } from '#session.js';
 import type { Response } from '#http.js';
-import { createDashboardOfflineAppStoreRoutes, DEFAULT_AUTHENTICATION_TIMEOUT_MS } from '#routes/dashboardOfflineAppStoreRoutes.js';
+import { createDashboardOfflineAppStoreRoutes } from '#routes/dashboardOfflineAppStoreRoutes.js';
 import type { OfflineAppStoreReadiness } from '#offlineAppStore.js';
 import type { CredentialRetrievalStatus } from '#offlineAppStoreCredential.js';
 
@@ -41,7 +41,9 @@ test('offline App Store management is manager-only and does not expose account s
       calls.push(`credential:${credential}`);
       return readiness().vault;
     },
-    authenticate: async (code) => { calls.push(`authenticate:${code ?? ''}`); },
+    startAuthentication: (code) => { calls.push(`authenticate:${code ?? ''}`); return { state: 'running', operationId: 'operation-1', startedAt: 123 }; },
+    getAuthenticationStatus: () => ({ state: 'idle' }),
+    resetAuthentication: () => {},
     clear: () => { calls.push('clear'); return true; },
   }));
 
@@ -84,7 +86,8 @@ test('offline App Store authentication accepts only a six-digit one-time code', 
   const server = Fastify().withTypeProvider<TypeBoxTypeProvider>();
   await server.register(createDashboardOfflineAppStoreRoutes({
     readiness,
-    authenticate: async (code) => { submitted.push(code); },
+    startAuthentication: (code) => { submitted.push(code); return { state: 'running', operationId: 'operation-1', startedAt: 123 }; },
+    getAuthenticationStatus: () => ({ state: 'idle' }),
   }));
   const headers = { cookie: sessionCookie(PermissionFlag.administrator, true) };
 
@@ -92,51 +95,44 @@ test('offline App Store authentication accepts only a six-digit one-time code', 
     const invalid = await server.inject({ method: 'POST', url: '/v1/dashboard/appstore-offline/authenticate', headers, payload: { verificationCode: '12345' } });
     const valid = await server.inject({ method: 'POST', url: '/v1/dashboard/appstore-offline/authenticate', headers, payload: { verificationCode: '123456' } });
     expect(invalid.statusCode).toBe(400);
-    expect(valid.statusCode).toBe(200);
+    expect(valid.statusCode).toBe(202);
     expect(submitted).toEqual(['123456']);
     expect(valid.body).not.toContain('123456');
+    expect(valid.json().authentication).toEqual({ state: 'running', operationId: 'operation-1', startedAt: 123 });
   } finally {
     await server.close();
   }
 });
 
-test('Apple Account authentication aborts and returns a timeout when the provider never responds', async () => {
-  expect(DEFAULT_AUTHENTICATION_TIMEOUT_MS).toBe(30_000);
-  let receivedSignal: AbortSignal | undefined;
-  let releaseProvider: () => void = () => {};
-  let abortObserved = false;
-  const server = Fastify().withTypeProvider<TypeBoxTypeProvider>();
-  await server.register(createDashboardOfflineAppStoreRoutes({
+test('Apple Account verification returns its durable background status without awaiting Apple', async () => {
+  const authentication = { state: 'running' as const, operationId: 'operation-1', startedAt: 123 };
+  const overrides = {
     readiness,
-    authenticate: ((_code?: string, signal?: AbortSignal) => {
-      receivedSignal = signal;
-      return new Promise<void>((resolve, reject) => {
-        releaseProvider = resolve;
-        signal?.addEventListener('abort', () => {
-          abortObserved = true;
-          reject(signal.reason);
-        }, { once: true });
-      });
-    }),
-  }, { authenticationTimeoutMs: 10 }));
+    startAuthentication: () => authentication,
+    getAuthenticationStatus: () => authentication,
+  };
+  const server = Fastify().withTypeProvider<TypeBoxTypeProvider>();
+  await server.register(createDashboardOfflineAppStoreRoutes(overrides));
 
   try {
-    const result = await Promise.race([
-      server.inject({
-        method: 'POST',
-        url: '/v1/dashboard/appstore-offline/authenticate',
-        headers: { cookie: sessionCookie(PermissionFlag.administrator, true) },
-        payload: {},
-      }).then((response) => response),
-      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 250)),
-    ]);
+    const startedAt = Date.now();
+    const started = await server.inject({
+      method: 'POST',
+      url: '/v1/dashboard/appstore-offline/authenticate',
+      headers: { cookie: sessionCookie(PermissionFlag.administrator, true) },
+      payload: {},
+    });
+    const status = await server.inject({
+      method: 'GET',
+      url: '/v1/dashboard/appstore-offline/status',
+      headers: { cookie: sessionCookie(PermissionFlag.administrator) },
+    });
 
-    expect(result?.statusCode).toBe(504);
-    expect(result?.json()).toMatchObject({ error: 'Apple Account verification timed out. Try again after checking Apple Account status.' });
-    expect(receivedSignal?.aborted).toBe(true);
-    expect(abortObserved).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(250);
+    expect(started.statusCode).toBe(202);
+    expect(started.json().authentication).toEqual(authentication);
+    expect(status.json().authentication).toEqual(authentication);
   } finally {
-    releaseProvider();
     await server.close();
   }
 });

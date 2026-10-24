@@ -43,12 +43,13 @@ function rewindToSchemaVersion16(database: ReturnType<typeof openStateDatabase>)
     DROP TABLE watch_revisions;
     DROP TABLE watch_drafts;
     DROP TABLE appstore_offline_credential_operations;
+    DROP TABLE appstore_offline_authentication_operations;
     DROP TABLE appstore_offline_account;
     ALTER TABLE billing_events DROP COLUMN provider;
     ALTER TABLE billing_events DROP COLUMN event_id;
     ALTER TABLE billing_events DROP COLUMN occurred_at;
     ALTER TABLE billing_events DROP COLUMN processed_at;
-    DELETE FROM schema_migrations WHERE version IN (17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28);
+      DELETE FROM schema_migrations WHERE version IN (17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29);
   `);
 }
 
@@ -133,6 +134,23 @@ test('SQLite state snapshots survive restart and retain independently owned coll
     expect(reopened.readCollection('scheduler_runs')).toEqual([]);
     expect(reopened.readCollection('projects')).toEqual(state.projects);
     reopened.close();
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('SQLite migration adds persisted Apple Account authentication operations', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'dkrypt-sqlite-apple-auth-migration-'));
+  try {
+    const database = openStateDatabase({ stateDir, filename: 'state.sqlite' });
+    database.db.exec('DROP TABLE appstore_offline_authentication_operations; DELETE FROM schema_migrations WHERE version = 29;');
+    database.close();
+
+    const migrated = openStateDatabase({ stateDir, filename: 'state.sqlite' });
+    const table = migrated.db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'appstore_offline_authentication_operations'").get();
+    expect(migrated.schemaVersion).toBe(LATEST_SQLITE_SCHEMA_VERSION);
+    expect(table).toEqual({ name: 'appstore_offline_authentication_operations' });
+    migrated.close();
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }
