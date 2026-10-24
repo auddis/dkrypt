@@ -3211,7 +3211,7 @@ export function getWebhookDeliveryLog(limit = 100): WebhookDeliveryEntry[] {
 
 export function recordJobHistory(entry: JobHistoryEntry): void {
   const scopedEntry = { ...entry, projectId: entry.projectId ?? DEFAULT_PROJECT_ID };
-  state.jobHistory.unshift(scopedEntry);
+  state.jobHistory = [scopedEntry, ...state.jobHistory.filter((existing) => existing.id !== scopedEntry.id)];
   if (state.jobHistory.length > MAX_HISTORY) state.jobHistory.length = MAX_HISTORY;
   const retentionDays = getEffectiveSettings().jobHistoryRetentionDays;
   if (retentionDays > 0) {

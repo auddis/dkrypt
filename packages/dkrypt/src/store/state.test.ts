@@ -1196,6 +1196,16 @@ test('backup schedule mutations persist through the typed SQLite collection', ()
 });
 
 describe('job history retention', () => {
+  test('updates an existing history record by job ID without creating duplicate rows', () => {
+    const id = randomUUID();
+    const initial = { id, bundleId: 'com.example.history-update', status: 'done' as const, source: 'manual' as const, createdAt: Date.now(), finishedAt: Date.now() };
+    recordJobHistory(initial);
+    recordJobHistory({ ...initial, status: 'failed', error: 'job deadline exceeded', finishedAt: Date.now() + 1 });
+
+    expect(getAllJobHistory().filter((entry) => entry.id === id)).toHaveLength(1);
+    expect(getJobHistoryEntryById(id)).toMatchObject({ status: 'failed', error: 'job deadline exceeded' });
+  });
+
   test('jobHistoryRetentionDays filters out entries older than the window on the next write', () => {
     updateSettings({ jobHistoryRetentionDays: 1 });
     try {
