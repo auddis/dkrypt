@@ -269,7 +269,6 @@ jobs:
                 DEVICE_SSH_KEY_DIR: /data/device-ssh
                 DEVICE_SSH_KEY_PATH: /data/device-ssh/id_ed25519
                 DEVICE_SSH_PUBLIC_KEY_PATH: /data/device-ssh/id_ed25519.pub
-                APPSTORE_OFFLINE_CREDENTIAL_SSH_HOST: "${{ secrets.APPSTORE_OFFLINE_CREDENTIAL_SSH_HOST }}"
               volumes:
                 - ipa-storage:/data/artifacts
                 - state:/data/state

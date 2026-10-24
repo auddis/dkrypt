@@ -78,7 +78,6 @@ Copy `.env.example` to `.env` and configure the required values. The important r
 | `STRIPE_SECRET_KEY_PREVIOUS` | Previous Stripe API key tried only after an explicit HTTP 401 authentication rejection from the current key |
 | `NOWPAYMENTS_API_KEY` | Current NOWPayments API credential |
 | `NOWPAYMENTS_API_KEY_PREVIOUS` | Previous NOWPayments API key tried only after HTTP 401 from the current key |
-| `APPSTORE_OFFLINE_CREDENTIAL_SSH_HOST` | Optional paired-device LAN address used only to retrieve the FairPlay credential; unset uses the Rust-managed USB tunnel |
 | `APPSTORE_OFFLINE_AUTHENTICATION_TIMEOUT_SECONDS` | Maximum Apple Account sign-in time; defaults to 300 seconds and is bounded to 60–900 seconds |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | SMTP credentials and server used for optional email notifications |
 | `SMTP_PASS_PREVIOUS` | Previous SMTP password used only after a permanent authentication rejection |

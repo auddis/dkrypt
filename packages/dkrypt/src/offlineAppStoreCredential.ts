@@ -2,12 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { config } from '#config.js';
 import { scopedLogger } from '#logger.js';
-import { isSupportedDeviceHost } from '#deviceHost.js';
 import { getAppleAccountVaultStatus, readAppleAccountSecrets, saveAppleAccountFairPlayCredential } from '#appleAccountVault.js';
 import type { AppleAccountSecrets } from '#appleAccountVault.js';
 import { getActiveJobs } from '#jobs/store.js';
@@ -80,16 +78,11 @@ export function sshWrapper(): string {
     'if (( last < 0 )); then exit 2; fi',
     'remote="${args[$last]}"',
     'for index in "${!args[@]}"; do',
-    'if [[ "${args[$index]}" == "root@127.0.0.1" ]]; then',
-    'if [[ -n "${DKRYPT_DEVICE_SSH_HOST:-}" ]]; then args[$index]="mobile@${DKRYPT_DEVICE_SSH_HOST}"; else args[$index]="mobile@127.0.0.1"; fi',
-    'elif [[ "${args[$index]}" == "-p" && -n "${DKRYPT_DEVICE_SSH_HOST:-}" ]]; then',
-    'next=$((index + 1))',
-    'if (( next < ${#args[@]} )); then args[$next]="${DKRYPT_DEVICE_SSH_PORT:-22}"; fi',
-    'fi',
+    'if [[ "${args[$index]}" == "root@127.0.0.1" ]]; then args[$index]="mobile@127.0.0.1"; fi',
     'done',
     'printf -v quoted_remote "%q" "$remote"',
     'args[$last]="sudo -n env PATH=/var/jb/usr/bin:/var/jb/bin:/usr/bin:/bin:/sbin sh -c $quoted_remote"',
-    'exec /usr/bin/ssh -i "$DKRYPT_DEVICE_SSH_KEY" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR "${args[@]}"',
+    'exec /usr/bin/ssh -i "$DKRYPT_DEVICE_SSH_KEY" -o UserKnownHostsFile="$HOME/.ssh/known_hosts" -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR "${args[@]}"',
     '',
   ].join('\n');
 }
@@ -140,7 +133,7 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
   try {
     wrapperRoot = await mkdtemp(path.join(tmpdir(), 'dkrypt-fairplay-ssh-'));
     const executableRoot = wrapperRoot;
-    const runAtPort = async (port: number, keyPath: string, sshHost?: string): Promise<Buffer> => {
+    const runAtPort = async (port: number, keyPath: string): Promise<Buffer> => {
       if (!Number.isInteger(port) || port < 1 || port > 65535 || !path.isAbsolute(keyPath)) throw new Error('The managed device tunnel configuration is invalid');
       const binDirectory = path.join(executableRoot, 'bin');
       const sshHomeDirectory = path.join(temporaryRoot, '.ssh');
@@ -155,8 +148,6 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
         HOME: temporaryRoot,
         LANG: 'C.UTF-8',
         DKRYPT_DEVICE_SSH_KEY: keyPath,
-        DKRYPT_DEVICE_SSH_HOST: sshHost ?? '',
-        DKRYPT_DEVICE_SSH_PORT: String(config.deviceSshPort),
       };
       const child = spawn(config.appStoreOfflinePythonBin, [
         config.appStoreOfflineCredentialRetriever,
@@ -213,29 +204,6 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
         if (hardKillTimer) clearTimeout(hardKillTimer);
       }
     };
-
-    if (config.appStoreOfflineCredentialSshHost) {
-      if (!isSupportedDeviceHost(config.appStoreOfflineCredentialSshHost)) throw new Error('the configured credential SSH host is invalid');
-      const probe = createServer((socket) => socket.destroy());
-      await new Promise<void>((resolve, reject) => {
-        const fail = (error: Error) => reject(error);
-        probe.once('error', fail);
-        probe.listen(0, '127.0.0.1', () => {
-          probe.off('error', fail);
-          resolve();
-        });
-      });
-      const address = probe.address();
-      if (!address || typeof address === 'string') {
-        await new Promise<void>((resolve) => probe.close(() => resolve()));
-        throw new Error('the credential SSH probe listener did not bind a TCP port');
-      }
-      try {
-        return await runAtPort(address.port, device.keyPath ?? config.deviceSshKeyPath, config.appStoreOfflineCredentialSshHost);
-      } finally {
-        await new Promise<void>((resolve) => probe.close(() => resolve()));
-      }
-    }
 
     return await withIpadecrypt(deviceConnection(device), async (runtimeDirectory) => {
       const runtime = JSON.parse(await readFile(path.join(runtimeDirectory, 'config.json'), 'utf8')) as {

@@ -40,6 +40,8 @@ function optionalList(name: string, fallback: string): string[] {
     .filter(Boolean);
 }
 
+const MAX_OFFLINE_APP_STORE_WORKERS = 4;
+
 export const config = {
   port: optionalInt('PORT', 8080),
   bindHost: optional('BIND_HOST', '127.0.0.1'),
@@ -101,7 +103,7 @@ export const config = {
   ipadecryptBin: optional('IPADECRYPT_BIN', 'ipadecrypt'),
   appStoreOfflineDecryptEnabled: optionalBool('APPSTORE_OFFLINE_DECRYPT_ENABLED', false),
   appStoreOfflineFairPlayAuthorized: optionalBool('APPSTORE_OFFLINE_FAIRPLAY_AUTHORIZED', false),
-  appStoreOfflineMaxWorkers: Math.max(1, optionalInt('APPSTORE_OFFLINE_MAX_WORKERS', 1)),
+  appStoreOfflineMaxWorkers: Math.min(MAX_OFFLINE_APP_STORE_WORKERS, Math.max(1, optionalInt('APPSTORE_OFFLINE_MAX_WORKERS', 1))),
   appStoreOfflineWorkerMemoryMb: Math.min(32768, Math.max(512, optionalInt('APPSTORE_OFFLINE_WORKER_MEMORY_MB', 8192))),
   appStoreOfflineInspectTimeoutSeconds: Math.min(3600, Math.max(1, optionalInt('APPSTORE_OFFLINE_INSPECT_TIMEOUT_SECONDS', 300))),
   appStoreOfflineDownloaderBin: optional('APPSTORE_OFFLINE_DOWNLOADER_BIN', '/usr/local/bin/ipatool'),
@@ -110,7 +112,6 @@ export const config = {
   appStoreOfflineCredentialRetriever: optional('APPSTORE_OFFLINE_CREDENTIAL_RETRIEVER', '/opt/fairplay-decrypt/credential-retrieval/retrieve.py'),
   appStoreOfflineCredentialTimeoutSeconds: Math.min(1800, Math.max(60, optionalInt('APPSTORE_OFFLINE_CREDENTIAL_TIMEOUT_SECONDS', 900))),
   appStoreOfflineAuthenticationTimeoutSeconds: Math.min(900, Math.max(60, optionalInt('APPSTORE_OFFLINE_AUTHENTICATION_TIMEOUT_SECONDS', 300))),
-  appStoreOfflineCredentialSshHost: optional('APPSTORE_OFFLINE_CREDENTIAL_SSH_HOST', ''),
   appStoreOfflineVaultKey: optional('APPSTORE_OFFLINE_VAULT_KEY', ''),
   appStoreOfflineTerminalBin: optional('APPSTORE_OFFLINE_TERMINAL_BIN', '/usr/bin/script'),
   outputDir: optional('OUTPUT_DIR', '/data/tmp'),

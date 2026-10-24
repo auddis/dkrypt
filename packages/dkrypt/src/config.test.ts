@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-async function loadDefaultRetention(): Promise<{ jobRetentionMinutes: number; nowpaymentsSupportedAssets: string[]; nowpaymentsDefaultAsset: string; nowpaymentsOutcomeCurrency: string; appStoreOfflineAuthenticationTimeoutSeconds: number }> {
+async function loadDefaultRetention(): Promise<{ jobRetentionMinutes: number; nowpaymentsSupportedAssets: string[]; nowpaymentsDefaultAsset: string; nowpaymentsOutcomeCurrency: string; appStoreOfflineAuthenticationTimeoutSeconds: number; appStoreOfflineMaxWorkers: number }> {
   const child = Bun.spawn(
     [
       process.execPath,
       '-e',
-      "const { config } = await import('./src/config.ts'); console.log(JSON.stringify({ jobRetentionMinutes: config.jobRetentionMinutes, nowpaymentsSupportedAssets: config.nowpaymentsSupportedAssets, nowpaymentsDefaultAsset: config.nowpaymentsDefaultAsset, nowpaymentsOutcomeCurrency: config.nowpaymentsOutcomeCurrency, appStoreOfflineAuthenticationTimeoutSeconds: config.appStoreOfflineAuthenticationTimeoutSeconds }));",
+      "const { config } = await import('./src/config.ts'); console.log(JSON.stringify({ jobRetentionMinutes: config.jobRetentionMinutes, nowpaymentsSupportedAssets: config.nowpaymentsSupportedAssets, nowpaymentsDefaultAsset: config.nowpaymentsDefaultAsset, nowpaymentsOutcomeCurrency: config.nowpaymentsOutcomeCurrency, appStoreOfflineAuthenticationTimeoutSeconds: config.appStoreOfflineAuthenticationTimeoutSeconds, appStoreOfflineMaxWorkers: config.appStoreOfflineMaxWorkers }));",
     ],
     {
       cwd: process.cwd(),
@@ -24,7 +24,31 @@ async function loadDefaultRetention(): Promise<{ jobRetentionMinutes: number; no
     child.exited,
   ]);
   if (exitCode !== 0) throw new Error(`config defaults lookup failed: ${stderr}`);
-  return JSON.parse(stdout) as { jobRetentionMinutes: number; nowpaymentsSupportedAssets: string[]; nowpaymentsDefaultAsset: string; nowpaymentsOutcomeCurrency: string; appStoreOfflineAuthenticationTimeoutSeconds: number };
+  return JSON.parse(stdout) as { jobRetentionMinutes: number; nowpaymentsSupportedAssets: string[]; nowpaymentsDefaultAsset: string; nowpaymentsOutcomeCurrency: string; appStoreOfflineAuthenticationTimeoutSeconds: number; appStoreOfflineMaxWorkers: number };
+}
+
+async function loadOfflineWorkerLimit(value: number): Promise<number> {
+  const child = Bun.spawn(
+    [process.execPath, '-e', "const { config } = await import('./src/config.ts'); console.log(config.appStoreOfflineMaxWorkers);"],
+    {
+      cwd: process.cwd(),
+      env: {
+        API_KEY: 'config-test-api-key',
+        SESSION_SIGNING_SECRET: 'config-test-session-signing-secret',
+        ADMIN_PASSWORD: 'config-test-admin-password',
+        APPSTORE_OFFLINE_MAX_WORKERS: String(value),
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  if (exitCode !== 0) throw new Error(`offline worker limit lookup failed: ${stderr}`);
+  return Number.parseInt(stdout.trim(), 10);
 }
 
 async function loadStripeMissingConfiguration(): Promise<string[]> {
@@ -116,7 +140,13 @@ describe('config defaults', () => {
       nowpaymentsDefaultAsset: 'USDC',
       nowpaymentsOutcomeCurrency: 'USDC',
       appStoreOfflineAuthenticationTimeoutSeconds: 300,
+      appStoreOfflineMaxWorkers: 1,
     });
+  });
+
+  test('bounds offline App Store worker concurrency', async () => {
+    await expect(loadOfflineWorkerLimit(32)).resolves.toBe(4);
+    await expect(loadOfflineWorkerLimit(-3)).resolves.toBe(1);
   });
 
   test('reports every missing Stripe runtime prerequisite', async () => {
