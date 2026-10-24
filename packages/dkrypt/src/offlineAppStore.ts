@@ -77,6 +77,30 @@ export class OfflineAppStoreAuthenticationError extends Error {
 
 type PromptResponder = (prompt: string) => Promise<string | undefined>;
 
+type AppStorePromptKey = 'Apple Account' | 'password' | '2FA code' | 'keychain passphrase';
+
+export function buildAppStoreCommandEnvironment(homeDirectory: string, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+    HOME: homeDirectory,
+    XDG_CONFIG_HOME: path.join(homeDirectory, 'config'),
+    XDG_STATE_HOME: path.join(homeDirectory, 'state'),
+    XDG_DATA_HOME: path.join(homeDirectory, 'data'),
+    LANG: 'C.UTF-8',
+    ...(platform === 'linux' ? { DBUS_SESSION_BUS_ADDRESS: 'unix:path=/nonexistent' } : {}),
+  };
+}
+
+export function identifyAppStorePrompt(promptOutput: string): AppStorePromptKey | undefined {
+  const candidates: Array<{ key: AppStorePromptKey; pattern: RegExp }> = [
+    { key: 'Apple Account', pattern: /(?:enter (?:your )?)?(?:apple id(?:\s*\([^\r\n]*\))?|apple account)\s*:?\s*$/i },
+    { key: 'password', pattern: /(?:enter (?:your )?)?password\s*:?\s*$/i },
+    { key: '2FA code', pattern: /(?:enter (?:your )?)?(?:2fa|two.factor|verification) code\s*:?\s*$/i },
+    { key: 'keychain passphrase', pattern: /(?:keychain passphrase|passphrase to unlock [^\r\n]+\(this is separate from your apple id password\):?)\s*$/i },
+  ];
+  return candidates.find((candidate) => candidate.pattern.test(promptOutput.trimEnd()))?.key;
+}
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
@@ -100,14 +124,7 @@ function runTerminalCommand(
   const limited = commandWithResourceLimits(terminalPath, terminalArgs, config.appStoreOfflineWorkerMemoryMb, config.jobMaxWaitSeconds);
   const child = spawn(limited.command, limited.args, {
     cwd: homeDirectory,
-    env: {
-      PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
-      HOME: homeDirectory,
-      XDG_CONFIG_HOME: path.join(homeDirectory, 'config'),
-      XDG_STATE_HOME: path.join(homeDirectory, 'state'),
-      XDG_DATA_HOME: path.join(homeDirectory, 'data'),
-      LANG: 'C.UTF-8',
-    },
+    env: buildAppStoreCommandEnvironment(homeDirectory),
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
   });
@@ -123,15 +140,10 @@ function runTerminalCommand(
     outputTail = `${outputTail}${chunk.toString()}`.slice(-8192);
     handling = handling.then(async () => {
       const promptOutput = outputTail.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replaceAll('\r', '');
-      const prompt = [
-        { key: 'Apple Account', pattern: /(?:enter (?:your )?)?(?:apple id|apple account)\s*:?\s*$/i },
-        { key: 'password', pattern: /(?:enter (?:your )?)?password\s*:?\s*$/i },
-        { key: '2FA code', pattern: /(?:enter (?:your )?)?(?:2fa|two.factor|verification) code\s*:?\s*$/i },
-        { key: 'keychain passphrase', pattern: /(?:enter (?:your )?)?keychain passphrase\s*:?\s*$/i },
-      ].find((candidate) => candidate.pattern.test(promptOutput.trimEnd()) && !responded.has(candidate.key));
-      if (!prompt) return;
-      responded.add(prompt.key);
-      const response = await respond(prompt.key);
+      const prompt = identifyAppStorePrompt(promptOutput);
+      if (!prompt || responded.has(prompt)) return;
+      responded.add(prompt);
+      const response = await respond(prompt);
       if (response === undefined) {
         terminateChildProcess(child, 'SIGTERM');
         return;
