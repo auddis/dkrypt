@@ -78,16 +78,29 @@ async fn try_get_download_info(
     external_version_id: Option<&str>,
 ) -> Result<DownloadItem, ClientError> {
     let url = download_url(account, client.guid());
+    let body_bytes = download_info_request_body(app_id, client.guid(), external_version_id)?;
+    let mut dict = post_download_info(client, account, &url, &body_bytes).await?;
+    if is_empty_successful_download(&dict) {
+        dict = retry_update_product(client, account, &body_bytes).await?;
+    }
+    download_item_from_response_dict(&dict)
+}
+fn download_info_request_body(
+    app_id: i64,
+    guid: &str,
+    external_version_id: Option<&str>,
+) -> Result<Vec<u8>, ClientError> {
     let mut body = plist::Dictionary::new();
     body.insert(
         "salableAdamId".into(),
-        plist::Value::String(app_id.to_string()),
+        plist::Value::Integer(app_id.into()),
     );
     body.insert(
         "guid".into(),
-        plist::Value::String(client.guid().to_string()),
+        plist::Value::String(guid.to_string()),
     );
     body.insert("creditDisplay".into(), plist::Value::String(String::new()));
+    body.insert("serialNumber".into(), plist::Value::String("0".into()));
     if let Some(vid) = external_version_id {
         body.insert(
             "externalVersionId".into(),
@@ -97,11 +110,7 @@ async fn try_get_download_info(
     let mut body_bytes = Vec::new();
     plist::to_writer_xml(&mut body_bytes, &body)
         .map_err(|e| ClientError::UnexpectedResponse(format!("plist serialize: {e}")))?;
-    let mut dict = post_download_info(client, account, &url, &body_bytes).await?;
-    if is_empty_successful_download(&dict) {
-        dict = retry_update_product(client, account, &body_bytes).await?;
-    }
-    download_item_from_response_dict(&dict)
+    Ok(body_bytes)
 }
 async fn post_download_info(
     client: &AppleClient,
@@ -439,6 +448,27 @@ mod tests {
         assert_eq!(
             request_url.as_str(),
             "https://downloaddispatch.itunes.apple.com/up/updateProduct?guid=AABBCCDDEEFF"
+        );
+    }
+    #[test]
+    fn download_info_request_matches_app_store_payload_types_and_fields() {
+        let body = download_info_request_body(1234, "AABBCCDDEEFF", Some("5678")).unwrap();
+        let request: plist::Dictionary = plist::from_bytes(&body).unwrap();
+        assert_eq!(
+            request.get("salableAdamId"),
+            Some(&plist::Value::Integer(1234.into()))
+        );
+        assert_eq!(
+            request.get("serialNumber"),
+            Some(&plist::Value::String("0".into()))
+        );
+        assert_eq!(
+            request.get("guid"),
+            Some(&plist::Value::String("AABBCCDDEEFF".into()))
+        );
+        assert_eq!(
+            request.get("externalVersionId"),
+            Some(&plist::Value::String("5678".into()))
         );
     }
 }
