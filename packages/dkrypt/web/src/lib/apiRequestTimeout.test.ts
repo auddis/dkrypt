@@ -18,6 +18,17 @@ test('aborts a request that never settles and returns the configured timeout mes
   expect(aborted).toBe(true);
 });
 
+test('settles with a timeout when an operation ignores its abort signal', async () => {
+  const timeoutMessage = 'Apple Account save timed out';
+  const result = await Promise.race([
+    withRequestTimeout(() => new Promise<never>(() => {}), 10, timeoutMessage)
+      .then(() => 'resolved', (error: unknown) => error instanceof Error ? error.message : String(error)),
+    new Promise<string>((resolve) => setTimeout(() => resolve('request still pending'), 40)),
+  ]);
+
+  expect(result).toBe(timeoutMessage);
+});
+
 test('does not abort a request that completes before the deadline', async () => {
   let signal: AbortSignal | undefined;
   const result = await withRequestTimeout(async (requestSignal) => {

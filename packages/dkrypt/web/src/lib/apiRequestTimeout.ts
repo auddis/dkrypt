@@ -5,19 +5,25 @@ export async function withRequestTimeout<T>(
 ): Promise<T> {
   const controller = new AbortController();
   let timedOut = false;
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutResult = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      const error = new Error(message);
+      controller.abort(error);
+      reject(error);
+    }, timeoutMs);
+  });
 
   try {
-    const result = await operation(controller.signal);
-    if (timedOut) throw new Error(message);
-    return result;
+    return await Promise.race([
+      Promise.resolve().then(() => operation(controller.signal)),
+      timeoutResult,
+    ]);
   } catch (error) {
     if (timedOut) throw new Error(message);
     throw error;
   } finally {
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
   }
 }

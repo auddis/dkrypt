@@ -7,6 +7,7 @@
   import Label from '#lib/components/ui/Label.svelte';
   import { authenticateOfflineAppStoreAccount, fetchDevices, fetchOfflineAppStoreStatus, reauthenticate, retrieveOfflineAppStoreCredential, saveOfflineAppStoreAccount, type DeviceRecord, type OfflineAppStoreStatus } from '#lib/api';
   import { retryAfterReauthentication } from '#lib/reauthenticatedRequest.js';
+  import { withRequestTimeout } from '#lib/apiRequestTimeout.js';
   import { sessionState } from '#lib/session.svelte';
   import { promptDialog } from '#lib/ui.svelte';
 
@@ -23,6 +24,30 @@
   let retrievingCredential = $state(false);
   let error = $state('');
   let notice = $state('');
+  let statusRefresh: Promise<void> | undefined;
+
+  const STATUS_REQUEST_TIMEOUT_MS = 10_000;
+  const STATUS_TIMEOUT_MESSAGE = 'Checking App Store processing status timed out. Refresh status to try again.';
+  const DEVICE_LIST_TIMEOUT_MESSAGE = 'Loading the device list timed out. Refresh status to try again.';
+
+  function refreshStatus(): Promise<void> {
+    if (statusRefresh) return statusRefresh;
+    statusRefresh = (async () => {
+      try {
+        status = await withRequestTimeout(
+          (signal) => fetchOfflineAppStoreStatus({ signal }),
+          STATUS_REQUEST_TIMEOUT_MS,
+          STATUS_TIMEOUT_MESSAGE,
+        );
+        if (error.startsWith('Could not refresh App Store processing status:')) error = '';
+      } catch (cause) {
+        error = `Could not refresh App Store processing status: ${cause instanceof Error ? cause.message : 'request failed'}`;
+      } finally {
+        statusRefresh = undefined;
+      }
+    })();
+    return statusRefresh;
+  }
 
   async function confirmRecentAuthentication(): Promise<void> {
     const isRootAdministrator = sessionState.sub === 'root';
@@ -40,15 +65,17 @@
 
   async function refresh(): Promise<void> {
     loading = true;
-    error = '';
+    if (!error.startsWith('Could not refresh App Store processing status:')) error = '';
     try {
-      const [nextStatus, deviceResponse] = await Promise.all([fetchOfflineAppStoreStatus(), fetchDevices()]);
-      status = nextStatus;
+      const [, deviceResponse] = await Promise.all([
+        refreshStatus(),
+        withRequestTimeout((signal) => fetchDevices({ signal }), STATUS_REQUEST_TIMEOUT_MS, DEVICE_LIST_TIMEOUT_MESSAGE),
+      ]);
       devices = deviceResponse.devices;
       const availableIpads = devices.filter((device) => device.enabled && !device.draining && device.transport === 'usb' && device.productType?.startsWith('iPad'));
       if (!availableIpads.some((device) => device.id === selectedDeviceId)) selectedDeviceId = availableIpads[0]?.id ?? '';
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Could not load App Store processing status.';
+      error = cause instanceof Error ? cause.message : 'Could not load available iPads.';
     } finally {
       loading = false;
     }
@@ -111,6 +138,7 @@
       notice = 'Credential retrieval started. The selected iPad is temporarily reserved while Apple’s FairPlay service restarts.';
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Could not retrieve the FairPlay credential.';
+      if (error.includes('timed out')) await refreshStatus();
     } finally {
       retrievingCredential = false;
     }
@@ -119,7 +147,7 @@
   onMount(() => {
     void refresh();
     const timer = setInterval(() => {
-      if (status?.credentialRetrieval.state === 'running') void refresh();
+      if (status?.credentialRetrieval.state === 'running') void refreshStatus();
     }, 3000);
     return () => clearInterval(timer);
   });
@@ -179,7 +207,7 @@
     <section class="space-y-3">
       <div><h4 class="text-sm font-medium">Device-derived FairPlay credential</h4><p class="mt-1 text-xs text-muted">dkrypt retrieves the 16-byte credential from an App Store app installed under this Apple Account, then stores it directly in the encrypted vault. The value is never sent to the browser or returned by the API.</p></div>
       <div class="space-y-1.5"><Label for="offline-credential-device">Connected iPad</Label><select id="offline-credential-device" class="min-h-9 w-full rounded-md border border-border bg-background px-2 text-sm" bind:value={selectedDeviceId} disabled={retrievingCredential || status?.credentialRetrieval.state === 'running'}><option value="">Select an enabled USB iPad</option>{#each devices.filter((device) => device.enabled && !device.draining && device.transport === 'usb' && device.productType?.startsWith('iPad')) as device (device.id)}<option value={device.id}>{device.name} · {device.productType}</option>{/each}</select></div>
-      <Button size="sm" loading={retrievingCredential || status?.credentialRetrieval.state === 'running'} disabled={!status?.vault.accountConfigured || !status.vault.authenticatedAt || !selectedDeviceId || status.vault.credentialConfigured} onclick={() => void retrieveCredential()}>Retrieve and store credential</Button>
+      <Button size="sm" loading={retrievingCredential} disabled={!status?.vault.accountConfigured || !status.vault.authenticatedAt || !selectedDeviceId || status.vault.credentialConfigured || status.credentialRetrieval.state === 'running'} onclick={() => void retrieveCredential()}>{status?.credentialRetrieval.state === 'running' ? 'Retrieval in progress' : 'Retrieve and store credential'}</Button>
       <p class="text-xs text-muted">This briefly restarts Apple’s FairPlay service. dkrypt drains the selected iPad so no decrypt job starts at the same time. The iPad must have an App Store app from the same Apple Account installed.</p>
     </section>
   </div>

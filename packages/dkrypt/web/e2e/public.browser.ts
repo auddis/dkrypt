@@ -2528,6 +2528,47 @@ test('Apple Account save submits its form and shows the saved state', async ({ p
   await expect(page.getByLabel('Password', { exact: true })).toHaveValue('');
 });
 
+test('FairPlay retrieval shows a steady in-progress state without an endless button spinner', async ({ page }) => {
+  await mockAuthenticatedDashboard(page, '1');
+  let credentialStatus = {
+    state: 'idle',
+  };
+  const status = {
+    enabled: false,
+    ready: false,
+    downloaderAvailable: false,
+    decryptorAvailable: false,
+    terminalAvailable: false,
+    fairPlayAuthorized: false,
+    vault: { encryptionReady: true, accountConfigured: true, credentialConfigured: false, authenticatedAt: Date.now() },
+    blockers: [],
+    credentialRetrieval: credentialStatus,
+  };
+  await page.route('**/v1/dashboard/appstore-offline/status', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...status, credentialRetrieval: credentialStatus }) });
+  });
+  await page.route('**/v1/dashboard/devices*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ devices: [{ id: 'test-ipad', name: 'Test iPad', enabled: true, transport: 'usb', productType: 'iPad14,3' }] }) });
+  });
+  let selectedDeviceId = '';
+  await page.route('**/v1/dashboard/appstore-offline/credential/retrieve', async (route) => {
+    selectedDeviceId = (route.request().postDataJSON() as { deviceId: string }).deviceId;
+    credentialStatus = { state: 'running' };
+    await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ ...status, credentialRetrieval: credentialStatus }) });
+  });
+
+  await page.goto('/?tab=settings&stab=doctor');
+  const retrieveButton = page.getByRole('button', { name: 'Retrieve and store credential' });
+  await expect(retrieveButton).toBeEnabled();
+  await retrieveButton.click();
+
+  const inProgressButton = page.getByRole('button', { name: 'Retrieval in progress' });
+  await expect(inProgressButton).toBeDisabled();
+  await expect(page.getByText('Retrieving from iPad')).toBeVisible();
+  await expect(inProgressButton.locator('svg')).toHaveCount(0);
+  expect(selectedDeviceId).toBe('test-ipad');
+});
+
 test('device managers without automation permission cannot download support bundles', async ({ page }) => {
   await page.route('**/v1/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname;

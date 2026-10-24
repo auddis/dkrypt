@@ -8,6 +8,7 @@ import { isUnauthenticatedResponse } from '#lib/apiAuthResponse.js';
 import { parseApiResponse } from '#lib/apiResponse.js';
 import { saveOfflineAppStoreAccountRequest } from '#lib/offlineAppStoreAccountSave.js';
 import { authenticateOfflineAppStoreAccountRequest } from '#lib/offlineAppStoreAuthentication.js';
+import { retrieveOfflineAppStoreCredentialRequest } from '#lib/offlineAppStoreCredentialRetrieval.js';
 
 export type { Role };
 export { rateLimitState, type RateLimitInfo } from '#lib/rateLimit.svelte';
@@ -900,8 +901,8 @@ export function fetchDeviceStorageHistory(deviceId: string, hours = 24): Promise
   return apiJson(`/v1/dashboard/devices/${encodeURIComponent(deviceId)}/storage-history?hours=${hours}`);
 }
 
-export function fetchDevices(): Promise<{ devices: DeviceRecord[] }> {
-  return apiJson('/v1/dashboard/devices');
+export function fetchDevices(options?: RequestInit): Promise<{ devices: DeviceRecord[] }> {
+  return apiJson('/v1/dashboard/devices', options);
 }
 
 export function discoverDevices(): Promise<DeviceDiscoveryResult> {
@@ -1737,8 +1738,8 @@ export interface OfflineAppStoreStatus {
   credentialRetrieval: { state: 'idle' | 'running' | 'succeeded' | 'failed' | 'interrupted'; operationId?: string; deviceId?: string; startedAt?: number; completedAt?: number; error?: string };
 }
 
-export function fetchOfflineAppStoreStatus(): Promise<OfflineAppStoreStatus> {
-  return apiJson('/v1/dashboard/appstore-offline/status');
+export function fetchOfflineAppStoreStatus(options?: RequestInit): Promise<OfflineAppStoreStatus> {
+  return apiJson('/v1/dashboard/appstore-offline/status', options);
 }
 
 export function saveOfflineAppStoreAccount(appleId: string, password: string): Promise<OfflineAppStoreStatus> {
@@ -1754,7 +1755,7 @@ export function saveOfflineAppStoreCredential(credential: string): Promise<Offli
 }
 
 export function retrieveOfflineAppStoreCredential(deviceId: string): Promise<OfflineAppStoreStatus> {
-  return apiJson('/v1/dashboard/appstore-offline/credential/retrieve', { method: 'POST', body: JSON.stringify({ deviceId }) });
+  return retrieveOfflineAppStoreCredentialRequest(apiJson, deviceId);
 }
 
 export function clearOfflineAppStoreAccount(): Promise<OfflineAppStoreStatus> {
