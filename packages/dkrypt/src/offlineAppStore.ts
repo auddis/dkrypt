@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { accessSync, constants, existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, open, readdir, readFile, rm, stat, writeFile, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,10 +11,9 @@ import type { FairPlayVerificationResult } from '#util/ipaFairPlay.js';
 import type { ExtractedIpaMetadata } from '#util/ipaMetadata.js';
 import { compareVersions } from '#util/version.js';
 import { inspectIpaInIsolatedProcess } from '#jobs/ipaInspection.js';
-import { commandWithResourceLimits } from '#jobs/resourceLimits.js';
 import type { Job, JobExecutionStage } from '#jobs/types.js';
 import { throwIfAborted } from '#util/abort.js';
-import { terminateChildProcess } from '#jobs/process.js';
+import { invokeFairPlayDecryptor } from '#offlineAppStoreDecryptor.js';
 import { createOfflineAppStoreAuthenticationRepository } from '#store/offlineAppStoreAuthenticationRepository.js';
 import { openStateCollectionDatabase } from '#store/sqlite.js';
 import { scopedLogger } from '#logger.js';
@@ -396,36 +394,15 @@ async function runDefaultDecrypt(job: Job, secrets: AppleAccountSecrets, inputPa
   try {
     await withTemporaryCredentialFile(credential, async (credentialPath) => {
       const decryptArgs = [inputPath, outputPath, '--credential', credentialPath];
-      const limited = commandWithResourceLimits(config.appStoreOfflineDecryptorBin, decryptArgs, config.appStoreOfflineWorkerMemoryMb, config.jobMaxWaitSeconds);
-      const child = spawn(limited.command, limited.args, {
-        env: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' },
-        stdio: ['ignore', 'ignore', 'ignore'],
-        detached: process.platform !== 'win32',
+      await invokeFairPlayDecryptor({
+        commandPath: config.appStoreOfflineDecryptorBin,
+        commandArgs: decryptArgs,
+        memoryMb: config.appStoreOfflineWorkerMemoryMb,
+        cpuSeconds: config.jobMaxWaitSeconds,
+        job,
+        signal,
+        sensitiveValues: [inputPath, outputPath, credentialPath, secrets.appleId ?? '', secrets.password ?? '', secrets.fairPlayCredential ?? ''],
       });
-      job.childProcess = child;
-      const abort = () => terminateChildProcess(child, 'SIGTERM');
-      signal?.addEventListener('abort', abort, { once: true });
-      if (signal?.aborted) abort();
-      try {
-        await new Promise<void>((resolve, reject) => {
-          child.once('error', reject);
-          child.once('close', (code) => {
-            signal?.removeEventListener('abort', abort);
-            if (signal?.aborted) {
-              reject(signal.reason instanceof Error ? signal.reason : new Error('offline decryption was cancelled'));
-              return;
-            }
-            if (code !== 0) {
-              reject(new Error('FairPlay decryption failed'));
-              return;
-            }
-            resolve();
-          });
-        });
-      } finally {
-        signal?.removeEventListener('abort', abort);
-        if (job.childProcess === child) job.childProcess = undefined;
-      }
     });
   } finally {
     credential.fill(0);
