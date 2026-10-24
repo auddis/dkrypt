@@ -467,9 +467,14 @@ fn map_download_error(error: &ClientError) -> &'static str {
             "apple_rate_limited"
         }
         ClientError::Http(_) => "download_info_http_failed",
-        ClientError::PlistDe(_)
-        | ClientError::MissingHeader(_)
-        | ClientError::UnexpectedResponse(_) => "download_info_response_invalid",
+        ClientError::PlistDe(_) => "download_info_plist_invalid",
+        ClientError::MissingHeader(_) => "download_info_response_invalid",
+        ClientError::UnexpectedResponse(reason) => match reason.as_str() {
+            "missing songList" => "download_info_song_list_missing",
+            "invalid songList" => "download_info_song_list_invalid",
+            "empty songList" => "download_info_song_list_empty",
+            _ => "download_info_response_invalid",
+        },
         ClientError::SapSignatureRequired { .. } => "action_signature_rejected",
         ClientError::Sap(_) => "action_signing_failed",
     }
@@ -824,6 +829,22 @@ mod tests {
                 message: "secret provider response".into(),
             })),
             "download_info_rejected"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse("missing songList".into())),
+            "download_info_song_list_missing"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse("invalid songList".into())),
+            "download_info_song_list_invalid"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse("empty songList".into())),
+            "download_info_song_list_empty"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse("private response".into())),
+            "download_info_response_invalid"
         );
     }
 
