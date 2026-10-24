@@ -2598,7 +2598,7 @@ test('authenticated top bar exposes community links without mobile overflow', as
   const discord = page.getByRole('link', { name: 'Join the dkrypt Discord server' });
   await expect(github).toBeVisible();
   await expect(discord).toBeVisible();
-  await expect(github).toHaveAttribute('href', 'https://github.com/unbound-app/dkrypt');
+  await expect(github).toHaveAttribute('href', 'https://github.com/castdrian/dkrypt');
   await expect(discord).toHaveAttribute('href', 'https://discord.gg/NdaBaxFKnn');
   await expect(discord).toHaveAttribute('target', '_blank');
 

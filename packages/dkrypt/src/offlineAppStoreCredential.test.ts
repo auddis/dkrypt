@@ -39,6 +39,7 @@ test('credential SSH wrapper converts upstream root access to the paired mobile 
   expect(result.status).toBe(0);
   expect(result.stdout).toContain('mobile@127.0.0.1');
   expect(result.stdout).toContain('UserKnownHostsFile=/dev/null');
+  expect(result.stdout).toContain('LogLevel=ERROR');
   expect(result.stdout).toContain('sudo -n env PATH=/var/jb/usr/bin:/var/jb/bin:/usr/bin:/bin:/sbin sh -c');
   expect(result.stdout).not.toContain('root@127.0.0.1');
 });

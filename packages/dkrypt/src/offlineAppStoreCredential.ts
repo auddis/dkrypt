@@ -89,7 +89,7 @@ export function sshWrapper(): string {
     'done',
     'printf -v quoted_remote "%q" "$remote"',
     'args[$last]="sudo -n env PATH=/var/jb/usr/bin:/var/jb/bin:/usr/bin:/bin:/sbin sh -c $quoted_remote"',
-    'exec /usr/bin/ssh -i "$DKRYPT_DEVICE_SSH_KEY" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "${args[@]}"',
+    'exec /usr/bin/ssh -i "$DKRYPT_DEVICE_SSH_KEY" -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR "${args[@]}"',
     '',
   ].join('\n');
 }

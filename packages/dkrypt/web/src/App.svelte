@@ -769,7 +769,7 @@ initDensity();
 				<HeaderOnlineUsers />
 				<BackgroundTaskTray />
 				<a
-					href="https://github.com/unbound-app/dkrypt"
+					href="https://github.com/castdrian/dkrypt"
 					target="_blank"
 					rel="noopener noreferrer"
 					class={buttonVariants("secondary", "icon")}
