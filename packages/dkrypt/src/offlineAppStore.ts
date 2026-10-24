@@ -47,6 +47,30 @@ export interface OfflineAppStoreProcessor {
   run(job: Job, signal?: AbortSignal, setStage?: (stage: JobExecutionStage) => void): Promise<OfflineAppStoreResult>;
 }
 
+const APPLE_AUTHENTICATION_FAILURE_CODES = [
+  'two_factor_required',
+  'verification_code_rejected',
+  'invalid_credentials',
+  'device_verification_required',
+  'rate_limited',
+  'apple_store_unavailable',
+  'account_disabled',
+  'apple_request_timed_out',
+  'apple_network_unavailable',
+  'apple_request_failed',
+  'action_signature_rejected',
+  'action_signing_failed',
+  'apple_response_invalid',
+  'apple_client_setup_failed',
+  'storefront_lookup_failed',
+  'provider_session_storage_failed',
+  'apple_sign_in_rejected',
+  'authentication_failed',
+] as const;
+
+type AppleAuthenticationFailureCode = typeof APPLE_AUTHENTICATION_FAILURE_CODES[number];
+const appleAuthenticationFailureCodeSet = new Set<string>(APPLE_AUTHENTICATION_FAILURE_CODES);
+
 export interface OfflineAppStoreDependencies {
   enabled: boolean;
   fairPlayAuthorized: boolean;
@@ -68,7 +92,7 @@ export class OfflineAppStoreUnavailableError extends Error {
 }
 
 export class OfflineAppStoreAuthenticationError extends Error {
-  constructor(readonly code: 'two_factor_required' | 'authentication_failed') {
+  constructor(readonly code: AppleAuthenticationFailureCode) {
     super(code === 'two_factor_required' ? 'Apple Account verification is required' : 'Apple Account authentication failed');
     this.name = 'OfflineAppStoreAuthenticationError';
   }
@@ -442,7 +466,11 @@ export async function authenticateAppleAccount(authCode?: string, signal?: Abort
     return status.response.authenticated ? status : { ...status, response: { ok: false, code: 'authentication_failed' } };
   }, signal);
   if (!result.response.ok) {
-    const code = result.response.code === 'two_factor_required' ? 'two_factor_required' : 'authentication_failed';
+    const responseCode = result.response.code ?? 'authentication_failed';
+    const code = appleAuthenticationFailureCodeSet.has(responseCode)
+      ? responseCode as AppleAuthenticationFailureCode
+      : 'authentication_failed';
+    log.warn('Apple Account authentication failed', { code });
     clearAppleAccountSessionSnapshot();
     markAppleAccountAuthenticationError(code);
     throw new OfflineAppStoreAuthenticationError(code);

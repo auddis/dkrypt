@@ -87,6 +87,27 @@ test('Apple Account verification records providers that throw before returning a
   }
 });
 
+test('Apple Account verification preserves a safe provider failure category', async () => {
+  const { database, repository } = createRepository();
+  const operation = createAppleAccountAuthenticationOperation({
+    authenticate: async () => { throw Object.assign(new Error('provider rejected login'), { code: 'invalid_credentials' }); },
+    repository,
+    timeoutMs: 1000,
+  });
+
+  try {
+    operation.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(operation.status()).toMatchObject({
+      state: 'failed',
+      error: 'Apple rejected the saved credentials. Check the Apple Account email and password.',
+    });
+    expect(operation.status().error).not.toContain('provider rejected login');
+  } finally {
+    database.close();
+  }
+});
+
 test('interrupted Apple Account verification is recoverable after server restart', () => {
   const { database, repository } = createRepository();
   repository.write({ state: 'running', operationId: 'operation-1', startedAt: 123 });

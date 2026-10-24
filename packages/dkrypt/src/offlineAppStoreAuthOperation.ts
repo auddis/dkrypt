@@ -24,6 +24,24 @@ const APPLE_TWO_FACTOR_REQUIRED = 'Apple requires a six-digit verification code.
 const APPLE_VERIFICATION_CODE_REJECTED = 'Apple did not accept that verification code. Request a fresh code and try again.';
 const APPLE_AUTHENTICATION_FAILED = 'Apple Account authentication failed. Confirm the saved credentials and try again.';
 const APPLE_AUTHENTICATION_INTERRUPTED = 'The server restarted during Apple Account verification. Start again.';
+const APPLE_AUTHENTICATION_FAILURE_MESSAGES: Record<string, string> = {
+  invalid_credentials: 'Apple rejected the saved credentials. Check the Apple Account email and password.',
+  device_verification_required: 'Apple requires verification from a trusted device. Check the iPad for an Apple prompt.',
+  rate_limited: 'Apple temporarily rate-limited sign-in. Wait before trying again.',
+  apple_store_unavailable: 'Apple’s sign-in service is temporarily unavailable. Try again later.',
+  account_disabled: 'Apple disabled sign-in for this account. Check its status with Apple.',
+  apple_request_timed_out: 'Apple’s sign-in request timed out. Check connectivity and try again.',
+  apple_network_unavailable: 'dkrypt could not reach Apple’s sign-in service. Check server connectivity.',
+  apple_request_failed: 'Apple’s sign-in request failed. Try again later.',
+  action_signature_rejected: 'Apple rejected the signed sign-in request. The downloader needs an update.',
+  action_signing_failed: 'dkrypt could not prepare Apple’s signed sign-in request.',
+  apple_response_invalid: 'Apple returned an unexpected sign-in response. The downloader may need an update.',
+  apple_client_setup_failed: 'The Apple downloader could not initialize its client.',
+  storefront_lookup_failed: 'The Apple downloader could not load Apple’s sign-in configuration.',
+  provider_session_storage_failed: 'The Apple downloader could not securely save its sign-in session.',
+  apple_sign_in_rejected: 'Apple rejected the sign-in request. Check account status and try again.',
+  verification_code_rejected: APPLE_VERIFICATION_CODE_REJECTED,
+};
 
 function isTwoFactorRequired(error: unknown): boolean {
   return error instanceof Error && (error as Error & { code?: unknown }).code === 'two_factor_required';
@@ -31,6 +49,11 @@ function isTwoFactorRequired(error: unknown): boolean {
 
 function isAuthenticationTimeout(error: unknown, signal: AbortSignal): boolean {
   return signal.aborted || (error instanceof Error && error.message === AUTHENTICATION_TIMEOUT_MESSAGE);
+}
+
+function authenticationFailureMessage(error: unknown): string {
+  const code = error instanceof Error ? (error as Error & { code?: unknown }).code : undefined;
+  return typeof code === 'string' ? APPLE_AUTHENTICATION_FAILURE_MESSAGES[code] ?? APPLE_AUTHENTICATION_FAILED : APPLE_AUTHENTICATION_FAILED;
 }
 
 export function createAppleAccountAuthenticationOperation(dependencies: AppleAccountAuthenticationDependencies) {
@@ -81,7 +104,7 @@ export function createAppleAccountAuthenticationOperation(dependencies: AppleAcc
       }
       const message = isAuthenticationTimeout(error, controller.signal) || timedOut
         ? AUTHENTICATION_TIMEOUT_MESSAGE
-        : APPLE_AUTHENTICATION_FAILED;
+        : authenticationFailureMessage(error);
       persist({ ...started, state: 'failed', completedAt: now(), error: message });
     }).finally(() => {
       if (timeout) clearTimeout(timeout);

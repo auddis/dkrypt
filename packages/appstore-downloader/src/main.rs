@@ -6,6 +6,7 @@ use std::process;
 
 use dkrypt_appstore_core::api;
 use dkrypt_appstore_core::client::{AppleClient, is_trusted_apple_download_url};
+use dkrypt_appstore_core::error::{ClientError, StoreError};
 use dkrypt_appstore_core::guid::MachineIdentity;
 use dkrypt_appstore_core::model::{Account, Platform};
 use dkrypt_appstore_core::sap;
@@ -195,6 +196,29 @@ fn valid_ipa_path(value: &Path) -> bool {
     value.parent().is_some_and(|parent| parent.is_dir())
 }
 
+fn map_authentication_error(error: &ClientError, verification_code_provided: bool) -> &'static str {
+    match error {
+        ClientError::Store(StoreError::AuthCodeRequired) if verification_code_provided => {
+            "verification_code_rejected"
+        }
+        ClientError::Store(StoreError::AuthCodeRequired) => "two_factor_required",
+        ClientError::Store(StoreError::InvalidCredentials) => "invalid_credentials",
+        ClientError::Store(StoreError::DeviceVerificationFailed) => "device_verification_required",
+        ClientError::Store(StoreError::RateLimited) => "rate_limited",
+        ClientError::Store(StoreError::TemporarilyUnavailable) => "apple_store_unavailable",
+        ClientError::Store(StoreError::AccountDisabled) => "account_disabled",
+        ClientError::Store(_) => "apple_sign_in_rejected",
+        ClientError::Http(error) if error.is_timeout() => "apple_request_timed_out",
+        ClientError::Http(error) if error.is_connect() => "apple_network_unavailable",
+        ClientError::Http(_) => "apple_request_failed",
+        ClientError::SapSignatureRequired { .. } => "action_signature_rejected",
+        ClientError::Sap(_) => "action_signing_failed",
+        ClientError::PlistDe(_)
+        | ClientError::MissingHeader(_)
+        | ClientError::UnexpectedResponse(_) => "apple_response_invalid",
+    }
+}
+
 async fn execute(request: Request) -> Result<Response, &'static str> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -250,13 +274,13 @@ async fn authenticate(
     let identity = load_or_create_identity(session_directory)?;
     let cookie_path = session_directory.join("cookies.json");
     let client = AppleClient::new(identity, Some(&cookie_path), cache_directory)
-        .map_err(|_| "authentication_failed")?;
+        .map_err(|_| "apple_client_setup_failed")?;
     let bag = api::bag::fetch_bag(&client)
         .await
-        .map_err(|_| "authentication_failed")?;
+        .map_err(|_| "storefront_lookup_failed")?;
     let signer = sap::new_default_signer(&client, &bag.sap, client.hardware_id())
         .await
-        .map_err(|_| "authentication_failed")?;
+        .map_err(|_| "action_signing_failed")?;
     let account = api::auth::login(
         &client,
         apple_id,
@@ -266,16 +290,11 @@ async fn authenticate(
         Some(&signer),
     )
     .await
-    .map_err(|error| match error {
-        dkrypt_appstore_core::error::ClientError::Store(
-            dkrypt_appstore_core::error::StoreError::AuthCodeRequired,
-        ) if verification_code.is_none() => "two_factor_required",
-        _ => "authentication_failed",
-    })?;
-    save_account(session_directory, account)?;
+    .map_err(|error| map_authentication_error(&error, verification_code.is_some()))?;
+    save_account(session_directory, account).map_err(|_| "provider_session_storage_failed")?;
     client
         .save_cookies(&cookie_path)
-        .map_err(|_| "authentication_failed")?;
+        .map_err(|_| "provider_session_storage_failed")?;
     Ok(Response::authenticated(true))
 }
 
@@ -587,9 +606,10 @@ fn load_or_create_identity(session_directory: &Path) -> Result<MachineIdentity, 
 #[cfg(test)]
 mod tests {
     use super::{
-        load_account, save_account, temporary_download_path, valid_bundle_id, valid_email,
-        valid_verification_code, verify_requested_version,
+        load_account, map_authentication_error, save_account, temporary_download_path,
+        valid_bundle_id, valid_email, valid_verification_code, verify_requested_version,
     };
+    use dkrypt_appstore_core::error::{ClientError, StoreError};
     use dkrypt_appstore_core::model::Account;
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
@@ -621,6 +641,48 @@ mod tests {
     fn only_accepts_six_digit_verification_codes() {
         assert!(valid_verification_code("123456"));
         assert!(!valid_verification_code("12345x"));
+    }
+
+    #[test]
+    fn classifies_apple_authentication_failures_without_exposing_provider_details() {
+        assert_eq!(
+            map_authentication_error(&ClientError::Store(StoreError::InvalidCredentials), false),
+            "invalid_credentials"
+        );
+        assert_eq!(
+            map_authentication_error(&ClientError::Store(StoreError::AuthCodeRequired), false),
+            "two_factor_required"
+        );
+        assert_eq!(
+            map_authentication_error(&ClientError::Store(StoreError::AuthCodeRequired), true),
+            "verification_code_rejected"
+        );
+        assert_eq!(
+            map_authentication_error(
+                &ClientError::Store(StoreError::DeviceVerificationFailed),
+                false
+            ),
+            "device_verification_required"
+        );
+        assert_eq!(
+            map_authentication_error(&ClientError::Store(StoreError::RateLimited), false),
+            "rate_limited"
+        );
+        assert_eq!(
+            map_authentication_error(
+                &ClientError::Store(StoreError::TemporarilyUnavailable),
+                false
+            ),
+            "apple_store_unavailable"
+        );
+        assert_eq!(
+            map_authentication_error(&ClientError::SapSignatureRequired { status: 403 }, false),
+            "action_signature_rejected"
+        );
+        assert_eq!(
+            map_authentication_error(&ClientError::Sap("signing failed".into()), false),
+            "action_signing_failed"
+        );
     }
 
     #[test]
