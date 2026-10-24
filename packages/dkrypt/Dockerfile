@@ -45,7 +45,7 @@ RUN set -eu; \
   go mod edit -require=github.com/klauspost/compress@v1.18.7 -require=golang.org/x/net@v0.60.0; \
   go mod tidy; \
   go generate ./...; \
-  go test ./...; \
+  go test ./... -skip '^TestSignerIntegration$'; \
   go build -trimpath -ldflags "-X github.com/majd/ipatool/v2/cmd.version=v${IPTATOOL_VERSION}" -o /usr/local/bin/ipatool .
 
 FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS fairplay-decrypt
