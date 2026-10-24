@@ -8,7 +8,7 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createDeviceHistoryRepository } from '#store/deviceHistoryRepository.js';
 import { createDeviceHealthRepository } from '#store/deviceHealthRepository.js';
-import { LATEST_SQLITE_SCHEMA_VERSION, openStateCollectionDatabase, openStateDatabase, readStateCollection, replaceStateCollections } from '#store/sqlite.js';
+import { LATEST_SQLITE_SCHEMA_VERSION, openStateCollectionDatabase, openStateDatabase, readStateCollection, replaceStateCollections, verifyDatabaseBackup } from '#store/sqlite.js';
 import { rewindApiKeySearchMigration, rewindSessionSearchMigration } from '#store/sqliteTestHelpers.js';
 
 const initializationApplicationId = 184527631;
@@ -526,6 +526,21 @@ test('SQLite backup is atomic and can be reopened with its checksum intact', asy
     expect(backup.integrityStatus()).toBe('ok');
     expect(backup.readState()).toEqual({ version: 15, devices: [], settings: {} });
     backup.close();
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('SQLite backup verification accepts an older schema when its applied migration history is intact', async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'dkrypt-sqlite-older-backup-'));
+  try {
+    const databasePath = path.join(stateDir, 'state.sqlite');
+    const database = openStateDatabase({ stateDir, filename: 'state.sqlite' });
+    database.writeState({ version: 29, settings: {} });
+    database.db.exec('DROP TABLE appstore_offline_authentication_operations; DELETE FROM schema_migrations WHERE version = 29;');
+    database.close();
+
+    expect(verifyDatabaseBackup(databasePath)).toEqual({ schemaVersion: 28, integrity: 'ok', hasStateSnapshot: true });
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

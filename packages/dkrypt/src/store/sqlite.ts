@@ -1901,12 +1901,17 @@ export function verifyDatabaseBackup(databasePath: string): { schemaVersion: num
     const table = database.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get() as { name?: string } | null;
     if (table?.name !== 'schema_migrations') throw new Error('SQLite backup is missing schema migration records');
     const applied = database.query('SELECT version, checksum FROM schema_migrations ORDER BY version').all() as Array<{ version: number; checksum: string }>;
-    for (const migration of migrations) {
-      const checksum = applied.find((row) => row.version === migration.version)?.checksum;
-      if (checksum !== sha256(migration.sql)) throw new Error(`SQLite backup migration checksum mismatch for version ${migration.version}`);
+    const schemaVersion = Math.max(...applied.map((row) => row.version), 0);
+    if (schemaVersion > migrations.length) throw new Error(`SQLite backup schema ${schemaVersion} is newer than this release`);
+    const appliedByVersion = new Map(applied.map((row) => [row.version, row.checksum]));
+    for (let version = 1; version <= schemaVersion; version += 1) {
+      const migration = migrations[version - 1];
+      const checksum = appliedByVersion.get(version);
+      if (!checksum) throw new Error(`SQLite backup is missing migration record ${version}`);
+      if (checksum !== sha256(migration.sql)) throw new Error(`SQLite backup migration checksum mismatch for version ${version}`);
     }
     const snapshot = database.query('SELECT 1 AS present FROM state_snapshots WHERE id = 1').get() as { present?: number } | null;
-    return { schemaVersion: Math.max(...applied.map((row) => row.version), 0), integrity: 'ok', hasStateSnapshot: snapshot?.present === 1 };
+    return { schemaVersion, integrity: 'ok', hasStateSnapshot: snapshot?.present === 1 };
   } finally {
     database.close();
   }
