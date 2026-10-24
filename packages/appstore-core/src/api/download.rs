@@ -150,6 +150,7 @@ async fn post_download_info(
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
+    let response_headers = response.headers().clone();
     let response_body = response.bytes().await?;
     tracing::debug!(%status, response_bytes = response_body.len(), "App Store download metadata response received");
     let dict = crate::client::plist_xml::parse_plist_response(&response_body).map_err(|_| {
@@ -157,13 +158,39 @@ async fn post_download_info(
             status.as_u16(),
             content_type.as_deref(),
             &response_body,
+            &response_headers,
         ))
     })?;
     Ok((status, dict))
 }
-fn response_diagnostic(status: u16, content_type: Option<&str>, body: &[u8]) -> String {
+fn response_diagnostic(
+    status: u16,
+    content_type: Option<&str>,
+    body: &[u8],
+    headers: &reqwest::header::HeaderMap,
+) -> String {
+    let server = headers
+        .get(reqwest::header::SERVER)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            if value.eq_ignore_ascii_case("Apple") {
+                "apple"
+            } else {
+                "other"
+            }
+        })
+        .unwrap_or("missing");
+    let commerce_header_count = [
+        "apple-originating-system",
+        "apple-timing-app",
+        "x-apple-jingle-correlation-key",
+        "x-apple-responding-instance",
+    ]
+    .iter()
+    .filter(|name| headers.contains_key(**name))
+    .count();
     format!(
-        "appstore_response_invalid|http_status={status};content_type={};body_format={};body_length={}",
+        "appstore_response_invalid|http_status={status};content_type={};body_format={};body_length={};server={server};commerce_header_count={commerce_header_count}",
         response_content_type(content_type),
         response_body_format(body),
         body.len()
@@ -1050,11 +1077,31 @@ mod tests {
             403,
             Some("text/html; charset=utf-8"),
             b"<html>private response body</html>",
+            &reqwest::header::HeaderMap::new(),
         );
         assert!(diagnostic.contains("http_status=403"));
         assert!(diagnostic.contains("content_type=html"));
         assert!(diagnostic.contains("body_format=html"));
         assert!(diagnostic.contains("body_length=34"));
+        assert!(diagnostic.contains("server=missing"));
+        assert!(diagnostic.contains("commerce_header_count=0"));
         assert!(!diagnostic.contains("private response body"));
+    }
+
+    #[test]
+    fn response_diagnostic_records_only_safe_commerce_header_presence() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::SERVER,
+            reqwest::header::HeaderValue::from_static("Apple"),
+        );
+        headers.insert(
+            "x-apple-jingle-correlation-key",
+            reqwest::header::HeaderValue::from_static("private-correlation-value"),
+        );
+        let diagnostic = response_diagnostic(403, None, &[], &headers);
+        assert!(diagnostic.contains("server=apple"));
+        assert!(diagnostic.contains("commerce_header_count=1"));
+        assert!(!diagnostic.contains("private-correlation-value"));
     }
 }
