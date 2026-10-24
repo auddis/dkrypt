@@ -109,6 +109,7 @@ export const config = {
   appStoreOfflinePythonBin: optional('APPSTORE_OFFLINE_PYTHON_BIN', '/usr/bin/python3'),
   appStoreOfflineCredentialRetriever: optional('APPSTORE_OFFLINE_CREDENTIAL_RETRIEVER', '/opt/fairplay-decrypt/credential-retrieval/retrieve.py'),
   appStoreOfflineCredentialTimeoutSeconds: Math.min(1800, Math.max(60, optionalInt('APPSTORE_OFFLINE_CREDENTIAL_TIMEOUT_SECONDS', 900))),
+  appStoreOfflineCredentialSshHost: optional('APPSTORE_OFFLINE_CREDENTIAL_SSH_HOST', ''),
   appStoreOfflineVaultKey: optional('APPSTORE_OFFLINE_VAULT_KEY', ''),
   appStoreOfflineTerminalBin: optional('APPSTORE_OFFLINE_TERMINAL_BIN', '/usr/bin/script'),
   outputDir: optional('OUTPUT_DIR', '/data/tmp'),
