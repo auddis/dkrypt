@@ -290,20 +290,21 @@ describe('enqueueDecryptJob', () => {
     }
   });
 
-  test('keeps App Store jobs queued until server-side processing is ready', async () => {
+  test('uses the device when server-side App Store processing is unavailable', async () => {
     await clearActiveTestJobs();
     offlineWorkerEnabled = true;
     offlineWorkerReady = false;
+    offlineWorkerAttempts = 0;
     const job = enqueueDecryptJob(`com.test.offline-not-ready.${crypto.randomUUID()}`, 'manual', { preferredDeviceId: testDeviceId });
 
     try {
-      expect(job).toMatchObject({ status: 'queued' });
-      expect(job.executionPath).toBeUndefined();
-      expect(getQueueReason(job)).toContain('Apple Account session needs verification');
+      expect(job).toMatchObject({ status: 'running', executionPath: 'device', deviceId: testDeviceId });
+      expect(offlineWorkerAttempts).toBe(0);
     } finally {
       offlineWorkerEnabled = false;
       offlineWorkerReady = false;
       if (job.status === 'queued') cancelQueuedJob(job.id, 'offline readiness test cleanup');
+      if (job.status === 'running') cancelJob(job.id, 'offline readiness test cleanup');
       await waitForJob(job, 1_000);
     }
   });
@@ -313,7 +314,7 @@ describe('enqueueDecryptJob', () => {
     offlineWorkerEnabled = true;
     offlineWorkerReady = false;
     offlineWorkerHold = true;
-    const job = enqueueDecryptJob(`com.test.offline-readiness-recovered.${crypto.randomUUID()}`, 'manual', { preferredDeviceId: testDeviceId });
+    const job = enqueueDecryptJob(`com.test.offline-readiness-recovered.${crypto.randomUUID()}`, 'manual', { preferredDeviceId: 'missing-device' });
 
     try {
       expect(job.status).toBe('queued');

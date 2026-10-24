@@ -5,7 +5,7 @@ use crate::sap::assets::Bundle;
 use crate::sap::macho::{self, Image};
 use crate::sap::unicorn::{Engine, Guest, reg};
 use crate::sap::{SapMachine, unicorn};
-use shims::Shims;
+use shims::{Shim, Shims};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,6 +14,17 @@ const HLT: u8 = 0xF4;
 const CORE_FP_BASE: u64 = 0x0000_1000_0000_0000;
 const COMMERCE_BASE: u64 = 0x0000_1000_4000_0000;
 const KIT_BASE: u64 = 0x0000_1000_8000_0000;
+const STORE_AGENT_BASE: u64 = 0x0000_1000_C000_0000;
+const STORE_AGENT_GLOBAL_INIT: u64 = STORE_AGENT_BASE + 0x0C5FC0;
+const STORE_AGENT_KBSYNC_ENTRY: u64 = STORE_AGENT_BASE + 0x0C93C0;
+const STORE_AGENT_SC_INFO_PATH: &[u8] = b"/Users/Shared/SC Info\0";
+const STORE_AGENT_ZERO_RETURN_ALIASES: &[&str] = &[
+    "_pthread_rwlock_rdlock",
+    "_pthread_rwlock_rdlock$UNIX2003",
+    "_pthread_mutex_init",
+    "_pthread_mutex_destroy",
+    "_pthread_rwlock_destroy",
+];
 const SCRATCH_BASE: u64 = 0x0000_3000_0000_0000;
 const SCRATCH_SIZE: u64 = 32 << 20;
 const STACK_BASE: u64 = 0x0000_5000_0000_0000;
@@ -21,8 +32,8 @@ const STACK_SIZE: u64 = 8 << 20;
 const STACK_END: u64 = STACK_BASE + STACK_SIZE;
 const PAGE_SIZE: u64 = 0x1000;
 const MAX_OUTPUT: u64 = 16 << 20;
-const CALL_TIMEOUT: Duration = Duration::from_secs(10);
-const CALL_INSTRUCTION_LIMIT: usize = 100_000_000;
+const CALL_TIMEOUT: Duration = Duration::from_secs(60);
+const CALL_INSTRUCTION_LIMIT: usize = 0;
 const CORE_EXPORTS: &[&str] = &[
     "_WIn9UJ86JKdV4dM",
     "_X46O5IeS",
@@ -37,6 +48,8 @@ struct EntryPoints {
     sign: u64,
     teardown: u64,
     dispose: u64,
+    store_agent_global_init: u64,
+    store_agent_kbsync: u64,
 }
 struct Inner {
     engine: Engine,
@@ -56,6 +69,7 @@ impl Machine {
         let mut core_fp = Image::open("CoreFP", &bundle.core_fp)?;
         let mut commerce_core = Image::open("CommerceCore", &bundle.commerce_core)?;
         let mut commerce_kit = Image::open("CommerceKit", &bundle.commerce_kit)?;
+        let mut store_agent = Image::open("StoreAgent", &bundle.store_agent)?;
         let mut exports = HashMap::new();
         let mut core_exports = HashMap::new();
         for name in CORE_EXPORTS {
@@ -73,6 +87,8 @@ impl Machine {
             sign: commerce_kit.export("_Fc3vhtJDvr", KIT_BASE)?,
             teardown: commerce_kit.export("_IPaI1oem5iL", KIT_BASE)?,
             dispose: commerce_kit.export("_jEHf8Xzsv8K", KIT_BASE)?,
+            store_agent_global_init: STORE_AGENT_GLOBAL_INIT,
+            store_agent_kbsync: STORE_AGENT_KBSYNC_ENTRY,
         };
         for (name, address) in &[
             ("_cp2g1b9ro", entry.initialize),
@@ -97,12 +113,18 @@ impl Machine {
             guest.mem_write(RETURN_ADDRESS, &[HLT])?;
         }
         let mut shims = Shims::new(&engine.guest(), core_exports, bundle.core_fp_icxs.clone())?;
+        shims.add_aliases(
+            STORE_AGENT_ZERO_RETURN_ALIASES,
+            Shim::ReturnZero,
+            &engine.guest(),
+        )?;
         {
             let guest = engine.guest();
             for (image, base) in [
                 (&mut core_fp, CORE_FP_BASE),
                 (&mut commerce_core, COMMERCE_BASE),
                 (&mut commerce_kit, KIT_BASE),
+                (&mut store_agent, STORE_AGENT_BASE),
             ] {
                 image.relocate(base, |name| match exports.get(name) {
                     Some(address) => Ok(*address),
@@ -134,6 +156,79 @@ impl Machine {
         self.inner
             .lock()
             .map_err(|_| ClientError::Sap("SAP machine is poisoned".into()))
+    }
+    pub fn generate_kbsync(&self, hardware_id: &[u8], dsid: u64) -> Result<Vec<u8>, ClientError> {
+        if dsid == 0 {
+            return Err(ClientError::Sap(
+                "kbsync requires a nonzero account DSID".into(),
+            ));
+        }
+        let hardware = hardware_block(hardware_id)?;
+        let mut inner = self.lock()?;
+        inner.begin_call();
+        let result = (|| {
+            let context_field = inner.scratch(None, 4)?;
+            let hardware_address = inner.scratch(Some(&hardware), hardware.len() as u64)?;
+            let path_address = inner.scratch(
+                Some(STORE_AGENT_SC_INFO_PATH),
+                STORE_AGENT_SC_INFO_PATH.len() as u64,
+            )?;
+            let global_init = inner.entry.store_agent_global_init;
+            let status = inner.invoke(
+                global_init,
+                &[0, hardware_address, path_address, context_field],
+            )?;
+            if status as i32 != 0 {
+                return Err(ClientError::Sap(format!(
+                    "StoreAgent global initialization returned {}",
+                    status as i32
+                )));
+            }
+            let global_context = shims::read_u32(&inner.engine.guest(), context_field)?;
+            if global_context == 0 {
+                return Err(ClientError::Sap(
+                    "StoreAgent global initialization returned a null context".into(),
+                ));
+            }
+            inner.begin_call();
+            let pointer_field = inner.scratch(None, 8)?;
+            let length_field = inner.scratch(None, 8)?;
+            let kbsync_entry = inner.entry.store_agent_kbsync;
+            let status = inner.invoke(
+                kbsync_entry,
+                [
+                    u64::from(global_context),
+                    dsid,
+                    0,
+                    1,
+                    pointer_field,
+                    length_field,
+                ]
+                .as_slice(),
+            )?;
+            let output = inner.consume_output(pointer_field, length_field);
+            if status as i32 != 0 {
+                return match output {
+                    Ok(_) => Err(ClientError::Sap(format!(
+                        "StoreAgent kbsync returned {}",
+                        status as i32
+                    ))),
+                    Err(error) => Err(ClientError::Sap(format!(
+                        "StoreAgent kbsync returned {} and output cleanup failed: {error}",
+                        status as i32
+                    ))),
+                };
+            }
+            let output = output?;
+            if output.is_empty() {
+                return Err(ClientError::Sap(
+                    "StoreAgent kbsync returned an empty buffer".into(),
+                ));
+            }
+            Ok(output)
+        })();
+        inner.clear_scratch();
+        result
     }
 }
 impl Inner {
@@ -404,5 +499,22 @@ mod tests {
             }
             assert_eq!(stack % 16, 8, "spilled={spilled}");
         }
+    }
+    #[tokio::test]
+    #[ignore = "downloads verified Apple SAP assets and Unicorn, then runs StoreAgent locally"]
+    async fn live_store_agent_generates_account_bound_kbsync() {
+        let client = AppleClient::for_tests();
+        let cache_dir = client.cache_dir().to_path_buf();
+        let bundle = crate::sap::assets::load(&client, &cache_dir.join("apple-assets"))
+            .await
+            .expect("load verified Apple assets");
+        let machine = Machine::open(&client, &cache_dir, &bundle)
+            .await
+            .expect("open SAP and StoreAgent runtime");
+        let kbsync = machine
+            .generate_kbsync(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF], 123456789)
+            .expect("generate account-bound kbsync");
+        assert!(!kbsync.is_empty());
+        assert!(kbsync.len() <= MAX_OUTPUT as usize);
     }
 }

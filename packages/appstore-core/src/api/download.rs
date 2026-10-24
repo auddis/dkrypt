@@ -1,11 +1,13 @@
 use crate::client::AppleClient;
 use crate::error::{ClientError, StoreError};
 use crate::model::Account;
+use base64::Engine as _;
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use url::Url;
 #[derive(Debug, Deserialize)]
@@ -47,6 +49,7 @@ mod serde_bytes {
     }
 }
 const MAX_DOWNLOAD_ATTEMPTS: u32 = 3;
+const ENT_DOWNLOAD_PATH: &str = "/WebObjects/DownloadDispatch.woa/wa/ent/download";
 pub async fn get_download_info(
     client: &AppleClient,
     app_id: i64,
@@ -79,6 +82,30 @@ async fn try_get_download_info(
     account: &Account,
     external_version_id: Option<&str>,
 ) -> Result<DownloadItem, ClientError> {
+    if let Ok(endpoints) = crate::api::bag::fetch_download_endpoints(client).await
+        && let Some(endpoint) = endpoints.ent_download
+    {
+        match get_ent_download_info(
+            client,
+            &endpoint,
+            app_id,
+            bundle_id,
+            account,
+            external_version_id,
+        )
+        .await
+        {
+            Ok(item) => return Ok(item),
+            Err(error) if should_try_legacy_download(&error) => {
+                tracing::warn!(
+                    "Apple ent/download path was unavailable; trying the legacy download path"
+                );
+            }
+            Err(error @ ClientError::Store(_))
+            | Err(error @ ClientError::SapSignatureRequired { .. }) => return Err(error),
+            Err(error) => return Err(stage_download_error(error, "ent_download")),
+        }
+    }
     let url = download_url(account, client.guid());
     let body_bytes = download_info_request_body(
         app_id,
@@ -97,6 +124,92 @@ async fn try_get_download_info(
             .await?;
     }
     download_item_from_response_dict(&dict)
+}
+fn should_try_legacy_download(error: &ClientError) -> bool {
+    match error {
+        ClientError::Sap(_) | ClientError::Http(_) => true,
+        ClientError::UnexpectedResponse(reason) => !reason
+            .split(';')
+            .any(|field| field.contains("http_status=403")),
+        ClientError::Store(_) | ClientError::MissingHeader(_) | ClientError::PlistDe(_) => false,
+        ClientError::SapSignatureRequired { .. } => false,
+    }
+}
+async fn get_ent_download_info(
+    client: &AppleClient,
+    endpoint: &Url,
+    app_id: i64,
+    bundle_id: &str,
+    account: &Account,
+    requested_external_version_id: Option<&str>,
+) -> Result<DownloadItem, ClientError> {
+    let external_version_id = match requested_external_version_id {
+        Some(version_id) => version_id.to_string(),
+        None => lookup_latest_external_version_id(client, account, app_id, bundle_id).await?,
+    };
+    let dsid = account
+        .directory_services_id
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| ClientError::UnexpectedResponse("ent_download_dsid_invalid".into()))?;
+    let cache_dir = client.cache_dir();
+    let bundle = crate::sap::assets::load(client, &cache_dir.join("apple-assets")).await?;
+    let machine = crate::sap::machine::Machine::open(client, cache_dir, &bundle).await?;
+    let kbsync = machine.generate_kbsync(client.hardware_id(), dsid)?;
+    let serial = ent_download_serial_number(client.hardware_id())?;
+    let body = ent_download_request_body(
+        app_id,
+        client.guid(),
+        &external_version_id,
+        &kbsync,
+        &serial,
+    )?;
+    let url = ent_download_dispatch_url(endpoint, client.guid());
+    let response = client
+        .app_store_dispatch_http()?
+        .post(url)
+        .header(
+            "Content-Type",
+            "application/x-www-form-urlencoded; charset=utf-8",
+        )
+        .header("X-Dsid", &account.directory_services_id)
+        .header("iCloud-DSID", &account.directory_services_id)
+        .header("X-Apple-Store-Front", &account.store_front)
+        .header("X-Token", &account.password_token)
+        .timeout(Duration::from_secs(45))
+        .body(body)
+        .send()
+        .await?;
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let response_headers = response.headers().clone();
+    let response_body = response.bytes().await?;
+    let dict = crate::client::plist_xml::parse_plist_response(&response_body).map_err(|_| {
+        ClientError::UnexpectedResponse(response_diagnostic(
+            status.as_u16(),
+            content_type.as_deref(),
+            &response_body,
+            &response_headers,
+        ))
+    })?;
+    if status != reqwest::StatusCode::OK && StoreError::from_plist_dict(&dict).is_none() {
+        return Err(ClientError::UnexpectedResponse(
+            "ent_download_http_failed".into(),
+        ));
+    }
+    let item = download_item_from_response_dict(&dict)?;
+    validate_download_response_identity(&dict, app_id, bundle_id, &external_version_id)?;
+    if item.url.is_empty() {
+        return Err(ClientError::UnexpectedResponse(
+            "ent_download_url_missing".into(),
+        ));
+    }
+    Ok(item)
 }
 #[derive(Clone, Copy)]
 enum DownloadVersionKey {
@@ -124,6 +237,47 @@ fn download_info_request_body(
             plist::Value::String(vid.to_string()),
         );
     }
+    let mut body_bytes = Vec::new();
+    plist::to_writer_xml(&mut body_bytes, &body)
+        .map_err(|e| ClientError::UnexpectedResponse(format!("plist serialize: {e}")))?;
+    Ok(body_bytes)
+}
+fn ent_download_serial_number(hardware_id: &[u8]) -> Result<Vec<u8>, ClientError> {
+    if hardware_id.len() != 6 {
+        return Err(ClientError::UnexpectedResponse(
+            "ent_download_hardware_id_invalid".into(),
+        ));
+    }
+    let mut serial = vec![0x54, 0xC8, 0xB0, 0xA9, 0x88];
+    serial.extend_from_slice(&hardware_id[2..]);
+    Ok(serial)
+}
+fn ent_download_request_body(
+    app_id: i64,
+    guid: &str,
+    external_version_id: &str,
+    kbsync: &[u8],
+    serial_number: &[u8],
+) -> Result<Vec<u8>, ClientError> {
+    let mut body = plist::Dictionary::new();
+    body.insert("creditDisplay".into(), plist::Value::String(String::new()));
+    body.insert("guid".into(), plist::Value::String(guid.to_string()));
+    body.insert(
+        "kbsync".into(),
+        plist::Value::String(base64::engine::general_purpose::STANDARD.encode(kbsync)),
+    );
+    body.insert(
+        "salableAdamId".into(),
+        plist::Value::String(app_id.to_string()),
+    );
+    body.insert(
+        "serialNumber".into(),
+        plist::Value::String(base64::engine::general_purpose::STANDARD.encode(serial_number)),
+    );
+    body.insert(
+        "externalVersionId".into(),
+        plist::Value::String(external_version_id.to_string()),
+    );
     let mut body_bytes = Vec::new();
     plist::to_writer_xml(&mut body_bytes, &body)
         .map_err(|e| ClientError::UnexpectedResponse(format!("plist serialize: {e}")))?;
@@ -268,17 +422,19 @@ async fn retry_download_dispatch(
     bundle_id: &str,
     requested_external_version_id: Option<&str>,
 ) -> Result<HashMap<String, plist::Value>, ClientError> {
-    let config = crate::api::bag::fetch_bag(client).await.map_err(|error| {
-        let code = match &error {
-            ClientError::Http(error) if error.is_timeout() => "update_product_bag_timed_out",
-            ClientError::Http(error) if error.is_connect() => {
-                "update_product_bag_network_unavailable"
-            }
-            _ => "update_product_bag_unavailable",
-        };
-        ClientError::UnexpectedResponse(code.into())
-    })?;
-    let endpoint = config.redownload_product_endpoint.ok_or_else(|| {
+    let config = crate::api::bag::fetch_download_endpoints(client)
+        .await
+        .map_err(|error| {
+            let code = match &error {
+                ClientError::Http(error) if error.is_timeout() => "update_product_bag_timed_out",
+                ClientError::Http(error) if error.is_connect() => {
+                    "update_product_bag_network_unavailable"
+                }
+                _ => "update_product_bag_unavailable",
+            };
+            ClientError::UnexpectedResponse(code.into())
+        })?;
+    let endpoint = config.redownload_product.ok_or_else(|| {
         ClientError::UnexpectedResponse("redownload_product_endpoint_missing".into())
     })?;
     let external_version_id = match requested_external_version_id {
@@ -305,7 +461,7 @@ async fn retry_download_dispatch(
                     app_id,
                     bundle_id,
                     &external_version_id,
-                    config.update_product_endpoint.as_ref(),
+                    config.update_product.as_ref(),
                 )
                 .await;
             }
@@ -326,7 +482,7 @@ async fn retry_download_dispatch(
             app_id,
             bundle_id,
             &external_version_id,
-            config.update_product_endpoint.as_ref(),
+            config.update_product.as_ref(),
         )
         .await;
     }
@@ -470,6 +626,14 @@ fn needs_download_dispatch_retry(
 }
 fn download_dispatch_url(endpoint: &Url, guid: &str) -> Url {
     let mut url = endpoint.clone();
+    url.query_pairs_mut().append_pair("guid", guid);
+    url
+}
+fn ent_download_dispatch_url(endpoint: &Url, guid: &str) -> Url {
+    let mut url = endpoint.clone();
+    if url.path() == "/ent/download" {
+        url.set_path(ENT_DOWNLOAD_PATH);
+    }
     url.query_pairs_mut().append_pair("guid", guid);
     url
 }
@@ -871,6 +1035,28 @@ mod tests {
         );
     }
     #[test]
+    fn ent_download_url_expands_apples_short_bag_alias() {
+        let endpoint =
+            url::Url::parse("https://downloaddispatch.itunes.apple.com/ent/download").unwrap();
+        let request_url = ent_download_dispatch_url(&endpoint, "AABBCCDDEEFF");
+        assert_eq!(
+            request_url.as_str(),
+            "https://downloaddispatch.itunes.apple.com/WebObjects/DownloadDispatch.woa/wa/ent/download?guid=AABBCCDDEEFF"
+        );
+    }
+    #[test]
+    fn ent_download_url_preserves_apples_canonical_bag_path() {
+        let endpoint = url::Url::parse(&format!(
+            "https://downloaddispatch.itunes.apple.com{ENT_DOWNLOAD_PATH}"
+        ))
+        .unwrap();
+        let request_url = ent_download_dispatch_url(&endpoint, "AABBCCDDEEFF");
+        assert_eq!(
+            request_url.as_str(),
+            "https://downloaddispatch.itunes.apple.com/WebObjects/DownloadDispatch.woa/wa/ent/download?guid=AABBCCDDEEFF"
+        );
+    }
+    #[test]
     fn download_info_request_matches_app_store_payload_types_and_fields() {
         let body = download_info_request_body(
             1234,
@@ -912,6 +1098,41 @@ mod tests {
             Some(&plist::Value::String("5678".into()))
         );
         assert!(!request.contains_key("externalVersionId"));
+    }
+    #[test]
+    fn ent_download_request_uses_account_bound_payload_fields() {
+        let serial = ent_download_serial_number(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]).unwrap();
+        assert_eq!(
+            serial,
+            vec![0x54, 0xC8, 0xB0, 0xA9, 0x88, 0xCC, 0xDD, 0xEE, 0xFF]
+        );
+        let body =
+            ent_download_request_body(1234, "AABBCCDDEEFF", "5678", &[1, 2, 3], &serial).unwrap();
+        let request: plist::Dictionary = plist::from_bytes(&body).unwrap();
+        assert_eq!(
+            request.get("creditDisplay"),
+            Some(&plist::Value::String(String::new()))
+        );
+        assert_eq!(
+            request.get("guid"),
+            Some(&plist::Value::String("AABBCCDDEEFF".into()))
+        );
+        assert_eq!(
+            request.get("kbsync"),
+            Some(&plist::Value::String("AQID".into()))
+        );
+        assert_eq!(
+            request.get("salableAdamId"),
+            Some(&plist::Value::String("1234".into()))
+        );
+        assert_eq!(
+            request.get("serialNumber"),
+            Some(&plist::Value::String("VMiwqYjM3e7/".into()))
+        );
+        assert_eq!(
+            request.get("externalVersionId"),
+            Some(&plist::Value::String("5678".into()))
+        );
     }
     #[test]
     fn platform_version_lookup_accepts_numeric_and_string_ids() {

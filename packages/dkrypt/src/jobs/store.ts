@@ -900,11 +900,13 @@ function getJobDispatchableDeviceCount(job: Job): number {
 }
 
 function requiresServerSideAppStoreAttempt(job: Job): boolean {
-  return !job.testflight && !job.offlineAttemptedAt && offlineAppStoreProcessor.readiness(job).enabled;
+  if (job.testflight || job.offlineAttemptedAt) return false;
+  const readiness = offlineAppStoreProcessor.readiness(job);
+  return readiness.enabled && readiness.ready;
 }
 
 function canStartOfflineAttempt(job: Job): boolean {
-  return requiresServerSideAppStoreAttempt(job) && offlineAppStoreProcessor.readiness(job).ready;
+  return requiresServerSideAppStoreAttempt(job);
 }
 
 function offlineWorkerSlots(job: Job): number {

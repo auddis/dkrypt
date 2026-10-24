@@ -497,6 +497,20 @@ fn map_download_error(error: &ClientError) -> &'static str {
             "invalid songList" => "download_info_song_list_invalid",
             "empty songList" => "download_info_song_list_empty",
             "download_info_http_failed" => "download_info_http_failed",
+            "ent_download_http_failed" => "download_info_ent_download_http_failed",
+            "ent_download_dsid_invalid" | "ent_download_hardware_id_invalid" => {
+                "download_info_ent_download_identity_invalid"
+            }
+            "ent_download_url_missing" => "download_info_ent_download_url_missing",
+            reason if reason.starts_with("ent_download_request_timed_out") => {
+                "download_info_ent_download_request_timed_out"
+            }
+            reason if reason.starts_with("ent_download_request_network_unavailable") => {
+                "download_info_ent_download_request_network_unavailable"
+            }
+            reason if reason.starts_with("ent_download_response_invalid") => {
+                "download_info_ent_download_response_invalid"
+            }
             "redownload_product_endpoint_missing" => {
                 "download_info_redownload_product_endpoint_missing"
             }
@@ -551,6 +565,7 @@ fn map_download_error(error: &ClientError) -> &'static str {
 fn map_download_diagnostic(error: &ClientError) -> Option<String> {
     match error {
         ClientError::UnexpectedResponse(reason) => [
+            "ent_download_response_invalid|",
             "redownload_product_response_invalid|",
             "update_product_response_invalid|",
         ]
@@ -999,6 +1014,17 @@ mod tests {
             failure.code,
             "download_info_update_product_response_invalid"
         );
+        assert_eq!(failure.diagnostic.as_deref(), Some(diagnostic));
+        assert_eq!(map_download_diagnostic(&error).as_deref(), Some(diagnostic));
+    }
+
+    #[test]
+    fn preserves_only_safe_ent_download_response_metadata() {
+        let diagnostic = "http_status=403;content_type=xml;body_format=empty;body_length=0;server=apple;commerce_header_count=0";
+        let error =
+            ClientError::UnexpectedResponse(format!("ent_download_response_invalid|{diagnostic}"));
+        let failure = DownloaderFailure::from_download_error("download_info", &error);
+        assert_eq!(failure.code, "download_info_ent_download_response_invalid");
         assert_eq!(failure.diagnostic.as_deref(), Some(diagnostic));
         assert_eq!(map_download_diagnostic(&error).as_deref(), Some(diagnostic));
     }

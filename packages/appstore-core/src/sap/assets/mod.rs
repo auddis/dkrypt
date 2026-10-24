@@ -44,6 +44,12 @@ const REQUIRED: &[FileSpec] = &[
         size: 5_288_352,
         digest: "473e78af86979f5bd4f6269561caf770b3d16c098d918846eeac8cdd2fe6566a",
     },
+    FileSpec {
+        name: "StoreAgent",
+        path: "CommerceKit.framework/Versions/A/Resources/storeagent",
+        size: 2_580_176,
+        digest: "70ce036f9dbcbc04db9511ebd08de0dd3cbc35ccc9d44b089c90170cb5453c59",
+    },
 ];
 #[derive(Debug, Clone)]
 pub struct Bundle {
@@ -51,6 +57,7 @@ pub struct Bundle {
     pub commerce_core: Vec<u8>,
     pub core_fp: Vec<u8>,
     pub core_fp_icxs: Vec<u8>,
+    pub store_agent: Vec<u8>,
 }
 pub async fn load(client: &AppleClient, cache_dir: &Path) -> Result<Bundle, ClientError> {
     match read_cache(cache_dir) {
@@ -204,6 +211,7 @@ fn assemble(mut found: HashMap<&'static str, Vec<u8>>) -> Result<Bundle, ClientE
         commerce_core: take("CommerceCore")?,
         core_fp: take("CoreFP")?,
         core_fp_icxs: take("CoreFP.icxs")?,
+        store_agent: take("StoreAgent")?,
     })
 }
 fn files(bundle: &Bundle) -> Vec<(&'static str, &[u8])> {
@@ -212,6 +220,7 @@ fn files(bundle: &Bundle) -> Vec<(&'static str, &[u8])> {
         ("CommerceCore", bundle.commerce_core.as_slice()),
         ("CoreFP", bundle.core_fp.as_slice()),
         ("CoreFP.icxs", bundle.core_fp_icxs.as_slice()),
+        ("StoreAgent", bundle.store_agent.as_slice()),
     ]
 }
 pub fn validate(bundle: &Bundle) -> Result<(), ClientError> {
@@ -268,21 +277,22 @@ fn write_cache(directory: &Path, bundle: &Bundle) -> Result<(), ClientError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn bundle_of(sizes: [usize; 4]) -> Bundle {
+    fn bundle_of(sizes: [usize; 5]) -> Bundle {
         Bundle {
             commerce_kit: vec![0; sizes[0]],
             commerce_core: vec![0; sizes[1]],
             core_fp: vec![0; sizes[2]],
             core_fp_icxs: vec![0; sizes[3]],
+            store_agent: vec![0; sizes[4]],
         }
     }
     #[test]
     fn rejects_wrong_sizes_before_hashing() {
-        assert!(validate(&bundle_of([1, 1, 1, 1])).is_err());
+        assert!(validate(&bundle_of([1, 1, 1, 1, 1])).is_err());
     }
     #[test]
     fn rejects_correctly_sized_but_wrong_contents() {
-        let bundle = bundle_of([3_271_840, 207_744, 29_014_912, 5_288_352]);
+        let bundle = bundle_of([3_271_840, 207_744, 29_014_912, 5_288_352, 2_580_176]);
         let message = validate(&bundle).unwrap_err().to_string();
         assert!(
             message.contains("failed integrity verification"),

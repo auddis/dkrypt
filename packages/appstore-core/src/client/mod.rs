@@ -95,6 +95,14 @@ impl AppleClient {
             .build()
             .map_err(ClientError::from)
     }
+    pub fn app_store_dispatch_http(&self) -> Result<DownloadHttpClient, ClientError> {
+        reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .cookie_provider(self.cookie_store.clone())
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(ClientError::from)
+    }
     pub fn save_cookies(&self, path: &Path) -> Result<(), ClientError> {
         cookie_jar::save_cookie_store(&self.cookie_store, path)
     }

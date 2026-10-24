@@ -13,13 +13,33 @@ const AUTH_POD_SUFFIX: &str = "-buy.itunes.apple.com";
 pub struct BagConfig {
     pub auth_endpoint: Url,
     pub sap: SapConfig,
+    pub ent_download_endpoint: Option<Url>,
     pub redownload_product_endpoint: Option<Url>,
     pub update_product_endpoint: Option<Url>,
 }
+#[derive(Debug, Clone, Default)]
+pub struct DownloadEndpoints {
+    pub ent_download: Option<Url>,
+    pub redownload_product: Option<Url>,
+    pub update_product: Option<Url>,
+}
 pub async fn fetch_bag(client: &AppleClient) -> Result<BagConfig, ClientError> {
+    let inner = fetch_inner_bag(client).await?;
+    parse_bag(&inner)
+}
+pub async fn fetch_download_endpoints(
+    client: &AppleClient,
+) -> Result<DownloadEndpoints, ClientError> {
+    let inner = fetch_inner_bag(client).await?;
+    Ok(parse_download_endpoints(&inner))
+}
+async fn fetch_inner_bag(
+    client: &AppleClient,
+) -> Result<HashMap<String, plist::Value>, ClientError> {
     let resp = client
         .http()
         .get(BAG_URL)
+        .query(&[("guid", client.guid())])
         .timeout(BAG_REQUEST_TIMEOUT)
         .send()
         .await?;
@@ -30,9 +50,7 @@ pub async fn fetch_bag(client: &AppleClient) -> Result<BagConfig, ClientError> {
         .get("bag")
         .and_then(plist::Value::as_data)
         .ok_or_else(|| ClientError::UnexpectedResponse("bag: missing 'bag' data".into()))?;
-    let inner: HashMap<String, plist::Value> =
-        plist::from_bytes(bag_data).map_err(ClientError::PlistDe)?;
-    parse_bag(&inner)
+    plist::from_bytes(bag_data).map_err(ClientError::PlistDe)
 }
 fn parse_bag(inner: &HashMap<String, plist::Value>) -> Result<BagConfig, ClientError> {
     let auth_endpoint = bag_url(inner, "authenticateAccount")?;
@@ -52,14 +70,41 @@ fn parse_bag(inner: &HashMap<String, plist::Value>) -> Result<BagConfig, ClientE
         version,
     };
     sap.validate()?;
-    let redownload_product_endpoint = bag_endpoint(inner, "redownloadProduct", "/r/redownload");
-    let update_product_endpoint = bag_endpoint(inner, "updateProduct", "/up/updateProduct");
+    let endpoints = parse_download_endpoints(inner);
     Ok(BagConfig {
         auth_endpoint,
         sap,
-        redownload_product_endpoint,
-        update_product_endpoint,
+        ent_download_endpoint: endpoints.ent_download,
+        redownload_product_endpoint: endpoints.redownload_product,
+        update_product_endpoint: endpoints.update_product,
     })
+}
+fn parse_download_endpoints(inner: &HashMap<String, plist::Value>) -> DownloadEndpoints {
+    DownloadEndpoints {
+        ent_download: ent_download_endpoint(inner),
+        redownload_product: bag_endpoint(inner, "redownloadProduct", "/r/redownload"),
+        update_product: bag_endpoint(inner, "updateProduct", "/up/updateProduct"),
+    }
+}
+fn ent_download_endpoint(inner: &HashMap<String, plist::Value>) -> Option<Url> {
+    let endpoint = inner
+        .get("volumeStoreDownloadProduct")
+        .and_then(plist::Value::as_string)
+        .and_then(|raw| Url::parse(raw).ok())?;
+    let host = endpoint.host_str().unwrap_or_default().to_ascii_lowercase();
+    let valid_path = matches!(
+        endpoint.path(),
+        "/ent/download" | "/WebObjects/DownloadDispatch.woa/wa/ent/download"
+    );
+    (endpoint.scheme() == "https"
+        && host == "downloaddispatch.itunes.apple.com"
+        && endpoint.port_or_known_default() == Some(443)
+        && endpoint.username().is_empty()
+        && endpoint.password().is_none()
+        && endpoint.query().is_none()
+        && endpoint.fragment().is_none()
+        && valid_path)
+        .then_some(endpoint)
 }
 fn bag_endpoint(inner: &HashMap<String, plist::Value>, key: &str, path: &str) -> Option<Url> {
     inner
@@ -141,6 +186,12 @@ mod tests {
                 plist::Value::String("200".into()),
             ),
             (
+                "volumeStoreDownloadProduct".to_string(),
+                plist::Value::String(
+                    "https://downloaddispatch.itunes.apple.com/ent/download".into(),
+                ),
+            ),
+            (
                 "redownloadProduct".to_string(),
                 plist::Value::String(
                     "https://downloaddispatch.itunes.apple.com/r/redownload".into(),
@@ -166,6 +217,10 @@ mod tests {
             "https://fpinit.itunes.apple.com/v1/signSapSetup/legacy"
         );
         assert_eq!(config.sap.version, 200);
+        assert_eq!(
+            config.ent_download_endpoint.unwrap().as_str(),
+            "https://downloaddispatch.itunes.apple.com/ent/download"
+        );
         assert_eq!(
             config.redownload_product_endpoint.unwrap().as_str(),
             "https://downloaddispatch.itunes.apple.com/r/redownload"
@@ -211,6 +266,33 @@ mod tests {
         );
         let config = parse_bag(&bag).unwrap();
         assert!(config.redownload_product_endpoint.is_none());
+    }
+    #[test]
+    fn accepts_only_trusted_ent_download_endpoints() {
+        for endpoint in [
+            "https://downloaddispatch.itunes.apple.com/ent/download",
+            "https://downloaddispatch.itunes.apple.com/WebObjects/DownloadDispatch.woa/wa/ent/download",
+        ] {
+            let mut bag = current_bag();
+            bag.insert(
+                "volumeStoreDownloadProduct".to_string(),
+                plist::Value::String(endpoint.into()),
+            );
+            assert!(parse_bag(&bag).unwrap().ent_download_endpoint.is_some());
+        }
+        for endpoint in [
+            "https://example.com/ent/download",
+            "http://downloaddispatch.itunes.apple.com/ent/download",
+            "https://downloaddispatch.itunes.apple.com/r/redownload",
+            "https://downloaddispatch.itunes.apple.com/ent/download?guid=other",
+        ] {
+            let mut bag = current_bag();
+            bag.insert(
+                "volumeStoreDownloadProduct".to_string(),
+                plist::Value::String(endpoint.into()),
+            );
+            assert!(parse_bag(&bag).unwrap().ent_download_endpoint.is_none());
+        }
     }
     #[test]
     fn accepts_legacy_bag_without_update_product_endpoint() {
