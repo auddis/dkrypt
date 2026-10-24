@@ -10,8 +10,9 @@ import type { AppleAccountSecrets, AppleAccountVaultStatus } from '#appleAccount
 import type { FairPlayVerificationResult } from '#util/ipaFairPlay.js';
 import type { ExtractedIpaMetadata } from '#util/ipaMetadata.js';
 import { compareVersions } from '#util/version.js';
+import { getIpaFairPlayLicenseSelector } from '#util/ipaFairPlay.js';
 import { inspectIpaInIsolatedProcess } from '#jobs/ipaInspection.js';
-import type { Job, JobExecutionStage } from '#jobs/types.js';
+import { appendJobTimelineEvent, type Job, type JobExecutionStage } from '#jobs/types.js';
 import { throwIfAborted } from '#util/abort.js';
 import { invokeFairPlayDecryptor } from '#offlineAppStoreDecryptor.js';
 import { createOfflineAppStoreAuthenticationRepository } from '#store/offlineAppStoreAuthenticationRepository.js';
@@ -19,6 +20,8 @@ import { openStateCollectionDatabase } from '#store/sqlite.js';
 import { scopedLogger } from '#logger.js';
 import { sanitizeAppStoreDownloadDiagnostic } from '#offlineAppStoreDiagnostic.js';
 import { runAppStoreDownloaderRequest } from '#offlineAppStoreDownloader.js';
+import { emitJobsChanged } from '#events.js';
+import { saveAppleAccountFairPlayCredentialForSelector } from '#appleAccountVault.js';
 
 const log = scopedLogger('appstore-offline');
 let offlineAppStoreDispatchNotifier = () => {};
@@ -78,7 +81,10 @@ export interface OfflineAppStoreDependencies {
   getSecrets(): AppleAccountSecrets | undefined;
   getVaultStatus(): AppleAccountVaultStatus;
   runDownload(job: Job, secrets: AppleAccountSecrets, outputPath: string, signal?: AbortSignal): Promise<void>;
-  runDecrypt(job: Job, secrets: AppleAccountSecrets, inputPath: string, outputPath: string, signal?: AbortSignal): Promise<void>;
+  runDecrypt(job: Job, secrets: AppleAccountSecrets, inputPath: string, outputPath: string, signal?: AbortSignal, credential?: string): Promise<void>;
+  getLicenseSelector(inputPath: string): string;
+  retrieveCredentialForIpa?(job: Job, inputPath: string, signal?: AbortSignal): Promise<Buffer>;
+  saveCredentialForSelector?(selector: string, credential: string): void;
   inspect(path: string, signal?: AbortSignal, onChildProcess?: (child: ChildProcess | undefined) => void): Promise<{ verification: FairPlayVerificationResult; metadata: ExtractedIpaMetadata }>;
 }
 
@@ -163,7 +169,9 @@ export function createOfflineAppStoreProcessor(dependencies: OfflineAppStoreDepe
       const currentReadiness = readiness(job);
       if (!currentReadiness.ready) throw new OfflineAppStoreUnavailableError(currentReadiness.blockers.join('; '));
       const secrets = dependencies.getSecrets();
-      if (!secrets?.fairPlayCredential) throw new OfflineAppStoreUnavailableError('device-derived FairPlay credential is not configured');
+      if (!secrets || (!secrets.fairPlayCredential && !Object.keys(secrets.fairPlayCredentials ?? {}).length)) {
+        throw new OfflineAppStoreUnavailableError('device-derived FairPlay credential is not configured');
+      }
       throwIfAborted(signal);
       await mkdir(dependencies.stagingDirectory, { recursive: true, mode: 0o700 });
       const encryptedPath = path.join(dependencies.stagingDirectory, `${job.id}.offline-encrypted.ipa`);
@@ -178,7 +186,39 @@ export function createOfflineAppStoreProcessor(dependencies: OfflineAppStoreDepe
           throw new Error('App Store download has an invalid size');
         }
         setStage?.('offline_decrypting');
-        await dependencies.runDecrypt(job, secrets, encryptedPath, outputPath, signal);
+        const selector = dependencies.getLicenseSelector(encryptedPath);
+        let credential = secrets.fairPlayCredentials?.[selector] ?? secrets.fairPlayCredential;
+        let retrievedCredential: Buffer | undefined;
+        let retrievedForThisJob = false;
+        if (!credential && dependencies.retrieveCredentialForIpa) {
+          job.progress = 'Retrieving the matching FairPlay key from the paired iPad';
+          appendJobTimelineEvent(job, 'Retrieving the matching FairPlay key from the paired iPad', 'running');
+          emitJobsChanged();
+          retrievedCredential = await dependencies.retrieveCredentialForIpa(job, encryptedPath, signal);
+          credential = retrievedCredential.toString('base64');
+          retrievedForThisJob = true;
+        }
+        try {
+          await dependencies.runDecrypt(job, secrets, encryptedPath, outputPath, signal, credential);
+        } catch (error) {
+          if (!isFairPlaySelectorMismatch(error) || !dependencies.retrieveCredentialForIpa || retrievedForThisJob) throw error;
+          job.progress = 'Retrieving the matching FairPlay key from the paired iPad';
+          appendJobTimelineEvent(job, 'Retrieving the matching FairPlay key from the paired iPad', 'running');
+          emitJobsChanged();
+          retrievedCredential = await dependencies.retrieveCredentialForIpa(job, encryptedPath, signal);
+          credential = retrievedCredential.toString('base64');
+          retrievedForThisJob = true;
+          await rm(outputPath, { force: true });
+          await dependencies.runDecrypt(job, secrets, encryptedPath, outputPath, signal, credential);
+          job.progress = 'Decrypting the App Store package on the server';
+          appendJobTimelineEvent(job, 'The matching FairPlay key decrypted the downloaded package', 'done');
+          emitJobsChanged();
+        } finally {
+          retrievedCredential?.fill(0);
+        }
+        if (credential && !secrets.fairPlayCredentials?.[selector]) {
+          dependencies.saveCredentialForSelector?.(selector, credential);
+        }
         throwIfAborted(signal);
         const inspection = await dependencies.inspect(outputPath, signal, (child) => { job.childProcess = child; });
         job.childProcess = undefined;
@@ -201,6 +241,10 @@ export function createOfflineAppStoreProcessor(dependencies: OfflineAppStoreDepe
       }
     },
   };
+}
+
+function isFairPlaySelectorMismatch(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('credential does not decode this SINF priv record');
 }
 
 const defaultStagingDirectory = path.join(config.artifactDir, '.staging');
@@ -385,8 +429,8 @@ async function runDefaultDownload(job: Job, secrets: AppleAccountSecrets, output
   markAppleAccountAuthenticated();
 }
 
-async function runDefaultDecrypt(job: Job, secrets: AppleAccountSecrets, inputPath: string, outputPath: string, signal?: AbortSignal): Promise<void> {
-  const credential = Buffer.from(secrets.fairPlayCredential ?? '', 'base64');
+async function runDefaultDecrypt(job: Job, secrets: AppleAccountSecrets, inputPath: string, outputPath: string, signal?: AbortSignal, credentialValue?: string): Promise<void> {
+  const credential = Buffer.from(credentialValue ?? '', 'base64');
   if (credential.length !== 16) {
     credential.fill(0);
     throw new Error('stored FairPlay credential is invalid');
@@ -401,7 +445,7 @@ async function runDefaultDecrypt(job: Job, secrets: AppleAccountSecrets, inputPa
         cpuSeconds: config.jobMaxWaitSeconds,
         job,
         signal,
-        sensitiveValues: [inputPath, outputPath, credentialPath, secrets.appleId ?? '', secrets.password ?? '', secrets.fairPlayCredential ?? ''],
+        sensitiveValues: [inputPath, outputPath, credentialPath, secrets.appleId ?? '', secrets.password ?? '', secrets.fairPlayCredential ?? '', credentialValue ?? ''],
       });
     });
   } finally {
@@ -514,6 +558,15 @@ export const offlineAppStoreProcessor = createOfflineAppStoreProcessor({
   getVaultStatus: getAppleAccountVaultStatus,
   runDownload: runDefaultDownload,
   runDecrypt: runDefaultDecrypt,
+  getLicenseSelector: getIpaFairPlayLicenseSelector,
+  retrieveCredentialForIpa: async (job, inputPath, signal) => {
+    job.progress = 'Retrieving the matching FairPlay key from the paired iPad';
+    appendJobTimelineEvent(job, 'Retrieving the matching FairPlay key from the paired iPad', 'running');
+    emitJobsChanged();
+    const { retrieveFairPlayCredentialForIpa } = await import('#offlineAppStoreCredential.js');
+    return retrieveFairPlayCredentialForIpa(inputPath, signal, job.id);
+  },
+  saveCredentialForSelector: saveAppleAccountFairPlayCredentialForSelector,
   inspect: (ipaPath, signal, onChildProcess) => inspectIpaInIsolatedProcess(ipaPath, signal, onChildProcess),
 });
 

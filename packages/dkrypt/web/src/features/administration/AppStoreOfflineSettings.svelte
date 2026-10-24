@@ -55,6 +55,12 @@
     return statusRefresh;
   }
 
+  function credentialSummary(): string {
+    if (!status?.vault.credentialConfigured) return 'Not configured';
+    const count = status.vault.fairPlayCredentialCount ?? 1;
+    return `${count} cached ${count === 1 ? 'key' : 'keys'}`;
+  }
+
   async function confirmRecentAuthentication(): Promise<void> {
     const isRootAdministrator = sessionState.sub === 'root';
     if (!isRootAdministrator && !sessionState.mfa?.enabled) {
@@ -177,11 +183,11 @@
       <div class="rounded-lg border border-border/70 bg-muted/20 p-3 text-xs"><div class="text-muted">Credential encryption</div><div class="mt-1 font-medium">{status.vault.encryptionReady ? 'External key configured' : 'External key missing'}</div></div>
       <div class="rounded-lg border border-border/70 bg-muted/20 p-3 text-xs"><div class="text-muted">Apple Account</div><div class="mt-1 font-medium">{status.vault.accountHint ?? 'Not configured'}</div></div>
       <div class="rounded-lg border border-border/70 bg-muted/20 p-3 text-xs"><div class="text-muted">Account session</div><div class="mt-1 font-medium">{status.vault.authenticatedAt ? `Verified ${new Date(status.vault.authenticatedAt).toLocaleString()}` : status.vault.authenticationError ?? 'Not verified'}</div></div>
-      <div class="rounded-lg border border-border/70 bg-muted/20 p-3 text-xs"><div class="text-muted">FairPlay credential</div><div class="mt-1 font-medium">{status.vault.credentialConfigured ? 'Stored for this account' : 'Not configured'}</div></div>
+      <div class="rounded-lg border border-border/70 bg-muted/20 p-3 text-xs"><div class="text-muted">FairPlay keys</div><div class="mt-1 font-medium">{credentialSummary()}</div></div>
     </div>
     {#if status.credentialRetrieval.state !== 'idle'}
       <div class="mt-3 rounded-lg border border-border/70 bg-muted/20 p-3 text-sm" role={['failed', 'interrupted'].includes(status.credentialRetrieval.state) ? 'alert' : 'status'}>
-        <div class="font-medium">{status.credentialRetrieval.state === 'running' ? 'Retrieving from iPad' : status.credentialRetrieval.state === 'succeeded' ? 'Credential stored securely' : status.credentialRetrieval.state === 'interrupted' ? 'Credential retrieval interrupted' : 'Credential retrieval failed'}</div>
+        <div class="font-medium">{status.credentialRetrieval.state === 'running' ? (status.credentialRetrieval.source === 'job' ? 'Retrieving a matching key for an App Store job' : 'Retrieving from iPad') : status.credentialRetrieval.state === 'succeeded' ? (status.credentialRetrieval.source === 'job' ? 'Matching key retrieved' : 'Credential stored securely') : status.credentialRetrieval.state === 'interrupted' ? 'Credential retrieval interrupted' : 'Credential retrieval failed'}</div>
         {#if status.credentialRetrieval.state === 'running' && status.credentialRetrieval.startedAt}<p class="mt-1 text-xs text-muted">Started {new Date(status.credentialRetrieval.startedAt).toLocaleTimeString()}. This can take a few minutes.</p>{/if}
         {#if status.credentialRetrieval.error}<p class="mt-1 text-xs text-muted">{status.credentialRetrieval.error}</p>{/if}
       </div>
@@ -224,9 +230,9 @@
     </form>
 
     <section class="space-y-3">
-      <div><h4 class="text-sm font-medium">Device-derived FairPlay credential</h4><p class="mt-1 text-xs text-muted">dkrypt retrieves the 16-byte credential from an App Store app installed under this Apple Account, then stores it directly in the encrypted vault. The value is never sent to the browser or returned by the API.</p></div>
+      <div><h4 class="text-sm font-medium">Device-derived FairPlay keys</h4><p class="mt-1 text-xs text-muted">dkrypt retrieves an initial key from an App Store app installed under this Apple Account. If a downloaded IPA uses a different license selector, dkrypt retrieves the matching key from the paired iPad and caches it only after that IPA decrypts successfully. Keys stay in the encrypted vault and are never sent to the browser or returned by the API.</p></div>
       <div class="space-y-1.5"><Label for="offline-credential-device">Connected iPad</Label><select id="offline-credential-device" class="min-h-9 w-full rounded-md border border-border bg-background px-2 text-sm" bind:value={selectedDeviceId} disabled={retrievingCredential || status?.credentialRetrieval.state === 'running'}><option value="">Select an enabled USB iPad</option>{#each devices.filter((device) => device.enabled && !device.draining && device.transport === 'usb' && device.productType?.startsWith('iPad')) as device (device.id)}<option value={device.id}>{device.name} · {device.productType}</option>{/each}</select></div>
-      <Button size="sm" loading={retrievingCredential} disabled={!status?.vault.accountConfigured || !status.vault.authenticatedAt || !selectedDeviceId || status.vault.credentialConfigured || status.credentialRetrieval.state === 'running'} onclick={() => void retrieveCredential()}>{status?.credentialRetrieval.state === 'running' ? 'Retrieval in progress' : 'Retrieve and store credential'}</Button>
+      <Button size="sm" loading={retrievingCredential} disabled={!status?.vault.accountConfigured || !status.vault.authenticatedAt || !selectedDeviceId || status.vault.credentialConfigured || status.credentialRetrieval.state === 'running'} onclick={() => void retrieveCredential()}>{status?.credentialRetrieval.state === 'running' ? 'Retrieval in progress' : 'Retrieve initial key'}</Button>
       <p class="text-xs text-muted">This briefly restarts Apple’s FairPlay service. dkrypt drains the selected iPad so no decrypt job starts at the same time. The iPad must have an App Store app from the same Apple Account installed.</p>
     </section>
   </div>

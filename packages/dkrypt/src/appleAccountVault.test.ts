@@ -25,6 +25,7 @@ test('Apple Account secrets are encrypted in SQLite and survive reopening with t
   const vault = createVault(stateDir);
   vault.saveAccount('Admin@icloud.com', 'account-password');
   vault.saveCredential(Buffer.alloc(16, 9).toString('hex'));
+  vault.saveCredentialForSelector('a'.repeat(64), Buffer.alloc(16, 11).toString('base64'));
   const sessionSnapshot = Buffer.from('provider-session-secret');
   vault.saveSessionSnapshot(sessionSnapshot);
   sessionSnapshot.fill(0);
@@ -34,6 +35,7 @@ test('Apple Account secrets are encrypted in SQLite and survive reopening with t
   inspectDatabase.close();
   expect(JSON.stringify(rows)).not.toContain('account-password');
   expect(JSON.stringify(rows)).not.toContain(Buffer.alloc(16, 9).toString('hex'));
+  expect(JSON.stringify(rows)).not.toContain(Buffer.alloc(16, 11).toString('base64'));
   expect(JSON.stringify(rows)).not.toContain('provider-session-secret');
   vault.close();
 
@@ -41,6 +43,7 @@ test('Apple Account secrets are encrypted in SQLite and survive reopening with t
   try {
     expect(reopened.read()).toMatchObject({ appleId: 'admin@icloud.com', password: 'account-password' });
     expect(Buffer.from(reopened.read()!.fairPlayCredential!, 'base64')).toEqual(Buffer.alloc(16, 9));
+    expect(Buffer.from(reopened.read()!.fairPlayCredentials!['a'.repeat(64)]!, 'base64')).toEqual(Buffer.alloc(16, 11));
     expect(reopened.readSessionSnapshot()?.toString()).toBe('provider-session-secret');
     expect(reopened.status()).toMatchObject({
       encryptionReady: true,
@@ -116,9 +119,11 @@ test('Apple Account vault validates credentials and invalidates account-bound ke
     expect(() => vault.saveCredential(Buffer.alloc(15, 1).toString('hex'))).toThrow('configure the Apple Account');
     vault.saveAccount('first@icloud.com', 'first-password');
     vault.saveCredential(Buffer.alloc(16, 1).toString('base64'));
+    vault.saveCredentialForSelector('b'.repeat(64), Buffer.alloc(16, 2).toString('base64'));
     expect(() => vault.saveCredential(Buffer.alloc(17, 1).toString('base64'))).toThrow('exactly 16 bytes');
     vault.saveAccount('second@icloud.com', 'second-password');
     expect(vault.status().credentialConfigured).toBe(false);
+    expect(vault.read()?.fairPlayCredentials).toBeUndefined();
   } finally {
     vault.close();
   }

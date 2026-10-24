@@ -121,6 +121,64 @@ test('credential retrieval targets the requested paired USB iPad, drains it, and
   }
 });
 
+test('job credential retrieval targets its downloaded IPA and preserves the existing account credential', async () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), 'dkrypt-device-credential-job-'));
+  directories.push(stateDir);
+  const database = openStateCollectionDatabase({ stateDir, filename: 'state.sqlite' }, ['appstore_offline_account', 'appstore_offline_credential_operations']);
+  const vault = createAppleAccountVault(createAppleAccountRepository(database), Buffer.alloc(32, 16).toString('base64url'));
+  const operationRepository = createOfflineCredentialRetrievalRepository(openStateCollectionDatabase({ stateDir, filename: 'state.sqlite' }, ['appstore_offline_credential_operations']));
+  const existing = Buffer.alloc(16, 17);
+  const retrieved = Buffer.alloc(16, 18);
+  vault.saveAccount('admin@icloud.com', 'account-password');
+  vault.markAuthenticated(1234);
+  vault.saveCredential(existing.toString('base64'));
+  let device: DeviceRecord = {
+    id: 'selected-ipad',
+    name: 'Selected iPad',
+    transport: 'usb',
+    udid: 'a'.repeat(40),
+    productType: 'iPad14,3',
+    enabled: true,
+    isPrimary: true,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  let receivedIpaPath: string | undefined;
+  const retriever = createFairPlayCredentialRetriever({
+    getDevice: (id) => id === device.id ? device : undefined,
+    listDevices: () => [device],
+    getActiveJobs: () => [],
+    getVaultStatus: vault.status,
+    getSecrets: vault.read,
+    updateDevice: (id, patch) => {
+      if (id !== device.id) return { ok: false, error: 'device not found' };
+      device = { ...device, ...patch };
+      return { ok: true, device };
+    },
+    runRetriever: async (selected, ipaPath) => {
+      expect(selected.id).toBe('selected-ipad');
+      expect(device.draining).toBe(true);
+      receivedIpaPath = ipaPath;
+      return Buffer.from(retrieved);
+    },
+    operationRepository,
+  });
+
+  try {
+    const result = await retriever.retrieveForIpa('/data/artifacts/.staging/job.offline-encrypted.ipa');
+    expect(result).toEqual(retrieved);
+    expect(receivedIpaPath).toBe('/data/artifacts/.staging/job.offline-encrypted.ipa');
+    expect(device.draining).toBe(false);
+    expect(retriever.status()).toMatchObject({ state: 'succeeded', source: 'job', deviceId: 'selected-ipad' });
+    expect(Buffer.from(vault.read()!.fairPlayCredential!, 'base64')).toEqual(existing);
+  } finally {
+    existing.fill(0);
+    retrieved.fill(0);
+    operationRepository.close();
+    vault.close();
+  }
+});
+
 test('failed credential retrieval retains a redacted helper diagnostic and releases the iPad', async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), 'dkrypt-device-credential-diagnostic-'));
   directories.push(stateDir);

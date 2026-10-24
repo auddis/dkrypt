@@ -1732,10 +1732,10 @@ export interface OfflineAppStoreStatus {
   downloaderAvailable: boolean;
   decryptorAvailable: boolean;
   fairPlayAuthorized: boolean;
-  vault: { encryptionReady: boolean; accountConfigured: boolean; credentialConfigured: boolean; authenticatedAt?: number; accountHint?: string; authenticationError?: string };
+  vault: { encryptionReady: boolean; accountConfigured: boolean; credentialConfigured: boolean; fairPlayCredentialCount?: number; authenticatedAt?: number; accountHint?: string; authenticationError?: string };
   blockers: string[];
   authentication?: { state: 'idle' | 'running' | 'verification_required' | 'succeeded' | 'failed' | 'interrupted'; operationId?: string; startedAt?: number; completedAt?: number; error?: string };
-  credentialRetrieval: { state: 'idle' | 'running' | 'succeeded' | 'failed' | 'interrupted'; operationId?: string; deviceId?: string; startedAt?: number; completedAt?: number; error?: string };
+  credentialRetrieval: { state: 'idle' | 'running' | 'succeeded' | 'failed' | 'interrupted'; operationId?: string; deviceId?: string; startedAt?: number; completedAt?: number; error?: string; source?: 'settings' | 'job'; bundleId?: string };
 }
 
 export function fetchOfflineAppStoreStatus(options?: RequestInit): Promise<OfflineAppStoreStatus> {

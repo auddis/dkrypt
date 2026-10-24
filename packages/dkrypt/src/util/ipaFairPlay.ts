@@ -1,4 +1,5 @@
 import AdmZip from 'adm-zip';
+import { createHash } from 'node:crypto';
 import { parse as parseXmlPlist } from 'plist';
 import { parseBuffer as parseBinaryPlist } from 'bplist-parser';
 
@@ -94,6 +95,53 @@ function parseInfoPlist(buffer: Buffer): Record<string, unknown> {
     return (parseBinaryPlist(buffer) as Record<string, unknown>[])[0] ?? {};
   }
   return parseXmlPlist(buffer.toString('utf8')) as Record<string, unknown>;
+}
+
+function atomFields(data: Buffer, start: number, end: number): Map<string, Buffer> {
+  const fields = new Map<string, Buffer>();
+  let offset = start;
+  while (offset < end) {
+    if (offset + 8 > end) throw new Error('downloaded IPA contains a truncated FairPlay license');
+    const size = data.readUInt32BE(offset);
+    if (size < 8 || offset + size > end) throw new Error('downloaded IPA contains an invalid FairPlay license');
+    const tag = data.toString('ascii', offset + 4, offset + 8);
+    fields.set(tag, data.subarray(offset + 8, offset + size));
+    offset += size;
+  }
+  return fields;
+}
+
+function selectorFromSinf(sinf: Buffer): string {
+  const root = atomFields(sinf, 0, sinf.length);
+  if (root.size !== 1 || !root.has('sinf')) throw new Error('downloaded IPA contains an unsupported FairPlay license');
+  const sinfAtom = root.get('sinf')!;
+  const sinfFields = atomFields(sinfAtom, 0, sinfAtom.length);
+  const schi = sinfFields.get('schi');
+  if (!schi) throw new Error('downloaded IPA FairPlay license has no selector');
+  const selectorFields = atomFields(schi, 0, schi.length);
+  const user = selectorFields.get('user');
+  const key = selectorFields.get('key ');
+  if (!user || user.length !== 4 || !key || key.length !== 4) {
+    throw new Error('downloaded IPA FairPlay license has an invalid selector');
+  }
+  return createHash('sha256').update(user).update(key).digest('hex');
+}
+
+export function getIpaFairPlayLicenseSelector(ipaPath: string): string {
+  const archive = new AdmZip(ipaPath);
+  const entries = archive.getEntries().filter((entry) => !entry.isDirectory);
+  const appInfo = entries.find((entry) => /^Payload\/[^/]+\.app\/Info\.plist$/.test(entry.entryName));
+  const appRoot = appInfo && /^Payload\/([^/]+\.app)\/Info\.plist$/.exec(appInfo.entryName)?.[1];
+  if (!appRoot) throw new Error('downloaded IPA does not contain a primary app bundle');
+  const sinfEntries = entries.filter((entry) => (
+    entry.entryName.startsWith(`Payload/${appRoot}/SC_Info/`)
+    && entry.entryName.endsWith('.sinf')
+    && !entry.entryName.endsWith('.v4.sinf')
+  ));
+  const selectors = new Set(sinfEntries.map((entry) => selectorFromSinf(entry.getData())));
+  if (selectors.size === 0) throw new Error('downloaded IPA does not contain a supported FairPlay license selector');
+  if (selectors.size > 1) throw new Error('downloaded IPA contains multiple FairPlay license selectors');
+  return selectors.values().next().value!;
 }
 
 export function verifyIpaFairPlayDecrypted(ipaPath: string): FairPlayVerificationResult {

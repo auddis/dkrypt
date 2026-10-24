@@ -7,12 +7,14 @@ export interface AppleAccountSecrets {
   appleId: string;
   password: string;
   fairPlayCredential?: string;
+  fairPlayCredentials?: Record<string, string>;
 }
 
 export interface AppleAccountVaultStatus {
   encryptionReady: boolean;
   accountConfigured: boolean;
   credentialConfigured: boolean;
+  fairPlayCredentialCount?: number;
   authenticatedAt?: number;
   accountHint?: string;
   authenticationError?: string;
@@ -23,6 +25,7 @@ export interface AppleAccountVault {
   read(): AppleAccountSecrets | undefined;
   saveAccount(appleId: string, password: string, now?: number): AppleAccountVaultStatus;
   saveCredential(credential: string, now?: number): AppleAccountVaultStatus;
+  saveCredentialForSelector(selector: string, credential: string, now?: number): AppleAccountVaultStatus;
   readSessionSnapshot(): Buffer | undefined;
   saveSessionSnapshot(snapshot: Buffer, now?: number): void;
   clearSessionSnapshot(): void;
@@ -35,6 +38,7 @@ export interface AppleAccountVault {
 const VAULT_AAD = Buffer.from('dkrypt:appstore-offline-account:v1');
 const SESSION_AAD = Buffer.from('dkrypt:appstore-offline-session:v1');
 const MAX_SESSION_SNAPSHOT_BYTES = 16 * 1024 * 1024;
+const MAX_FAIRPLAY_CREDENTIALS = 128;
 
 function decodeKey(value: string): Buffer | undefined {
   if (/^[0-9a-fA-F]{64}$/.test(value)) return Buffer.from(value, 'hex');
@@ -55,6 +59,16 @@ function validateCredential(value: string): string {
     : Buffer.from(trimmed, 'base64');
   if (bytes.length !== 16) throw new Error('FairPlay credential must be exactly 16 bytes');
   return bytes.toString('base64');
+}
+
+function validateSelector(value: string): string {
+  if (!/^[0-9a-f]{64}$/i.test(value)) throw new Error('FairPlay license selector is invalid');
+  return value.toLowerCase();
+}
+
+function credentialCount(secrets: AppleAccountSecrets): number {
+  const mapped = secrets.fairPlayCredentials ? Object.keys(secrets.fairPlayCredentials).length : 0;
+  return mapped + (secrets.fairPlayCredential ? 1 : 0);
 }
 
 export function createAppleAccountVault(repository: AppleAccountRepository, keyValue: string): AppleAccountVault {
@@ -81,6 +95,9 @@ export function createAppleAccountVault(repository: AppleAccountRepository, keyV
         appleId: parsed.appleId,
         password: parsed.password,
         fairPlayCredential: typeof parsed.fairPlayCredential === 'string' ? parsed.fairPlayCredential : undefined,
+        fairPlayCredentials: parsed.fairPlayCredentials && typeof parsed.fairPlayCredentials === 'object' && !Array.isArray(parsed.fairPlayCredentials)
+          ? parsed.fairPlayCredentials as Record<string, string>
+          : undefined,
       };
     } catch {
       throw new Error('unable to decrypt stored App Store account data');
@@ -144,10 +161,12 @@ export function createAppleAccountVault(repository: AppleAccountRepository, keyV
   function status(): AppleAccountVaultStatus {
     const record = repository.read();
     let credentialConfigured = false;
+    let fairPlayCredentialCount: number | undefined;
     let authenticationError = record?.authenticationError;
     if (record && key) {
       try {
-        credentialConfigured = Boolean(decryptRecord(record).fairPlayCredential);
+        fairPlayCredentialCount = credentialCount(decryptRecord(record));
+        credentialConfigured = fairPlayCredentialCount > 0;
       } catch {
         authenticationError = 'encryption_key_mismatch';
       }
@@ -156,6 +175,7 @@ export function createAppleAccountVault(repository: AppleAccountRepository, keyV
       encryptionReady: Boolean(key),
       accountConfigured: Boolean(record),
       credentialConfigured,
+      fairPlayCredentialCount,
       authenticatedAt: record?.authenticatedAt,
       accountHint: record?.accountHint,
       authenticationError,
@@ -180,6 +200,7 @@ export function createAppleAccountVault(repository: AppleAccountRepository, keyV
         appleId,
         password,
         fairPlayCredential: sameAccount ? current.secrets.fairPlayCredential : undefined,
+        fairPlayCredentials: sameAccount ? current.secrets.fairPlayCredentials : undefined,
       }, {
         accountHint: accountHint(appleId),
         authenticatedAt: sameCredentials ? current.record.authenticatedAt : undefined,
@@ -192,6 +213,22 @@ export function createAppleAccountVault(repository: AppleAccountRepository, keyV
       if (!current) throw new Error('configure the Apple Account before adding its FairPlay credential');
       const fairPlayCredential = validateCredential(credentialValue);
       writeSecrets({ ...current.secrets, fairPlayCredential }, {
+        accountHint: current.record.accountHint,
+        authenticatedAt: current.record.authenticatedAt,
+        sessionCiphertext: current.record.sessionCiphertext,
+      }, now);
+      return status();
+    },
+    saveCredentialForSelector(selectorValue, credentialValue, now = Date.now()) {
+      const current = readCurrent();
+      if (!current) throw new Error('configure the Apple Account before adding its FairPlay credential');
+      const selector = validateSelector(selectorValue);
+      const credential = validateCredential(credentialValue);
+      const fairPlayCredentials = { ...current.secrets.fairPlayCredentials, [selector]: credential };
+      while (Object.keys(fairPlayCredentials).length > MAX_FAIRPLAY_CREDENTIALS) {
+        delete fairPlayCredentials[Object.keys(fairPlayCredentials)[0]!];
+      }
+      writeSecrets({ ...current.secrets, fairPlayCredentials }, {
         accountHint: current.record.accountHint,
         authenticatedAt: current.record.authenticatedAt,
         sessionCiphertext: current.record.sessionCiphertext,
@@ -245,6 +282,7 @@ export const getAppleAccountVaultStatus = defaultVault.status;
 export const readAppleAccountSecrets = defaultVault.read;
 export const saveAppleAccountCredentials = defaultVault.saveAccount;
 export const saveAppleAccountFairPlayCredential = defaultVault.saveCredential;
+export const saveAppleAccountFairPlayCredentialForSelector = defaultVault.saveCredentialForSelector;
 export const readAppleAccountSessionSnapshot = defaultVault.readSessionSnapshot;
 export const saveAppleAccountSessionSnapshot = defaultVault.saveSessionSnapshot;
 export const clearAppleAccountSessionSnapshot = defaultVault.clearSessionSnapshot;

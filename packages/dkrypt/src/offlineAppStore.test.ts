@@ -37,6 +37,7 @@ async function createDependencies(overrides: Partial<OfflineAppStoreDependencies
     stagingDirectory: path.join(root, 'staging'),
     getSecrets: () => secrets,
     getVaultStatus: () => ({ encryptionReady: true, accountConfigured: true, credentialConfigured: true, authenticatedAt: 1 }),
+    getLicenseSelector: () => 'a'.repeat(64),
     async runDownload(_job, _account, outputPath) {
       await writeFile(outputPath, 'encrypted ipa');
     },
@@ -104,6 +105,45 @@ test('offline App Store processor preserves extension-only warnings and removes 
   expect(result.warnings[0]).toContain('Some embedded extensions remained encrypted');
   expect(await Bun.file(path.join(dependencies.stagingDirectory, 'offline-job.offline-encrypted.ipa')).exists()).toBe(false);
   expect(await Bun.file(result.outputPath).exists()).toBe(true);
+});
+
+test('offline App Store processing retrieves and caches a matching selector credential after a mismatch', async () => {
+  const freshCredential = Buffer.alloc(16, 29);
+  const attempts: Array<string | undefined> = [];
+  const saved: Array<{ selector: string; credential: string }> = [];
+  const dependencies = await createDependencies({
+    async runDecrypt(_job, _secrets, _inputPath, outputPath, _signal, credential) {
+      attempts.push(credential);
+      if (attempts.length === 1) throw new Error('FairPlay decryption failed: credential does not decode this SINF priv record');
+      await writeFile(outputPath, 'decrypted ipa');
+    },
+    retrieveCredentialForIpa: async (_job, inputPath) => {
+      expect(inputPath).toContain('offline-encrypted.ipa');
+      return Buffer.from(freshCredential);
+    },
+    saveCredentialForSelector: (selector, credential) => saved.push({ selector, credential }),
+  });
+  try {
+    const result = await createOfflineAppStoreProcessor(dependencies).run(job());
+    expect(attempts).toEqual([Buffer.alloc(16, 4).toString('base64'), freshCredential.toString('base64')]);
+    expect(saved).toEqual([{ selector: 'a'.repeat(64), credential: freshCredential.toString('base64') }]);
+    expect(result.outputPath).toContain('offline-decrypted.ipa');
+  } finally {
+    freshCredential.fill(0);
+  }
+});
+
+test('offline App Store processing does not cache a retrieved credential until decryption succeeds', async () => {
+  const saved: string[] = [];
+  const dependencies = await createDependencies({
+    async runDecrypt() {
+      throw new Error('FairPlay decryption failed: credential does not decode this SINF priv record');
+    },
+    retrieveCredentialForIpa: async () => Buffer.alloc(16, 30),
+    saveCredentialForSelector: (_selector, credential) => saved.push(credential),
+  });
+  await expect(createOfflineAppStoreProcessor(dependencies).run(job())).rejects.toThrow('credential does not decode this SINF priv record');
+  expect(saved).toEqual([]);
 });
 
 test('offline App Store processor removes both staged files on decrypt and verification failures', async () => {

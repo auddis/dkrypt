@@ -10,7 +10,7 @@ import { getAppleAccountVaultStatus, readAppleAccountSecrets, saveAppleAccountFa
 import type { AppleAccountSecrets } from '#appleAccountVault.js';
 import { getActiveJobs } from '#jobs/store.js';
 import type { Job } from '#jobs/types.js';
-import { getDevice, updateDevice } from '#store/state.js';
+import { getDevice, listDevices, updateDevice } from '#store/state.js';
 import type { DeviceRecord } from '#store/state.js';
 import { createOfflineCredentialRetrievalRepository } from '#store/offlineCredentialRetrievalRepository.js';
 import type { OfflineCredentialRetrievalRepository } from '#store/offlineCredentialRetrievalRepository.js';
@@ -18,6 +18,7 @@ import { openStateCollectionDatabase } from '#store/sqlite.js';
 import { withIpadecrypt } from '#idevice.js';
 import type { DeviceConnection } from '#idevice.js';
 import { terminateChildProcess } from '#jobs/process.js';
+import { throwIfAborted } from '#util/abort.js';
 
 const log = scopedLogger('appstore-offline-credential');
 const MAX_HELPER_DIAGNOSTIC_LENGTH = 4_096;
@@ -29,16 +30,19 @@ export interface CredentialRetrievalStatus {
   startedAt?: number;
   completedAt?: number;
   error?: string;
+  source?: 'settings' | 'job';
+  bundleId?: string;
 }
 
 export interface FairPlayCredentialRetrieverDependencies {
   getDevice: typeof getDevice;
+  listDevices: typeof listDevices;
   getActiveJobs: typeof getActiveJobs;
   getVaultStatus: typeof getAppleAccountVaultStatus;
   getSecrets(): AppleAccountSecrets | undefined;
   updateDevice: typeof updateDevice;
   saveCredential: typeof saveAppleAccountFairPlayCredential;
-  runRetriever(device: DeviceRecord): Promise<Buffer>;
+  runRetriever(device: DeviceRecord, ipaPath?: string, signal?: AbortSignal): Promise<Buffer>;
   operationRepository: OfflineCredentialRetrievalRepository;
 }
 
@@ -53,8 +57,8 @@ function isUsbIpad(device: DeviceRecord): boolean {
     && /^iPad\d+,\d+$/.test(device.productType ?? '');
 }
 
-function isRunningOnDevice(jobs: Job[], deviceId: string): boolean {
-  return jobs.some((job) => job.status === 'running' && job.deviceId === deviceId);
+function isRunningOnDevice(jobs: Job[], deviceId: string, exceptJobId?: string): boolean {
+  return jobs.some((job) => job.id !== exceptJobId && job.status === 'running' && job.deviceId === deviceId);
 }
 
 function deviceConnection(device: DeviceRecord): DeviceConnection {
@@ -89,11 +93,12 @@ export function sshWrapper(): string {
 
 function sensitiveValues(secrets: AppleAccountSecrets | undefined): string[] {
   if (!secrets) return [];
-  const values = [secrets.appleId, secrets.password, secrets.fairPlayCredential ?? ''];
-  if (secrets.fairPlayCredential) {
-    const credentialBytes = /^[0-9a-f]{32}$/i.test(secrets.fairPlayCredential)
-      ? Buffer.from(secrets.fairPlayCredential, 'hex')
-      : Buffer.from(secrets.fairPlayCredential, 'base64');
+  const credentialValues = [secrets.fairPlayCredential, ...Object.values(secrets.fairPlayCredentials ?? {})].filter((value): value is string => Boolean(value));
+  const values = [secrets.appleId, secrets.password, ...credentialValues];
+  for (const value of credentialValues) {
+    const credentialBytes = /^[0-9a-f]{32}$/i.test(value)
+      ? Buffer.from(value, 'hex')
+      : Buffer.from(value, 'base64');
     try {
       if (credentialBytes.length === 16) {
         values.push(credentialBytes.toString('hex'), credentialBytes.toString('base64'), credentialBytes.toString('base64url'));
@@ -127,13 +132,14 @@ function safeCredentialRetrievalDiagnostic(error: unknown, sensitiveValues: stri
   return safeMessage || 'The credential helper failed without a diagnostic message.';
 }
 
-async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
+async function runCredentialHelper(device: DeviceRecord, ipaPath?: string, signal?: AbortSignal): Promise<Buffer> {
   const temporaryRoot = await mkdtemp(path.join(existsSync('/dev/shm') ? '/dev/shm' : tmpdir(), 'dkrypt-fairplay-credential-'));
   let wrapperRoot: string | undefined;
   try {
     wrapperRoot = await mkdtemp(path.join(tmpdir(), 'dkrypt-fairplay-ssh-'));
     const executableRoot = wrapperRoot;
     const runAtPort = async (port: number, keyPath: string, knownHostsPath: string): Promise<Buffer> => {
+      throwIfAborted(signal);
       if (!Number.isInteger(port) || port < 1 || port > 65535 || !path.isAbsolute(keyPath)) throw new Error('The managed device tunnel configuration is invalid');
       const binDirectory = path.join(executableRoot, 'bin');
       const sshHomeDirectory = path.join(temporaryRoot, '.ssh');
@@ -150,15 +156,17 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
         DKRYPT_DEVICE_SSH_KEY: keyPath,
         DKRYPT_DEVICE_SSH_KNOWN_HOSTS: knownHostsPath,
       };
-      const child = spawn(config.appStoreOfflinePythonBin, [
+      const args = [
         config.appStoreOfflineCredentialRetriever,
         '--output-dir',
         outputDirectory,
+        ...(ipaPath ? ['--ipa', ipaPath] : []),
         '--device-udid',
         device.udid!,
         '--ssh-port',
         String(port),
-      ], {
+      ];
+      const child = spawn(config.appStoreOfflinePythonBin, args, {
         cwd: path.dirname(config.appStoreOfflineCredentialRetriever),
         env: environment,
         stdio: ['ignore', 'ignore', 'pipe'],
@@ -171,6 +179,12 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
       });
       let timedOut = false;
       let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
+      const abort = () => {
+        terminateChildProcess(child, 'SIGTERM');
+        hardKillTimer = setTimeout(() => terminateChildProcess(child, 'SIGKILL'), 5_000);
+        hardKillTimer.unref();
+      };
+      signal?.addEventListener('abort', abort, { once: true });
       const timeout = setTimeout(() => {
         timedOut = true;
         terminateChildProcess(child, 'SIGTERM');
@@ -178,15 +192,18 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
         hardKillTimer.unref();
       }, config.appStoreOfflineCredentialTimeoutSeconds * 1000);
       try {
+        if (signal?.aborted) abort();
         await new Promise<void>((resolve, reject) => {
           child.once('error', reject);
-          child.once('close', (code, signal) => {
+          child.once('close', (code, processSignal) => {
             if (code === 0 && !timedOut) resolve();
             else {
-              const exit = code === null ? `signal ${signal ?? 'unknown'}` : `code ${code}`;
+              const exit = code === null ? `signal ${processSignal ?? 'unknown'}` : `code ${code}`;
               const diagnostic = stderr.trim();
               reject(new Error(timedOut
                 ? 'FairPlay credential retrieval timed out'
+              : signal?.aborted
+                ? 'FairPlay credential retrieval was cancelled'
                 : `FairPlay credential helper exited with ${exit}${diagnostic ? `: ${diagnostic}` : ''}`));
             }
           });
@@ -203,6 +220,7 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
       } finally {
         clearTimeout(timeout);
         if (hardKillTimer) clearTimeout(hardKillTimer);
+        signal?.removeEventListener('abort', abort);
       }
     };
 
@@ -217,7 +235,7 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
         throw new Error('The managed device tunnel configuration is invalid');
       }
       return runAtPort(port, keyPath, path.join(runtimeDirectory, 'ssh_known_hosts'));
-    });
+    }, signal);
   } finally {
     await Promise.all([
       rm(temporaryRoot, { recursive: true, force: true }),
@@ -234,6 +252,7 @@ export function createFairPlayCredentialRetriever(overrides: Partial<FairPlayCre
   }, ['appstore_offline_credential_operations']));
   const dependencies: FairPlayCredentialRetrieverDependencies = {
     getDevice,
+    listDevices,
     getActiveJobs,
     getVaultStatus: getAppleAccountVaultStatus,
     getSecrets: readAppleAccountSecrets,
@@ -275,6 +294,61 @@ export function createFairPlayCredentialRetriever(overrides: Partial<FairPlayCre
     status(): CredentialRetrievalStatus {
       return { ...current };
     },
+    async retrieveForIpa(ipaPath: string, signal?: AbortSignal, activeJobId?: string): Promise<Buffer> {
+      if (!path.isAbsolute(ipaPath)) throw new Error('FairPlay credential retrieval requires a staged IPA path');
+      if (current.state === 'running') throw new Error('another FairPlay credential retrieval is already running');
+      const devices = dependencies.listDevices().filter(isUsbIpad);
+      const selected = devices.find((candidate) => candidate.isPrimary) ?? devices[0];
+      if (!selected) throw new Error('no enabled USB iPad is available for FairPlay credential retrieval');
+      const device = dependencies.getDevice(selected.id);
+      if (!device || !isUsbIpad(device)) throw new Error('the selected USB iPad is no longer available');
+      const vault = dependencies.getVaultStatus();
+      if (!vault.encryptionReady || !vault.accountConfigured || !vault.authenticatedAt) {
+        throw new Error('configure and verify the Apple Account before retrieving its device credential');
+      }
+      throwIfAborted(signal);
+      if (isRunningOnDevice(dependencies.getActiveJobs(), device.id, activeJobId)) throw new Error('the selected iPad is currently running a job');
+      const drained = dependencies.updateDevice(device.id, { draining: true }, 'system');
+      if (!drained.ok) throw new Error('could not reserve the selected iPad');
+      if (isRunningOnDevice(dependencies.getActiveJobs(), device.id, activeJobId)) {
+        restoreDevice(device.id, drained.device?.updatedAt);
+        throw new Error('the selected iPad started a job; retry after it finishes');
+      }
+      const started: CredentialRetrievalStatus = {
+        state: 'running',
+        operationId: randomUUID(),
+        deviceId: device.id,
+        startedAt: Date.now(),
+        source: 'job',
+      };
+      const previous = current;
+      try {
+        setStatus(started, true);
+      } catch {
+        current = previous;
+        restoreDevice(device.id, drained.device?.updatedAt);
+        throw new Error('could not persist the FairPlay credential retrieval operation');
+      }
+      let credential: Buffer | undefined;
+      try {
+        credential = await dependencies.runRetriever(device, ipaPath, signal);
+        if (credential.length !== 16) throw new Error('retrieved FairPlay credential has an invalid length');
+        setStatus({ ...started, state: 'succeeded', completedAt: Date.now() });
+        return credential;
+      } catch (error) {
+        let diagnostic: string;
+        try {
+          diagnostic = safeCredentialRetrievalDiagnostic(error, sensitiveValues(dependencies.getSecrets()));
+        } catch {
+          diagnostic = 'The credential helper failed; detailed output was hidden because stored account data could not be read safely.';
+        }
+        credential?.fill(0);
+        setStatus({ ...started, state: 'failed', completedAt: Date.now(), error: diagnostic });
+        throw new Error(diagnostic);
+      } finally {
+        restoreDevice(device.id, drained.device?.updatedAt);
+      }
+    },
     start(deviceId: string): CredentialRetrievalStatus {
       if (current.state === 'running') {
         if (current.deviceId === deviceId) return { ...current };
@@ -296,7 +370,7 @@ export function createFairPlayCredentialRetriever(overrides: Partial<FairPlayCre
       }
 
       const startedAt = Date.now();
-      const started: CredentialRetrievalStatus = { state: 'running', operationId: randomUUID(), deviceId: device.id, startedAt };
+      const started: CredentialRetrievalStatus = { state: 'running', operationId: randomUUID(), deviceId: device.id, startedAt, source: 'settings' };
       const previous = current;
       try {
         setStatus(started, true);
@@ -335,3 +409,4 @@ const defaultRetriever = createFairPlayCredentialRetriever();
 
 export const getFairPlayCredentialRetrievalStatus = defaultRetriever.status;
 export const startFairPlayCredentialRetrieval = defaultRetriever.start;
+export const retrieveFairPlayCredentialForIpa = defaultRetriever.retrieveForIpa;
