@@ -41,6 +41,7 @@ const DEFAULT_SSH_PORT: u16 = 22;
 const MAX_RPC_DEADLINE_MS: u64 = 120_000;
 const RPC_OPERATION_SHUTDOWN_GRACE: Duration = Duration::from_secs(125);
 const RPC_CLIENT_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+const DEVICE_SERVICE_CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -786,6 +787,53 @@ async fn open_tunnel(
     id: &str,
     remote_port: u16,
 ) -> Result<Value, RpcError> {
+    open_tunnel_with_timeout(state, id, remote_port, DEVICE_SERVICE_CONNECT_TIMEOUT).await
+}
+
+async fn connect_device_service(
+    state: &BridgeState,
+    id: &str,
+    remote_port: u16,
+    connect_timeout: Duration,
+) -> Result<Box<dyn DeviceServiceStream>, RpcError> {
+    match timeout(
+        connect_timeout,
+        state.service_connector.connect(id.to_string(), remote_port),
+    )
+    .await
+    {
+        Ok(Ok(device)) => Ok(device),
+        Ok(Err(failure)) => {
+            if failure.retryable {
+                if let Some(recovery) = &state.mux_recovery {
+                    let _ = recovery.send(id.to_string());
+                }
+            }
+            Err(failure)
+        }
+        Err(_) => {
+            if let Some(recovery) = &state.mux_recovery {
+                let _ = recovery.send(id.to_string());
+            }
+            Err(error(
+                "device_service_timeout",
+                format!(
+                    "device service on port {remote_port} did not respond within {}ms",
+                    connect_timeout.as_millis()
+                ),
+                true,
+            ))
+        }
+    }
+}
+
+async fn open_tunnel_with_timeout(
+    state: Arc<BridgeState>,
+    id: &str,
+    remote_port: u16,
+    connect_timeout: Duration,
+) -> Result<Value, RpcError> {
+    let initial_service = connect_device_service(&state, id, remote_port, connect_timeout).await?;
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .map_err(|value| error("tunnel_bind", value.to_string(), true))?;
@@ -796,6 +844,7 @@ async fn open_tunnel(
     let tunnel_id = Uuid::new_v4().to_string();
     let device_id = id.to_string();
     let task_state = state.clone();
+    let mut first_service = Some(initial_service);
     let cancellation = CancellationToken::new();
     let task_cancellation = cancellation.clone();
     let task = tokio::spawn(async move {
@@ -807,13 +856,17 @@ async fn open_tunnel(
                     let Ok((mut incoming, _)) = accepted else {
                         break;
                     };
-                    let connector = task_state.service_connector.clone();
+                    let preconnected = first_service.take();
+                    let service_state = task_state.clone();
                     let device_id = device_id.clone();
                     let connection_cancellation = task_cancellation.clone();
                     connection_tasks.spawn(async move {
-                        let device = tokio::select! {
-                            _ = connection_cancellation.cancelled() => return,
-                            result = connector.connect(device_id, remote_port) => result,
+                        let device = match preconnected {
+                            Some(device) => Ok(device),
+                            None => tokio::select! {
+                                _ = connection_cancellation.cancelled() => return,
+                                result = connect_device_service(&service_state, &device_id, remote_port, connect_timeout) => result,
+                            },
                         };
                         let Ok(mut device) = device else {
                             return;
@@ -1488,9 +1541,9 @@ mod tests {
         BridgeState, CancellationToken, DeviceServiceConnectFuture, DeviceServiceConnector,
         DeviceServiceStream, MAX_FRAME_BYTES, MAX_RPC_DEADLINE_MS, RPC_OPERATION_SHUTDOWN_GRACE,
         RPC_VERSION, UsbmuxdDeviceServiceConnector, authorized_secret, bridge_capabilities, error,
-        failure, handle_client, netmuxd_restart_delay, read_agent_frame, read_frame,
-        request_agent_exchange, response, serve_rpc, supervise_netmuxd, valid_frame_length,
-        write_agent_frame,
+        failure, handle_client, netmuxd_restart_delay, open_tunnel_with_timeout, read_agent_frame,
+        read_frame, request_agent_exchange, response, serve_rpc, supervise_netmuxd,
+        valid_frame_length, write_agent_frame,
     };
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use hmac::{Hmac, Mac};
@@ -2774,6 +2827,40 @@ mod tests {
             .await
             .expect("RPC server should stop after client close");
         let _ = std::fs::remove_file(socket_path);
+    }
+
+    #[tokio::test]
+    async fn tunnel_open_does_not_report_ready_before_device_service_is_connected() {
+        let directory = PathBuf::from(format!("/tmp/dkrypt-tunnel-open-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).expect("test directory should be created");
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let state = Arc::new(BridgeState {
+            secrets: vec!["current-secret".to_string()],
+            mux_socket: directory.join("mux.sock"),
+            host_id: "test-host".to_string(),
+            service_connector: Arc::new(StalledDeviceServiceConnector),
+            shutdown: CancellationToken::new(),
+            operation_gate: RwLock::new(()),
+            tunnels: Mutex::new(HashMap::new()),
+            cancellations: Mutex::new(HashMap::new()),
+            event_sequence: AtomicU64::new(0),
+            mux_recovery: Some(sender),
+        });
+
+        let result =
+            open_tunnel_with_timeout(state, "fixture-device", 22, Duration::from_millis(25)).await;
+
+        assert_eq!(
+            result.expect_err("a stalled device service must fail").code,
+            "device_service_timeout"
+        );
+        assert_eq!(
+            receiver
+                .try_recv()
+                .expect("a stalled service must request mux recovery"),
+            "fixture-device"
+        );
+        fs::remove_dir_all(directory).expect("test directory should be removed");
     }
 
     #[tokio::test]

@@ -37,6 +37,7 @@ test('credential SSH wrapper converts upstream root access to the paired mobile 
       ...process.env,
       DKRYPT_DEVICE_SSH_KEY: '/tmp/device-key',
       DKRYPT_DEVICE_SSH_KNOWN_HOSTS: '/tmp/device-runtime/ssh_known_hosts',
+      HOME: wrapperRoot,
     },
   });
 
@@ -44,6 +45,9 @@ test('credential SSH wrapper converts upstream root access to the paired mobile 
   expect(result.stdout).toContain('mobile@127.0.0.1');
   expect(result.stdout).toContain('HostKeyAlias=dkrypt-device');
   expect(result.stdout).toContain('UserKnownHostsFile=/tmp/device-runtime/ssh_known_hosts');
+  expect(result.stdout).toContain('ControlMaster=auto');
+  expect(result.stdout).toContain('ControlPersist=10');
+  expect(result.stdout).toContain(`ControlPath=${wrapperRoot}/.ssh/c-%C`);
   expect(result.stdout).toContain('StrictHostKeyChecking=accept-new');
   expect(result.stdout).not.toContain('UserKnownHostsFile=/dev/null');
   expect(result.stdout).not.toContain('StrictHostKeyChecking=no');

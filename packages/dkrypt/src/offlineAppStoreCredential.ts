@@ -86,7 +86,7 @@ export function sshWrapper(): string {
     'done',
     'printf -v quoted_remote "%q" "$remote"',
     'args[$last]="sudo -n env PATH=/var/jb/usr/bin:/var/jb/bin:/usr/bin:/bin:/sbin sh -c $quoted_remote"',
-    'exec /usr/bin/ssh -i "$DKRYPT_DEVICE_SSH_KEY" -o HostKeyAlias=dkrypt-device -o UserKnownHostsFile="${DKRYPT_DEVICE_SSH_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}" -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR "${args[@]}"',
+    'exec /usr/bin/ssh -i "$DKRYPT_DEVICE_SSH_KEY" -o HostKeyAlias=dkrypt-device -o UserKnownHostsFile="${DKRYPT_DEVICE_SSH_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}" -o StrictHostKeyChecking=accept-new -o ControlMaster=auto -o ControlPersist=10 -o ControlPath="$HOME/.ssh/c-%C" -o LogLevel=ERROR "${args[@]}"',
     '',
   ].join('\n');
 }
