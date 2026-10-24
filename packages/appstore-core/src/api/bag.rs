@@ -13,6 +13,7 @@ const AUTH_POD_SUFFIX: &str = "-buy.itunes.apple.com";
 pub struct BagConfig {
     pub auth_endpoint: Url,
     pub sap: SapConfig,
+    pub update_product_endpoint: Option<Url>,
 }
 pub async fn fetch_bag(client: &AppleClient) -> Result<BagConfig, ClientError> {
     let resp = client
@@ -50,7 +51,16 @@ fn parse_bag(inner: &HashMap<String, plist::Value>) -> Result<BagConfig, ClientE
         version,
     };
     sap.validate()?;
-    Ok(BagConfig { auth_endpoint, sap })
+    let update_product_endpoint = inner
+        .get("updateProduct")
+        .and_then(plist::Value::as_string)
+        .and_then(|raw| Url::parse(raw).ok())
+        .filter(|endpoint| validate_update_product_endpoint(endpoint).is_ok());
+    Ok(BagConfig {
+        auth_endpoint,
+        sap,
+        update_product_endpoint,
+    })
 }
 fn bag_url(inner: &HashMap<String, plist::Value>, key: &str) -> Result<Url, ClientError> {
     let raw = inner
@@ -76,6 +86,23 @@ pub fn validate_auth_endpoint(url: &Url) -> Result<(), ClientError> {
         return Err(ClientError::UnexpectedResponse(format!(
             "unsupported authentication endpoint {url}: unexpected path"
         )));
+    }
+    Ok(())
+}
+fn validate_update_product_endpoint(url: &Url) -> Result<(), ClientError> {
+    let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+    if url.scheme() != "https"
+        || host != "downloaddispatch.itunes.apple.com"
+        || url.port_or_known_default() != Some(443)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/up/updateProduct"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(ClientError::UnexpectedResponse(
+            "bag: unsupported updateProduct URL".into(),
+        ));
     }
     Ok(())
 }
@@ -107,6 +134,12 @@ mod tests {
                 "sign-sap-version".to_string(),
                 plist::Value::String("200".into()),
             ),
+            (
+                "updateProduct".to_string(),
+                plist::Value::String(
+                    "https://downloaddispatch.itunes.apple.com/up/updateProduct".into(),
+                ),
+            ),
         ])
     }
     #[test]
@@ -121,6 +154,30 @@ mod tests {
             "https://fpinit.itunes.apple.com/v1/signSapSetup/legacy"
         );
         assert_eq!(config.sap.version, 200);
+        assert_eq!(
+            config.update_product_endpoint.unwrap().as_str(),
+            "https://downloaddispatch.itunes.apple.com/up/updateProduct"
+        );
+    }
+
+    #[test]
+    fn ignores_untrusted_update_product_endpoint_without_rejecting_other_bag_settings() {
+        let mut bag = current_bag();
+        bag.insert(
+            "updateProduct".to_string(),
+            plist::Value::String(
+                "https://downloaddispatch.itunes.apple.com.evil.test/up/updateProduct".into(),
+            ),
+        );
+        let config = parse_bag(&bag).unwrap();
+        assert!(config.update_product_endpoint.is_none());
+    }
+    #[test]
+    fn accepts_legacy_bag_without_update_product_endpoint() {
+        let mut bag = current_bag();
+        bag.remove("updateProduct");
+        let config = parse_bag(&bag).unwrap();
+        assert!(config.update_product_endpoint.is_none());
     }
     #[test]
     fn fails_when_sap_keys_are_absent() {

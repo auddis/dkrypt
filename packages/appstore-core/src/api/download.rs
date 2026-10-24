@@ -7,6 +7,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
+use url::Url;
 #[derive(Debug, Deserialize)]
 pub struct DownloadItem {
     #[serde(rename = "URL")]
@@ -96,23 +97,66 @@ async fn try_get_download_info(
     let mut body_bytes = Vec::new();
     plist::to_writer_xml(&mut body_bytes, &body)
         .map_err(|e| ClientError::UnexpectedResponse(format!("plist serialize: {e}")))?;
-    tracing :: debug ! (% url , dsid = % account . directory_services_id , store_front = % account . store_front , token_len = account . password_token . len () , "download request");
-    let resp = client
+    let mut dict = post_download_info(client, account, &url, &body_bytes).await?;
+    if is_empty_successful_download(&dict)
+        && let Some(fallback) = retry_update_product(client, account, &body_bytes).await
+    {
+        dict = fallback;
+    }
+    download_item_from_response_dict(&dict)
+}
+async fn post_download_info(
+    client: &AppleClient,
+    account: &Account,
+    url: &str,
+    body: &[u8],
+) -> Result<HashMap<String, plist::Value>, ClientError> {
+    let response = client
         .http()
-        .post(&url)
+        .post(url)
         .header("Content-Type", "application/x-apple-plist")
         .header("iCloud-DSID", &account.directory_services_id)
         .header("X-Dsid", &account.directory_services_id)
-        .body(body_bytes)
+        .body(body.to_vec())
         .send()
         .await?;
-    let status = resp.status();
-    tracing :: debug ! (% status , "download response status");
-    let resp_body = resp.bytes().await?;
-    tracing :: debug ! (len = resp_body . len () , preview = % String :: from_utf8_lossy (& resp_body [.. resp_body . len () . min (500)]) , "download response body");
-    let dict: HashMap<String, plist::Value> =
-        crate::client::plist_xml::parse_plist_response(&resp_body)?;
-    download_item_from_response_dict(&dict)
+    let status = response.status();
+    let response_body = response.bytes().await?;
+    tracing::debug!(%status, response_bytes = response_body.len(), "App Store download metadata response received");
+    crate::client::plist_xml::parse_plist_response(&response_body)
+}
+async fn retry_update_product(
+    client: &AppleClient,
+    account: &Account,
+    body: &[u8],
+) -> Option<HashMap<String, plist::Value>> {
+    let endpoint = match crate::api::bag::fetch_bag(client).await {
+        Ok(config) => config.update_product_endpoint?,
+        Err(_) => return None,
+    };
+    let fallback_url = update_product_url(&endpoint, client.guid());
+    tracing::info!(
+        "legacy App Store download returned no package; retrying Apple's updateProduct endpoint"
+    );
+    match post_download_info(client, account, fallback_url.as_str(), body).await {
+        Ok(response) if !is_empty_successful_download(&response) => Some(response),
+        _ => None,
+    }
+}
+fn is_empty_successful_download(dict: &HashMap<String, plist::Value>) -> bool {
+    if StoreError::from_plist_dict(dict).is_some() {
+        return false;
+    }
+    match dict.get("songList") {
+        None => true,
+        Some(plist::Value::Array(items)) => items.is_empty(),
+        Some(_) => false,
+    }
+}
+fn update_product_url(endpoint: &Url, guid: &str) -> Url {
+    let mut url = endpoint.clone();
+    url.query_pairs_mut().append_pair("guid", guid);
+    url
 }
 fn download_item_from_response_dict(
     dict: &HashMap<String, plist::Value>,
@@ -348,5 +392,29 @@ mod tests {
         item.insert("metadata".into(), plist::Value::Dictionary(metadata));
         let item: DownloadItem = plist::from_value(&plist::Value::Dictionary(item)).unwrap();
         assert_eq!(item.latest_external_version_id(), None);
+    }
+    #[test]
+    fn retries_only_empty_successful_download_responses() {
+        let empty_success = HashMap::from([("songList".into(), plist::Value::Array(Vec::new()))]);
+        let failed_response =
+            HashMap::from([("failureType".into(), plist::Value::String("9610".into()))]);
+        let available_item = HashMap::from([(
+            "songList".into(),
+            plist::Value::Array(vec![sample_download_item()]),
+        )]);
+        assert!(is_empty_successful_download(&empty_success));
+        assert!(is_empty_successful_download(&HashMap::new()));
+        assert!(!is_empty_successful_download(&failed_response));
+        assert!(!is_empty_successful_download(&available_item));
+    }
+    #[test]
+    fn update_product_url_preserves_guid_as_query_parameter() {
+        let endpoint =
+            url::Url::parse("https://downloaddispatch.itunes.apple.com/up/updateProduct").unwrap();
+        let request_url = update_product_url(&endpoint, "AABBCCDDEEFF");
+        assert_eq!(
+            request_url.as_str(),
+            "https://downloaddispatch.itunes.apple.com/up/updateProduct?guid=AABBCCDDEEFF"
+        );
     }
 }
