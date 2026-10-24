@@ -98,10 +98,8 @@ async fn try_get_download_info(
     plist::to_writer_xml(&mut body_bytes, &body)
         .map_err(|e| ClientError::UnexpectedResponse(format!("plist serialize: {e}")))?;
     let mut dict = post_download_info(client, account, &url, &body_bytes).await?;
-    if is_empty_successful_download(&dict)
-        && let Some(fallback) = retry_update_product(client, account, &body_bytes).await
-    {
-        dict = fallback;
+    if is_empty_successful_download(&dict) {
+        dict = retry_update_product(client, account, &body_bytes).await?;
     }
     download_item_from_response_dict(&dict)
 }
@@ -129,19 +127,45 @@ async fn retry_update_product(
     client: &AppleClient,
     account: &Account,
     body: &[u8],
-) -> Option<HashMap<String, plist::Value>> {
-    let endpoint = match crate::api::bag::fetch_bag(client).await {
-        Ok(config) => config.update_product_endpoint?,
-        Err(_) => return None,
-    };
+) -> Result<HashMap<String, plist::Value>, ClientError> {
+    let config = crate::api::bag::fetch_bag(client).await.map_err(|error| {
+        let code = match &error {
+            ClientError::Http(error) if error.is_timeout() => "update_product_bag_timed_out",
+            ClientError::Http(error) if error.is_connect() => {
+                "update_product_bag_network_unavailable"
+            }
+            _ => "update_product_bag_unavailable",
+        };
+        ClientError::UnexpectedResponse(code.into())
+    })?;
+    let endpoint = config
+        .update_product_endpoint
+        .ok_or_else(|| ClientError::UnexpectedResponse("update_product_endpoint_missing".into()))?;
     let fallback_url = update_product_url(&endpoint, client.guid());
     tracing::info!(
         "legacy App Store download returned no package; retrying Apple's updateProduct endpoint"
     );
-    match post_download_info(client, account, fallback_url.as_str(), body).await {
-        Ok(response) if !is_empty_successful_download(&response) => Some(response),
-        _ => None,
+    let response = post_download_info(client, account, fallback_url.as_str(), body)
+        .await
+        .map_err(|error| {
+            let code = match &error {
+                ClientError::Http(error) if error.is_timeout() => {
+                    "update_product_request_timed_out"
+                }
+                ClientError::Http(error) if error.is_connect() => {
+                    "update_product_request_network_unavailable"
+                }
+                ClientError::PlistDe(_) => "update_product_response_invalid",
+                _ => "update_product_request_failed",
+            };
+            ClientError::UnexpectedResponse(code.into())
+        })?;
+    if is_empty_successful_download(&response) {
+        return Err(ClientError::UnexpectedResponse(
+            "update_product_empty_song_list".into(),
+        ));
     }
+    Ok(response)
 }
 fn is_empty_successful_download(dict: &HashMap<String, plist::Value>) -> bool {
     if StoreError::from_plist_dict(dict).is_some() {

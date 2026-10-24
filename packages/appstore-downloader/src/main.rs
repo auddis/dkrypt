@@ -473,6 +473,19 @@ fn map_download_error(error: &ClientError) -> &'static str {
             "missing songList" => "download_info_song_list_missing",
             "invalid songList" => "download_info_song_list_invalid",
             "empty songList" => "download_info_song_list_empty",
+            "update_product_bag_timed_out" => "download_info_update_product_bag_timed_out",
+            "update_product_bag_network_unavailable" => {
+                "download_info_update_product_bag_network_unavailable"
+            }
+            "update_product_bag_unavailable" => "download_info_update_product_bag_unavailable",
+            "update_product_endpoint_missing" => "download_info_update_product_endpoint_missing",
+            "update_product_request_timed_out" => "download_info_update_product_request_timed_out",
+            "update_product_request_network_unavailable" => {
+                "download_info_update_product_request_network_unavailable"
+            }
+            "update_product_request_failed" => "download_info_update_product_request_failed",
+            "update_product_response_invalid" => "download_info_update_product_response_invalid",
+            "update_product_empty_song_list" => "download_info_update_product_empty_song_list",
             _ => "download_info_response_invalid",
         },
         ClientError::SapSignatureRequired { .. } => "action_signature_rejected",
@@ -841,6 +854,42 @@ mod tests {
         assert_eq!(
             map_download_error(&ClientError::UnexpectedResponse("empty songList".into())),
             "download_info_song_list_empty"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse(
+                "update_product_bag_unavailable".into()
+            )),
+            "download_info_update_product_bag_unavailable"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse(
+                "update_product_endpoint_missing".into()
+            )),
+            "download_info_update_product_endpoint_missing"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse(
+                "update_product_request_timed_out".into()
+            )),
+            "download_info_update_product_request_timed_out"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse(
+                "update_product_request_network_unavailable".into()
+            )),
+            "download_info_update_product_request_network_unavailable"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse(
+                "update_product_response_invalid".into()
+            )),
+            "download_info_update_product_response_invalid"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse(
+                "update_product_empty_song_list".into()
+            )),
+            "download_info_update_product_empty_song_list"
         );
         assert_eq!(
             map_download_error(&ClientError::UnexpectedResponse("private response".into())),
