@@ -41,7 +41,21 @@ struct Response {
     #[serde(skip_serializing_if = "Option::is_none")]
     authenticated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    stage: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     code: Option<&'static str>,
+}
+
+#[derive(Clone, Copy)]
+struct DownloaderFailure {
+    stage: &'static str,
+    code: &'static str,
+}
+
+impl DownloaderFailure {
+    fn new(stage: &'static str, code: &'static str) -> Self {
+        Self { stage, code }
+    }
 }
 
 impl Response {
@@ -49,6 +63,7 @@ impl Response {
         Self {
             ok: true,
             authenticated: Some(value),
+            stage: None,
             code: None,
         }
     }
@@ -57,14 +72,16 @@ impl Response {
         Self {
             ok: true,
             authenticated: None,
+            stage: None,
             code: None,
         }
     }
 
-    fn failure(code: &'static str) -> Self {
+    fn failure(stage: &'static str, code: &'static str) -> Self {
         Self {
             ok: false,
             authenticated: None,
+            stage: Some(stage),
             code: Some(code),
         }
     }
@@ -72,20 +89,21 @@ impl Response {
 
 #[tokio::main]
 async fn main() {
-    let result =
-        match read_request().and_then(|request| validate_request(&request).map(|()| request)) {
-            Ok(request) => execute(request).await,
-            Err(code) => Err(code),
-        };
+    let request = read_request().and_then(|request| validate_request(&request).map(|()| request));
+    let result = match request {
+        Ok(request) => execute(request).await,
+        Err(code) => Err(DownloaderFailure::new("request", code)),
+    };
     match result {
         Ok(response) => emit(response, 0),
-        Err(code) => emit(Response::failure(code), 1),
+        Err(failure) => emit(Response::failure(failure.stage, failure.code), 1),
     }
 }
 
 fn emit(response: Response, exit_code: i32) {
-    let encoded = serde_json::to_string(&response)
-        .unwrap_or_else(|_| "{\"ok\":false,\"code\":\"internal_error\"}".to_string());
+    let encoded = serde_json::to_string(&response).unwrap_or_else(|_| {
+        "{\"ok\":false,\"stage\":\"internal\",\"code\":\"internal_error\"}".to_string()
+    });
     println!("{encoded}");
     if exit_code != 0 {
         process::exit(exit_code);
@@ -219,28 +237,27 @@ fn map_authentication_error(error: &ClientError, verification_code_provided: boo
     }
 }
 
-async fn execute(request: Request) -> Result<Response, &'static str> {
+async fn execute(request: Request) -> Result<Response, DownloaderFailure> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
-        .ok_or("invalid_environment")?;
+        .ok_or_else(|| DownloaderFailure::new("environment", "invalid_environment"))?;
     let session_directory = home.join(".dkrypt-appstore");
     match request {
-        Request::Status => Ok(Response::authenticated(
-            load_account(&session_directory)?.is_some(),
-        )),
+        Request::Status => load_account(&session_directory)
+            .map(|account| Response::authenticated(account.is_some()))
+            .map_err(|code| DownloaderFailure::new("session", code)),
         Request::Authenticate {
             apple_id,
             password,
             verification_code,
-        } => {
-            authenticate(
-                &session_directory,
-                &apple_id,
-                &password,
-                verification_code.as_deref(),
-            )
-            .await
-        }
+        } => authenticate(
+            &session_directory,
+            &apple_id,
+            &password,
+            verification_code.as_deref(),
+        )
+        .await
+        .map_err(|code| DownloaderFailure::new(authentication_failure_stage(code), code)),
         Request::Download {
             apple_id,
             password,
@@ -260,6 +277,16 @@ async fn execute(request: Request) -> Result<Response, &'static str> {
             )
             .await
         }
+    }
+}
+
+fn authentication_failure_stage(code: &'static str) -> &'static str {
+    match code {
+        "apple_client_setup_failed" | "storefront_lookup_failed" | "action_signing_failed" => {
+            "sign_in_setup"
+        }
+        "provider_session_storage_failed" => "session_persistence",
+        _ => "sign_in",
     }
 }
 
@@ -306,17 +333,21 @@ async fn download(
     external_version_id: Option<&str>,
     output_path: &Path,
     max_bytes: u64,
-) -> Result<Response, &'static str> {
-    let mut account = load_account(session_directory)?.ok_or("authentication_required")?;
+) -> Result<Response, DownloaderFailure> {
+    let mut account = load_account(session_directory)
+        .map_err(|code| DownloaderFailure::new("session", code))?
+        .ok_or_else(|| DownloaderFailure::new("session", "authentication_required"))?;
     if !account.email.eq_ignore_ascii_case(apple_id) {
-        return Err("account_mismatch");
+        return Err(DownloaderFailure::new("account", "account_mismatch"));
     }
     account.password = Some(password.to_string());
-    let cache_directory = cache_directory(session_directory)?;
-    let identity = load_or_create_identity(session_directory)?;
+    let cache_directory = cache_directory(session_directory)
+        .map_err(|code| DownloaderFailure::new("environment", code))?;
+    let identity = load_or_create_identity(session_directory)
+        .map_err(|code| DownloaderFailure::new("session", code))?;
     let cookie_path = session_directory.join("cookies.json");
     let mut client = AppleClient::new(identity, Some(&cookie_path), cache_directory)
-        .map_err(|_| "download_failed")?;
+        .map_err(|_| DownloaderFailure::new("client_setup", "apple_client_setup_failed"))?;
     client.set_account(account.clone());
     let country = dkrypt_appstore_core::model::storefront::country_code_from_store_front(
         &account.store_front,
@@ -324,8 +355,8 @@ async fn download(
     .unwrap_or("US");
     let app = api::lookup::lookup(&client, bundle_id, country, Platform::IPhone)
         .await
-        .map_err(|_| "download_failed")?
-        .ok_or("app_not_found")?;
+        .map_err(|error| DownloaderFailure::new("app_lookup", map_lookup_error(&error)))?
+        .ok_or_else(|| DownloaderFailure::new("app_lookup", "app_not_found"))?;
     let item = match api::download::get_download_info(
         &client,
         app.id,
@@ -338,21 +369,34 @@ async fn download(
         Err(error) if error.is_token_expired() => {
             account = api::reauth::reauthenticate(&client, &account)
                 .await
-                .map_err(|error| map_download_error(&error))?;
+                .map_err(|error| {
+                    DownloaderFailure::new("reauthentication", map_download_error(&error))
+                })?;
             client.set_account(account.clone());
             api::download::get_download_info(&client, app.id, &account, external_version_id)
                 .await
-                .map_err(|error| map_download_error(&error))?
+                .map_err(|error| {
+                    DownloaderFailure::new("download_info", map_download_error(&error))
+                })?
         }
-        Err(error) => return Err(map_download_error(&error)),
+        Err(error) => {
+            return Err(DownloaderFailure::new(
+                "download_info",
+                map_download_error(&error),
+            ));
+        }
     };
     verify_requested_version(
         item.latest_external_version_id().as_deref(),
         external_version_id,
-    )?;
-    let (temporary_path, temporary_file) = temporary_download_path(output_path)?;
+    )
+    .map_err(|code| DownloaderFailure::new("version_validation", code))?;
+    let (temporary_path, temporary_file) = temporary_download_path(output_path)
+        .map_err(|_| DownloaderFailure::new("download_staging", "download_file_failed"))?;
     let mut temporary = TemporaryFile::new(temporary_path.clone());
-    let download_client = client.download_http().map_err(|_| "download_failed")?;
+    let download_client = client
+        .download_http()
+        .map_err(|_| DownloaderFailure::new("download_client", "download_client_setup_failed"))?;
     stream_download(&download_client, &item.url, temporary_file, max_bytes).await?;
     let mut output = TemporaryFile::new(output_path.to_path_buf());
     dkrypt_appstore_core::ipa::patch::patch_ipa(
@@ -361,14 +405,15 @@ async fn download(
         &item,
         &account.email,
     )
-    .map_err(|_| "download_failed")?;
+    .map_err(|_| DownloaderFailure::new("ipa_patching", "ipa_patch_failed"))?;
     output.keep();
     temporary.remove();
     account.password = None;
-    save_account(session_directory, account)?;
-    client
-        .save_cookies(&cookie_path)
-        .map_err(|_| "download_failed")?;
+    save_account(session_directory, account)
+        .map_err(|code| DownloaderFailure::new("session_persistence", code))?;
+    client.save_cookies(&cookie_path).map_err(|_| {
+        DownloaderFailure::new("session_persistence", "provider_session_storage_failed")
+    })?;
     Ok(Response::success())
 }
 
@@ -386,16 +431,47 @@ fn verify_requested_version(
     }
 }
 
-fn map_download_error(error: &dkrypt_appstore_core::error::ClientError) -> &'static str {
+fn map_lookup_error(error: &ClientError) -> &'static str {
     match error {
-        dkrypt_appstore_core::error::ClientError::Store(
-            dkrypt_appstore_core::error::StoreError::AuthCodeRequired,
-        ) => "two_factor_required",
-        dkrypt_appstore_core::error::ClientError::Store(
-            dkrypt_appstore_core::error::StoreError::LicenseNotFound,
-        ) => "app_not_owned",
-        _ if error.is_token_expired() => "authentication_required",
-        _ => "download_failed",
+        ClientError::Http(error) if error.is_timeout() => "app_lookup_timed_out",
+        ClientError::Http(error) if error.is_connect() => "app_lookup_network_unavailable",
+        ClientError::Http(error) if error.status().is_some_and(|status| status.as_u16() == 429) => {
+            "apple_rate_limited"
+        }
+        ClientError::Http(_) => "app_lookup_http_failed",
+        ClientError::PlistDe(_) | ClientError::UnexpectedResponse(_) => {
+            "app_lookup_response_invalid"
+        }
+        ClientError::MissingHeader(_)
+        | ClientError::Sap(_)
+        | ClientError::SapSignatureRequired { .. } => "app_lookup_failed",
+        ClientError::Store(_) => "app_lookup_failed",
+    }
+}
+
+fn map_download_error(error: &ClientError) -> &'static str {
+    match error {
+        ClientError::Store(StoreError::AuthCodeRequired) => "two_factor_required",
+        ClientError::Store(StoreError::LicenseNotFound) => "app_not_owned",
+        ClientError::Store(StoreError::RateLimited) => "apple_rate_limited",
+        ClientError::Store(StoreError::TemporarilyUnavailable) => "apple_store_unavailable",
+        ClientError::Store(
+            StoreError::PasswordTokenExpired
+            | StoreError::SignInRequired
+            | StoreError::DeviceVerificationFailed,
+        ) => "authentication_required",
+        ClientError::Store(_) => "download_info_rejected",
+        ClientError::Http(error) if error.is_timeout() => "download_info_timed_out",
+        ClientError::Http(error) if error.is_connect() => "download_info_network_unavailable",
+        ClientError::Http(error) if error.status().is_some_and(|status| status.as_u16() == 429) => {
+            "apple_rate_limited"
+        }
+        ClientError::Http(_) => "download_info_http_failed",
+        ClientError::PlistDe(_)
+        | ClientError::MissingHeader(_)
+        | ClientError::UnexpectedResponse(_) => "download_info_response_invalid",
+        ClientError::SapSignatureRequired { .. } => "action_signature_rejected",
+        ClientError::Sap(_) => "action_signing_failed",
     }
 }
 
@@ -404,44 +480,90 @@ async fn stream_download(
     url: &str,
     destination: fs::File,
     max_bytes: u64,
-) -> Result<(), &'static str> {
-    let parsed = Url::parse(url).map_err(|_| "download_failed")?;
+) -> Result<(), DownloaderFailure> {
+    let parsed = Url::parse(url)
+        .map_err(|_| DownloaderFailure::new("download_url", "download_url_invalid"))?;
     if !is_trusted_apple_download_url(&parsed) {
-        return Err("download_failed");
+        return Err(DownloaderFailure::new(
+            "download_url",
+            "download_url_rejected",
+        ));
     }
-    let mut response = client
-        .get(parsed)
-        .send()
-        .await
-        .map_err(|_| "download_failed")?
-        .error_for_status()
-        .map_err(|_| "download_failed")?;
+    let mut response = client.get(parsed).send().await.map_err(|error| {
+        DownloaderFailure::new(
+            "download_transfer",
+            map_transfer_error(error.is_timeout(), error.is_connect()),
+        )
+    })?;
+    if !is_trusted_apple_download_url(response.url()) {
+        return Err(DownloaderFailure::new(
+            "download_redirect",
+            "download_redirect_rejected",
+        ));
+    }
+    let status = response.status();
+    if !status.is_success() {
+        let code = if status.is_redirection() {
+            "download_redirect_rejected"
+        } else if status.as_u16() == 429 {
+            "apple_rate_limited"
+        } else {
+            "download_http_rejected"
+        };
+        return Err(DownloaderFailure::new("download_transfer", code));
+    }
     if response
         .content_length()
         .is_some_and(|length| length > max_bytes)
     {
-        return Err("download_too_large");
+        return Err(DownloaderFailure::new(
+            "download_transfer",
+            "download_too_large",
+        ));
     }
     let mut output = tokio::fs::File::from_std(destination);
     let mut downloaded = 0_u64;
-    while let Some(chunk) = response.chunk().await.map_err(|_| "download_failed")? {
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        DownloaderFailure::new(
+            "download_transfer",
+            map_transfer_error(error.is_timeout(), error.is_connect()),
+        )
+    })? {
         downloaded = downloaded
             .checked_add(chunk.len() as u64)
-            .ok_or("download_too_large")?;
+            .ok_or_else(|| DownloaderFailure::new("download_transfer", "download_too_large"))?;
         if downloaded > max_bytes {
-            return Err("download_too_large");
+            return Err(DownloaderFailure::new(
+                "download_transfer",
+                "download_too_large",
+            ));
         }
         tokio::io::AsyncWriteExt::write_all(&mut output, &chunk)
             .await
-            .map_err(|_| "download_failed")?;
+            .map_err(|_| {
+                DownloaderFailure::new("download_staging", "download_disk_write_failed")
+            })?;
     }
     tokio::io::AsyncWriteExt::flush(&mut output)
         .await
-        .map_err(|_| "download_failed")?;
+        .map_err(|_| DownloaderFailure::new("download_staging", "download_disk_write_failed"))?;
     if downloaded == 0 {
-        return Err("download_failed");
+        return Err(DownloaderFailure::new(
+            "download_transfer",
+            "download_empty",
+        ));
     }
     Ok(())
+}
+
+fn map_transfer_error(is_timeout: bool, is_connect: bool) -> &'static str {
+    if is_timeout {
+        "download_transfer_timed_out"
+    } else if is_connect {
+        "download_transfer_network_unavailable"
+    } else {
+        "download_transfer_failed"
+    }
 }
 
 struct TemporaryFile {
@@ -606,8 +728,9 @@ fn load_or_create_identity(session_directory: &Path) -> Result<MachineIdentity, 
 #[cfg(test)]
 mod tests {
     use super::{
-        load_account, map_authentication_error, save_account, temporary_download_path,
-        valid_bundle_id, valid_email, valid_verification_code, verify_requested_version,
+        load_account, map_authentication_error, map_download_error, map_lookup_error, save_account,
+        temporary_download_path, valid_bundle_id, valid_email, valid_verification_code,
+        verify_requested_version,
     };
     use dkrypt_appstore_core::error::{ClientError, StoreError};
     use dkrypt_appstore_core::model::Account;
@@ -682,6 +805,33 @@ mod tests {
         assert_eq!(
             map_authentication_error(&ClientError::Sap("signing failed".into()), false),
             "action_signing_failed"
+        );
+    }
+
+    #[test]
+    fn classifies_download_metadata_failures_without_exposing_provider_details() {
+        assert_eq!(
+            map_download_error(&ClientError::Store(StoreError::LicenseNotFound)),
+            "app_not_owned"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::Store(StoreError::AuthCodeRequired)),
+            "two_factor_required"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::Store(StoreError::Unknown {
+                code: "secret-store-code".into(),
+                message: "secret provider response".into(),
+            })),
+            "download_info_rejected"
+        );
+    }
+
+    #[test]
+    fn classifies_app_lookup_failures_without_exposing_response_contents() {
+        assert_eq!(
+            map_lookup_error(&ClientError::UnexpectedResponse("private response".into())),
+            "app_lookup_response_invalid"
         );
     }
 

@@ -370,6 +370,7 @@ async function runDefaultDownload(job: Job, secrets: AppleAccountSecrets, output
     log.warn('server-side App Store download failed', {
       jobId: job.id,
       bundleId: job.bundleId,
+      stage: result.response.stage,
       code: result.response.code,
       diagnostic: sanitizeAppStoreDownloadDiagnostic(result.diagnostic, secrets),
     });

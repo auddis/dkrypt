@@ -9,6 +9,7 @@ const MAX_DOWNLOADER_OUTPUT_BYTES = 8192;
 export interface AppStoreDownloaderResponse {
   ok: boolean;
   authenticated?: boolean;
+  stage?: string;
   code?: string;
 }
 

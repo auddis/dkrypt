@@ -47,7 +47,7 @@ fn authentication_rejects_invalid_account_input_before_network_access() {
     assert!(!success);
     assert_eq!(
         response,
-        serde_json::json!({"ok": false, "code": "invalid_request"})
+        serde_json::json!({"ok": false, "stage": "request", "code": "invalid_request"})
     );
 }
 
@@ -60,6 +60,24 @@ fn download_rejects_invalid_bundle_ids_before_network_access() {
     assert!(!success);
     assert_eq!(
         response,
-        serde_json::json!({"ok": false, "code": "invalid_request"})
+        serde_json::json!({"ok": false, "stage": "request", "code": "invalid_request"})
     );
+}
+
+#[test]
+fn download_reports_a_safe_failure_stage_when_the_session_is_missing() {
+    let home = TempDir::new().expect("create isolated home");
+    let request = serde_json::json!({
+        "operation": "download",
+        "apple_id": "person@example.test",
+        "password": "secret",
+        "bundle_id": "com.example.app",
+        "external_version_id": null,
+        "output_path": home.path().join("download.ipa"),
+    });
+    let (success, response) = invoke(&home, &request.to_string());
+
+    assert!(!success);
+    assert_eq!(response["stage"], "session");
+    assert_eq!(response["code"], "authentication_required");
 }

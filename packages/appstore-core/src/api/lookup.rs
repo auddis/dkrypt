@@ -19,7 +19,8 @@ pub async fn lookup(
             ("limit", "1"),
         ])
         .send()
-        .await?;
+        .await?
+        .error_for_status()?;
     let body = resp.text().await?;
     let search_resp: SearchResponse =
         serde_json::from_str(&body).map_err(|e| ClientError::UnexpectedResponse(e.to_string()))?;
