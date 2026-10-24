@@ -134,8 +134,6 @@ export const config = {
   jobProcessGraceSeconds: optionalInt('JOB_PROCESS_GRACE_SECONDS', 10),
   jobRetentionMinutes: optionalInt('JOB_RETENTION_MINUTES', 24 * 60),
 
-  runPollIntervalSeconds: optionalInt('RUN_POLL_INTERVAL_SECONDS', 15),
-  runPollTimeoutMinutes: optionalInt('RUN_POLL_TIMEOUT_MINUTES', 30),
   notifyWebhookUrl: optional('NOTIFY_WEBHOOK_URL', ''),
   outboundWebhookSecret: optional('OUTBOUND_WEBHOOK_SECRET', ''),
   outboundWebhookSecretPrevious: optional('OUTBOUND_WEBHOOK_SECRET_PREVIOUS', ''),
