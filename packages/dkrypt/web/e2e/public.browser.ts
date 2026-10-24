@@ -722,12 +722,15 @@ test('job history cards keep names and actions readable from desktop to phone wi
   await page.route('**/v1/dashboard/jobs?*', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ history: [{ id: 'job-card-layout', bundleId: 'com.example.a.long.bundle.identifier', status: 'done', source: 'manual', versionLabel: '348.0 (113691)', createdAt: Date.now() - 60_000, finishedAt: Date.now() - 30_000, fileAvailable: true, artifactId: 'job-card-artifact', downloadUrl: '/download/job-card-artifact' }], total: 1 }),
+      body: JSON.stringify({ history: [{ id: 'job-card-layout', bundleId: 'com.example.a.long.bundle.identifier', status: 'done', source: 'scheduler', versionLabel: '348.0 (113691)', createdAt: Date.now() - 60_000, finishedAt: Date.now() - 30_000, fileAvailable: true, artifactId: 'job-card-artifact', downloadUrl: '/download/job-card-artifact' }], total: 1 }),
     });
   });
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/?tab=home');
+  await expect(page.getByRole('button', { name: 'Any source' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Manual', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'System', exact: true })).toHaveCount(0);
   const row = page.locator('.history-feed-row').first();
   await expect(row).toBeVisible();
   const rowWidth = await row.evaluate((element) => element.getBoundingClientRect().width);
@@ -752,6 +755,10 @@ test('job history cards keep names and actions readable from desktop to phone wi
   expect(iconBounds).not.toBeNull();
   expect(nameBounds).not.toBeNull();
   expect(Math.abs(iconBounds!.y - nameBounds!.y)).toBeLessThanOrEqual(4);
+
+  await page.goto('/?tab=home&hsource=scheduler');
+  await expect(page.locator('.history-feed-row')).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.get('hsource')).toBeNull();
 });
 
 test('job history groups version and status while keeping actions beside the app at constrained desktop widths', async ({ page }) => {

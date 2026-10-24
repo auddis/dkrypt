@@ -63,7 +63,7 @@
 	const interfaceLanguage = $derived(resolveInterfaceLanguage(interfaceLanguageState.value, systemLocalesState.value));
 	const viewMessage = (key: 'viewMode.label' | 'viewMode.list' | 'viewMode.cards') => translateMessage(key, interfaceLanguage);
 
-	type SourceFilter = "all" | "manual" | "scheduler";
+	type SourceFilter = "all" | "manual";
 	type StatusFilter = "all" | "done" | "failed";
 
 	interface FilterPreset {
@@ -92,6 +92,10 @@
 		entry: JobHistoryEntry;
 		showDateHeader: boolean;
 	};
+
+	function normalizeSourceFilter(value: string | null | undefined): SourceFilter {
+		return value === "manual" ? "manual" : "all";
+	}
 
 	function requesterInitials(name: string): string {
 		return name
@@ -122,11 +126,9 @@
 	);
 	let activeQuery = $state("");
 	let sourceFilter = $state<SourceFilter>(
-		(getQueryParam("hsource") as SourceFilter | undefined) ??
-			(localStorage.getItem(
-				"jobHistorySourceFilter",
-			) as SourceFilter | null) ??
-			"all",
+		normalizeSourceFilter(
+			getQueryParam("hsource") ?? localStorage.getItem("jobHistorySourceFilter"),
+		),
 	);
 	let statusFilter = $state<StatusFilter>(
 		(getQueryParam("hstatus") as StatusFilter | undefined) ??
@@ -173,7 +175,7 @@
 
 	function applyPreset(p: FilterPreset): void {
 		searchText = p.query;
-		sourceFilter = p.source;
+		sourceFilter = normalizeSourceFilter(p.source);
 		statusFilter = p.status;
 		queuedByFilter = p.queuedBy;
 		deviceFilter = p.deviceId;
@@ -914,12 +916,6 @@
 				variant={sourceFilter === "manual" ? "default" : "secondary"}
 				onclick={() => (sourceFilter = "manual")}>Manual</Button
 			>
-			<Button
-				variant={sourceFilter === "scheduler" ? "default" : "secondary"}
-				onclick={() => (sourceFilter = "scheduler")}
-			>
-				System
-			</Button>
 		</div>
 	</div>
 
