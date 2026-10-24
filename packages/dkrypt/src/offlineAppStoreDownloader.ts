@@ -11,6 +11,7 @@ export interface AppStoreDownloaderResponse {
   authenticated?: boolean;
   stage?: string;
   code?: string;
+  diagnostic?: string;
 }
 
 export interface AppStoreDownloaderRequestOptions {

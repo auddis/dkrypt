@@ -44,17 +44,32 @@ struct Response {
     stage: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diagnostic: Option<String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 struct DownloaderFailure {
     stage: &'static str,
     code: &'static str,
+    diagnostic: Option<String>,
 }
 
 impl DownloaderFailure {
     fn new(stage: &'static str, code: &'static str) -> Self {
-        Self { stage, code }
+        Self {
+            stage,
+            code,
+            diagnostic: None,
+        }
+    }
+
+    fn from_download_error(stage: &'static str, error: &ClientError) -> Self {
+        Self {
+            stage,
+            code: map_download_error(error),
+            diagnostic: map_download_diagnostic(error),
+        }
     }
 }
 
@@ -65,6 +80,7 @@ impl Response {
             authenticated: Some(value),
             stage: None,
             code: None,
+            diagnostic: None,
         }
     }
 
@@ -74,15 +90,17 @@ impl Response {
             authenticated: None,
             stage: None,
             code: None,
+            diagnostic: None,
         }
     }
 
-    fn failure(stage: &'static str, code: &'static str) -> Self {
+    fn failure(failure: DownloaderFailure) -> Self {
         Self {
             ok: false,
             authenticated: None,
-            stage: Some(stage),
-            code: Some(code),
+            stage: Some(failure.stage),
+            code: Some(failure.code),
+            diagnostic: failure.diagnostic,
         }
     }
 }
@@ -96,7 +114,7 @@ async fn main() {
     };
     match result {
         Ok(response) => emit(response, 0),
-        Err(failure) => emit(Response::failure(failure.stage, failure.code), 1),
+        Err(failure) => emit(Response::failure(failure), 1),
     }
 }
 
@@ -370,19 +388,17 @@ async fn download(
             account = api::reauth::reauthenticate(&client, &account)
                 .await
                 .map_err(|error| {
-                    DownloaderFailure::new("reauthentication", map_download_error(&error))
+                    DownloaderFailure::from_download_error("reauthentication", &error)
                 })?;
             client.set_account(account.clone());
             api::download::get_download_info(&client, app.id, &account, external_version_id)
                 .await
-                .map_err(|error| {
-                    DownloaderFailure::new("download_info", map_download_error(&error))
-                })?
+                .map_err(|error| DownloaderFailure::from_download_error("download_info", &error))?
         }
         Err(error) => {
-            return Err(DownloaderFailure::new(
+            return Err(DownloaderFailure::from_download_error(
                 "download_info",
-                map_download_error(&error),
+                &error,
             ));
         }
     };
@@ -485,11 +501,23 @@ fn map_download_error(error: &ClientError) -> &'static str {
             }
             "update_product_request_failed" => "download_info_update_product_request_failed",
             "update_product_response_invalid" => "download_info_update_product_response_invalid",
+            reason if reason.starts_with("update_product_response_invalid|") => {
+                "download_info_update_product_response_invalid"
+            }
             "update_product_empty_song_list" => "download_info_update_product_empty_song_list",
             _ => "download_info_response_invalid",
         },
         ClientError::SapSignatureRequired { .. } => "action_signature_rejected",
         ClientError::Sap(_) => "action_signing_failed",
+    }
+}
+
+fn map_download_diagnostic(error: &ClientError) -> Option<String> {
+    match error {
+        ClientError::UnexpectedResponse(reason) => reason
+            .strip_prefix("update_product_response_invalid|")
+            .map(str::to_owned),
+        _ => None,
     }
 }
 
@@ -746,9 +774,9 @@ fn load_or_create_identity(session_directory: &Path) -> Result<MachineIdentity, 
 #[cfg(test)]
 mod tests {
     use super::{
-        load_account, map_authentication_error, map_download_error, map_lookup_error, save_account,
-        temporary_download_path, valid_bundle_id, valid_email, valid_verification_code,
-        verify_requested_version,
+        DownloaderFailure, load_account, map_authentication_error, map_download_diagnostic,
+        map_download_error, map_lookup_error, save_account, temporary_download_path,
+        valid_bundle_id, valid_email, valid_verification_code, verify_requested_version,
     };
     use dkrypt_appstore_core::error::{ClientError, StoreError};
     use dkrypt_appstore_core::model::Account;
@@ -895,6 +923,21 @@ mod tests {
             map_download_error(&ClientError::UnexpectedResponse("private response".into())),
             "download_info_response_invalid"
         );
+    }
+
+    #[test]
+    fn preserves_only_safe_update_product_response_metadata() {
+        let diagnostic = "http_status=403;content_type=html;body_format=html;body_length=34";
+        let error = ClientError::UnexpectedResponse(format!(
+            "update_product_response_invalid|{diagnostic}"
+        ));
+        let failure = DownloaderFailure::from_download_error("download_info", &error);
+        assert_eq!(
+            failure.code,
+            "download_info_update_product_response_invalid"
+        );
+        assert_eq!(failure.diagnostic.as_deref(), Some(diagnostic));
+        assert_eq!(map_download_diagnostic(&error).as_deref(), Some(diagnostic));
     }
 
     #[test]

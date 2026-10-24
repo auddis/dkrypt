@@ -91,14 +91,8 @@ fn download_info_request_body(
     external_version_id: Option<&str>,
 ) -> Result<Vec<u8>, ClientError> {
     let mut body = plist::Dictionary::new();
-    body.insert(
-        "salableAdamId".into(),
-        plist::Value::Integer(app_id.into()),
-    );
-    body.insert(
-        "guid".into(),
-        plist::Value::String(guid.to_string()),
-    );
+    body.insert("salableAdamId".into(), plist::Value::Integer(app_id.into()));
+    body.insert("guid".into(), plist::Value::String(guid.to_string()));
     body.insert("creditDisplay".into(), plist::Value::String(String::new()));
     body.insert("serialNumber".into(), plist::Value::String("0".into()));
     if let Some(vid) = external_version_id {
@@ -128,9 +122,93 @@ async fn post_download_info(
         .send()
         .await?;
     let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
     let response_body = response.bytes().await?;
     tracing::debug!(%status, response_bytes = response_body.len(), "App Store download metadata response received");
-    crate::client::plist_xml::parse_plist_response(&response_body)
+    crate::client::plist_xml::parse_plist_response(&response_body).map_err(|_| {
+        ClientError::UnexpectedResponse(response_diagnostic(
+            status.as_u16(),
+            content_type.as_deref(),
+            &response_body,
+        ))
+    })
+}
+fn response_diagnostic(status: u16, content_type: Option<&str>, body: &[u8]) -> String {
+    format!(
+        "appstore_response_invalid|http_status={status};content_type={};body_format={};body_length={}",
+        response_content_type(content_type),
+        response_body_format(body),
+        body.len()
+    )
+}
+fn response_content_type(content_type: Option<&str>) -> &'static str {
+    let media_type = content_type
+        .and_then(|value| value.split(';').next())
+        .unwrap_or_default()
+        .trim();
+    if [
+        "application/x-apple-plist",
+        "application/x-apple-binary-plist",
+        "application/plist",
+    ]
+    .iter()
+    .any(|expected| media_type.eq_ignore_ascii_case(expected))
+    {
+        "apple_plist"
+    } else if ["application/xml", "text/xml"]
+        .iter()
+        .any(|expected| media_type.eq_ignore_ascii_case(expected))
+    {
+        "xml"
+    } else if media_type.eq_ignore_ascii_case("text/html") {
+        "html"
+    } else if media_type.eq_ignore_ascii_case("application/json")
+        || media_type.to_ascii_lowercase().ends_with("+json")
+    {
+        "json"
+    } else if media_type.is_empty() {
+        "missing"
+    } else {
+        "other"
+    }
+}
+fn response_body_format(body: &[u8]) -> &'static str {
+    let body = &body[body
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(body.len())..];
+    if body.is_empty() {
+        "empty"
+    } else if body.starts_with(b"bplist00") {
+        "binary_plist"
+    } else if body
+        .get(..14)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"<!doctype html"))
+        || body
+            .get(..5)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"<html"))
+    {
+        "html"
+    } else if [
+        b"<?xml".as_slice(),
+        b"<plist".as_slice(),
+        b"<dict".as_slice(),
+    ]
+    .iter()
+    .any(|prefix| {
+        body.get(..prefix.len())
+            .is_some_and(|body_prefix| body_prefix.eq_ignore_ascii_case(prefix))
+    }) {
+        "xml"
+    } else if body.starts_with(b"{") || body.starts_with(b"[") {
+        "json"
+    } else {
+        "other"
+    }
 }
 async fn retry_update_product(
     client: &AppleClient,
@@ -163,6 +241,13 @@ async fn retry_update_product(
                 }
                 ClientError::Http(error) if error.is_connect() => {
                     "update_product_request_network_unavailable"
+                }
+                ClientError::UnexpectedResponse(reason)
+                    if let Some(diagnostic) = reason.strip_prefix("appstore_response_invalid|") =>
+                {
+                    return ClientError::UnexpectedResponse(format!(
+                        "update_product_response_invalid|{diagnostic}"
+                    ));
                 }
                 ClientError::PlistDe(_) => "update_product_response_invalid",
                 _ => "update_product_request_failed",
@@ -470,5 +555,18 @@ mod tests {
             request.get("externalVersionId"),
             Some(&plist::Value::String("5678".into()))
         );
+    }
+    #[test]
+    fn response_diagnostic_contains_safe_format_metadata_only() {
+        let diagnostic = response_diagnostic(
+            403,
+            Some("text/html; charset=utf-8"),
+            b"<html>private response body</html>",
+        );
+        assert!(diagnostic.contains("http_status=403"));
+        assert!(diagnostic.contains("content_type=html"));
+        assert!(diagnostic.contains("body_format=html"));
+        assert!(diagnostic.contains("body_length=34"));
+        assert!(!diagnostic.contains("private response body"));
     }
 }

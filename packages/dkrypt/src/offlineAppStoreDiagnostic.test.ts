@@ -35,3 +35,24 @@ test('App Store download diagnostics preserve provider errors and redact account
   expect(diagnostic).not.toContain('/run/secrets/id_ed25519');
   expect(diagnostic).not.toContain('00008030-001624583AF9402E');
 });
+
+test('App Store response diagnostics retain format metadata but not response contents', () => {
+  const diagnostic = sanitizeAppStoreDownloadDiagnostic(
+    JSON.stringify({
+      ok: false,
+      stage: 'download_info',
+      code: 'download_info_update_product_response_invalid',
+      diagnostic: 'http_status=403;content_type=html;body_format=html;body_length=34',
+    }),
+    {
+      appleId: 'owner@example.test',
+      password: 'apple-password',
+    },
+  );
+
+  expect(diagnostic).toContain('http_status=403');
+  expect(diagnostic).toContain('content_type=html');
+  expect(diagnostic).toContain('body_format=html');
+  expect(diagnostic).toContain('body_length=34');
+  expect(diagnostic).not.toContain('private response body');
+});
