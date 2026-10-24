@@ -952,6 +952,106 @@ describe('Stripe billing webhooks', () => {
     }
   });
 
+  test('Stripe checkout API grants access after a mocked sandbox checkout webhook', async () => {
+    const previousBillingSnapshot = exportBillingSnapshot();
+    replaceBillingSnapshot({ customers: [], subscriptions: [] });
+    const requests: Array<{ method: string; path: string; authorization: string | null; idempotencyKey: string | null; body: string }> = [];
+    const checkoutSession = {
+      id: 'cs_test_billing_api_http',
+      object: 'checkout.session',
+      url: 'https://checkout.stripe.com/c/pay/cs_test_billing_api_http',
+      livemode: false,
+    };
+    const currentPeriodEnd = Math.floor(Date.now() / 1000) + 2_592_000;
+    const mockedFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const request = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
+      const url = new URL(request.url);
+      const body = await request.text();
+      requests.push({
+        method: request.method,
+        path: url.pathname,
+        authorization: request.headers.get('authorization'),
+        idempotencyKey: request.headers.get('idempotency-key'),
+        body,
+      });
+
+      if (request.method === 'POST' && url.pathname === '/v1/checkout/sessions') return Response.json(checkoutSession);
+      if (request.method === 'GET' && url.pathname === `/v1/checkout/sessions/${checkoutSession.id}`) return Response.json(checkoutSession);
+      if (request.method === 'GET' && url.pathname === '/v1/subscriptions/sub_test_billing_api_http') {
+        return Response.json({
+          id: 'sub_test_billing_api_http',
+          object: 'subscription',
+          customer: 'cus_test_billing_api_http',
+          status: 'active',
+          metadata: { dkrypt_user_id: 'root', plan_id: 'regular' },
+          current_period_end: currentPeriodEnd,
+          cancel_at: null,
+          cancel_at_period_end: false,
+          items: {
+            object: 'list',
+            data: [{
+              id: 'si_test_billing_api_http',
+              object: 'subscription_item',
+              current_period_end: currentPeriodEnd,
+              price: { id: 'price_regular_test', object: 'price', product: 'prod_regular_test' },
+            }],
+            has_more: false,
+          },
+        });
+      }
+      return Response.json({ error: { message: `Unexpected mocked Stripe request ${request.method} ${url.pathname}` } }, { status: 404 });
+    }) as unknown as typeof fetch;
+    const stripeClient = new Stripe('sk_test_billing_api_http', {
+      apiVersion: '2026-08-26.dahlia' as Stripe.LatestApiVersion,
+      httpClient: Stripe.createFetchHttpClient(mockedFetch),
+    });
+    const server = await buildTestServer({ includePublicRoutes: false, stripeClient: () => stripeClient });
+    const headers = { cookie: createSessionCookie(0n), 'idempotency-key': 'sandbox-checkout-api-flow' };
+
+    try {
+      const checkout = await server.inject({
+        method: 'POST',
+        url: '/v1/billing/checkout',
+        headers,
+        payload: { planId: 'regular', provider: 'stripe' },
+      });
+      const replay = await server.inject({
+        method: 'POST',
+        url: '/v1/billing/checkout',
+        headers,
+        payload: { planId: 'regular', provider: 'stripe' },
+      });
+
+      expect(checkout.statusCode).toBe(200);
+      expect(checkout.json() as { url: string }).toEqual({ url: checkoutSession.url });
+      expect(replay.statusCode).toBe(200);
+      expect(replay.json() as { url: string }).toEqual(checkout.json() as { url: string });
+      expect(requests.filter((request) => request.method === 'POST' && request.path === '/v1/checkout/sessions')).toHaveLength(1);
+      expect(requests.filter((request) => request.method === 'GET' && request.path === `/v1/checkout/sessions/${checkoutSession.id}`)).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        authorization: 'Bearer sk_test_billing_api_http',
+        idempotencyKey: checkoutIdempotencyKey('stripe', 'root', 'sandbox-checkout-api-flow'),
+      });
+      const checkoutParameters = new URLSearchParams(requests[0].body);
+      expect(checkoutParameters.get('mode')).toBe('subscription');
+      expect(checkoutParameters.get('line_items[0][price]')).toBe('price_regular_test');
+      expect(checkoutParameters.get('managed_payments[enabled]')).toBe('true');
+      expect(getBillingEntitlements('root').planId).toBe('viewer');
+
+      const stripeEvent = checkoutEvent('root', 'cus_test_billing_api_http', 'sub_test_billing_api_http');
+      const webhook = signedStripeWebhook(stripeEvent);
+      const delivery = await server.inject({ method: 'POST', url: '/v1/stripe/webhook', headers: webhook.headers, payload: webhook.payload });
+
+      expect(delivery.statusCode).toBe(200);
+      expect(getBillingCustomerId('root')).toBe('cus_test_billing_api_http');
+      expect(getBillingEntitlements('root')).toMatchObject({ planId: 'regular', decrypt: true, priority: 0 });
+      expect(requests.filter((request) => request.method === 'GET' && request.path === '/v1/subscriptions/sub_test_billing_api_http')).toHaveLength(1);
+    } finally {
+      await server.close();
+      replaceBillingSnapshot(previousBillingSnapshot);
+    }
+  });
+
   test('checkout pause is manager-only and blocks new provider checkouts', async () => {
     const previousBillingSnapshot = exportBillingSnapshot();
     const createdAt = new Date().toISOString();

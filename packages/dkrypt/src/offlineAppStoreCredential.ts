@@ -89,7 +89,7 @@ export function sshWrapper(): string {
 
 function sensitiveValues(secrets: AppleAccountSecrets | undefined): string[] {
   if (!secrets) return [];
-  const values = [secrets.appleId, secrets.password, secrets.keychainPassphrase, secrets.fairPlayCredential ?? ''];
+  const values = [secrets.appleId, secrets.password, secrets.fairPlayCredential ?? ''];
   if (secrets.fairPlayCredential) {
     const credentialBytes = /^[0-9a-f]{32}$/i.test(secrets.fairPlayCredential)
       ? Buffer.from(secrets.fairPlayCredential, 'hex')

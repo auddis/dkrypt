@@ -3,7 +3,7 @@ import type { AppleAccountSecrets } from '#appleAccountVault.js';
 const sensitiveFieldPattern = /(["']?(?:apple[ _-]?(?:id|account)|account[ _-]?(?:email|name)|email|password|passphrase|credential|authorization|access[ _-]?token|refresh[ _-]?token|session(?:[ _-]?token)?)["']?\s*[:=]\s*["']?)[^"'\s,}\]]+/gi;
 
 function secretValues(secrets: AppleAccountSecrets): string[] {
-  const values = [secrets.appleId, secrets.password, secrets.keychainPassphrase, secrets.fairPlayCredential ?? ''];
+  const values = [secrets.appleId, secrets.password, secrets.fairPlayCredential ?? ''];
   if (secrets.fairPlayCredential) {
     const credential = Buffer.from(secrets.fairPlayCredential, 'base64');
     try {

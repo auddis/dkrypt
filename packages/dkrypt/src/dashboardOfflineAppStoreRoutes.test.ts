@@ -21,7 +21,6 @@ function readiness(): OfflineAppStoreReadiness {
     ready: false,
     downloaderAvailable: true,
     decryptorAvailable: false,
-    terminalAvailable: true,
     fairPlayAuthorized: false,
     vault: { encryptionReady: true, accountConfigured: true, credentialConfigured: false, accountHint: 'a•••@icloud.com' },
     blockers: ['offline decryption is disabled', 'FairPlay decryptor is missing'],

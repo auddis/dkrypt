@@ -1,42 +1,42 @@
 export const GENERATED_CHANGELOG = [
   {
-    "date": "2026-09-29",
-    "title": "fix(device): refresh health on USB events",
-    "description": "Released in 35a2627."
+    "date": "2026-10-24",
+    "title": "fix(ui): bound FairPlay setup requests",
+    "description": "Released in cbbe693."
   },
   {
-    "date": "2026-09-29",
-    "title": "fix(ops): always smoke test authenticated dashboard",
-    "description": "Released in c8c38e2."
+    "date": "2026-10-24",
+    "title": "fix(build): skip network-bound ipatool integration test",
+    "description": "Released in a835c54."
   },
   {
-    "date": "2026-09-29",
-    "title": "fix(billing): reconcile Stripe checkout subscriptions",
-    "description": "Released in 88bad09."
+    "date": "2026-10-24",
+    "title": "fix(appstore): retrieve FairPlay credentials over LAN",
+    "description": "Released in e77ea28."
   },
   {
-    "date": "2026-09-29",
-    "title": "fix(device): preserve typed Rust bridge errors",
-    "description": "Released in ace7dea."
+    "date": "2026-10-24",
+    "title": "fix(deps): patch undici security advisory",
+    "description": "Released in 723d286."
   },
   {
-    "date": "2026-09-29",
-    "title": "test(deploy): assert database migration and MFA login",
-    "description": "Released in b818d1d."
+    "date": "2026-10-24",
+    "title": "fix(appstore): keep SSH shim executable",
+    "description": "Released in a7f7bc4."
   },
   {
-    "date": "2026-09-29",
-    "title": "test(deploy): verify artifact access with root MFA",
-    "description": "Released in 8c78e92."
+    "date": "2026-10-23",
+    "title": "fix(deps): update zod security patch",
+    "description": "Released in b72cea7."
   },
   {
-    "date": "2026-09-29",
-    "title": "refactor(deploy): reuse operational status response",
-    "description": "Released in 551c775."
+    "date": "2026-10-23",
+    "title": "fix(device): keep agent keys stable per device",
+    "description": "Released in 600c7b5."
   },
   {
-    "date": "2026-09-29",
-    "title": "test(deploy): validate smoke scripts before rollout",
-    "description": "Released in 44b6c86."
+    "date": "2026-10-23",
+    "title": "fix(appstore): install retrieval key in mobile SSH home",
+    "description": "Released in 922d2b0."
   }
 ] as const;

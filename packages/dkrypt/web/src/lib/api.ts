@@ -1731,7 +1731,6 @@ export interface OfflineAppStoreStatus {
   ready: boolean;
   downloaderAvailable: boolean;
   decryptorAvailable: boolean;
-  terminalAvailable: boolean;
   fairPlayAuthorized: boolean;
   vault: { encryptionReady: boolean; accountConfigured: boolean; credentialConfigured: boolean; authenticatedAt?: number; accountHint?: string; authenticationError?: string };
   blockers: string[];

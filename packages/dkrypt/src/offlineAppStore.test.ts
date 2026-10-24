@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createAppleAccountVault } from '#appleAccountVault.js';
 import { createAppleAccountRepository } from '#store/appleAccountRepository.js';
 import { openStateCollectionDatabase } from '#store/sqlite.js';
-import { buildAppStoreCommandEnvironment, createOfflineAppStoreProcessor, identifyAppStorePrompt, OfflineAppStoreUnavailableError, type OfflineAppStoreDependencies } from '#offlineAppStore.js';
+import { createOfflineAppStoreProcessor, OfflineAppStoreUnavailableError, type OfflineAppStoreDependencies } from '#offlineAppStore.js';
 import type { AppleAccountSecrets } from '#appleAccountVault.js';
 import type { Job } from '#jobs/types.js';
 
@@ -15,28 +15,10 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-test('App Store commands use an isolated Linux file keyring inside the encrypted session workspace', () => {
-  const environment = buildAppStoreCommandEnvironment('/tmp/dkrypt-session', 'linux');
-  expect(environment).toMatchObject({
-    HOME: '/tmp/dkrypt-session',
-    XDG_CONFIG_HOME: '/tmp/dkrypt-session/config',
-    XDG_STATE_HOME: '/tmp/dkrypt-session/state',
-    XDG_DATA_HOME: '/tmp/dkrypt-session/data',
-    DBUS_SESSION_BUS_ADDRESS: 'unix:path=/nonexistent',
-  });
-  expect(buildAppStoreCommandEnvironment('/tmp/dkrypt-session', 'darwin')).not.toHaveProperty('DBUS_SESSION_BUS_ADDRESS');
-});
-
-test('App Store prompt detection recognizes ipatool encrypted file-keychain unlock prompts', () => {
-  expect(identifyAppStorePrompt('enter passphrase to unlock /dev/shm/dkrypt-appstore-session-123/.ipatool (this is separate from your Apple ID password): ')).toBe('keychain passphrase');
-  expect(identifyAppStorePrompt('enter Apple ID (email address or phone number): ')).toBe('Apple Account');
-  expect(identifyAppStorePrompt('enter password: ')).toBe('password');
-});
-
 async function createDependencies(overrides: Partial<OfflineAppStoreDependencies> = {}): Promise<OfflineAppStoreDependencies> {
   const root = await mkdtemp(path.join(tmpdir(), 'dkrypt-offline-appstore-'));
   directories.push(root);
-  const executables = await Promise.all(['ipatool', 'fairplay-decrypt', 'script'].map(async (name) => {
+  const executables = await Promise.all(['dkrypt-appstore-downloader', 'fairplay-decrypt'].map(async (name) => {
     const executable = path.join(root, name);
     await writeFile(executable, '');
     await chmod(executable, 0o700);
@@ -45,7 +27,6 @@ async function createDependencies(overrides: Partial<OfflineAppStoreDependencies
   const secrets: AppleAccountSecrets = {
     appleId: 'test@example.test',
     password: 'account-password',
-    keychainPassphrase: 'local-passphrase',
     fairPlayCredential: Buffer.alloc(16, 4).toString('base64'),
   };
   return {
@@ -53,7 +34,6 @@ async function createDependencies(overrides: Partial<OfflineAppStoreDependencies
     fairPlayAuthorized: true,
     downloaderPath: executables[0]!,
     decryptorPath: executables[1]!,
-    terminalPath: executables[2]!,
     stagingDirectory: path.join(root, 'staging'),
     getSecrets: () => secrets,
     getVaultStatus: () => ({ encryptionReady: true, accountConfigured: true, credentialConfigured: true, authenticatedAt: 1 }),

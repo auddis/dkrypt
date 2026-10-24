@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { createCipheriv, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -68,6 +69,42 @@ test('Apple Account vault refuses a missing or wrong external key', () => {
     expect(() => wrongKey.readSessionSnapshot()).toThrow('unable to decrypt');
   } finally {
     wrongKey.close();
+  }
+});
+
+test('Apple Account vault migrates legacy keychain passphrases out of decrypted secrets', () => {
+  const stateDir = mkdtempSync(path.join(tmpdir(), 'dkrypt-apple-vault-legacy-'));
+  temporaryDirectories.push(stateDir);
+  const database = openStateCollectionDatabase({ stateDir, filename: 'state.sqlite' }, ['appstore_offline_account']);
+  const repository = createAppleAccountRepository(database);
+  const key = Buffer.alloc(32, 7);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  cipher.setAAD(Buffer.from('dkrypt:appstore-offline-account:v1'));
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify({
+      appleId: 'admin@icloud.com',
+      password: 'account-password',
+      keychainPassphrase: 'legacy-helper-passphrase',
+      fairPlayCredential: Buffer.alloc(16, 3).toString('base64'),
+    }), 'utf8'),
+    cipher.final(),
+  ]);
+  repository.write({
+    id: 'primary',
+    accountHint: 'a•••@icloud.com',
+    ciphertext: `${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${ciphertext.toString('base64url')}`,
+    updatedAt: 1,
+  });
+  const vault = createAppleAccountVault(repository, key.toString('base64url'));
+
+  try {
+    const secrets = vault.read();
+    expect(secrets).toMatchObject({ appleId: 'admin@icloud.com', password: 'account-password' });
+    expect(secrets).not.toHaveProperty('keychainPassphrase');
+    expect(vault.status().credentialConfigured).toBe(true);
+  } finally {
+    vault.close();
   }
 });
 

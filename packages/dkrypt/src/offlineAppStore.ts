@@ -21,6 +21,7 @@ import { createOfflineAppStoreAuthenticationRepository } from '#store/offlineApp
 import { openStateCollectionDatabase } from '#store/sqlite.js';
 import { scopedLogger } from '#logger.js';
 import { sanitizeAppStoreDownloadDiagnostic } from '#offlineAppStoreDiagnostic.js';
+import { runAppStoreDownloaderRequest } from '#offlineAppStoreDownloader.js';
 
 const log = scopedLogger('appstore-offline');
 
@@ -29,7 +30,6 @@ export interface OfflineAppStoreReadiness {
   ready: boolean;
   downloaderAvailable: boolean;
   decryptorAvailable: boolean;
-  terminalAvailable: boolean;
   fairPlayAuthorized: boolean;
   vault: AppleAccountVaultStatus;
   blockers: string[];
@@ -52,7 +52,6 @@ export interface OfflineAppStoreDependencies {
   fairPlayAuthorized: boolean;
   downloaderPath: string;
   decryptorPath: string;
-  terminalPath: string;
   stagingDirectory: string;
   getSecrets(): AppleAccountSecrets | undefined;
   getVaultStatus(): AppleAccountVaultStatus;
@@ -75,118 +74,10 @@ export class OfflineAppStoreAuthenticationError extends Error {
   }
 }
 
-type PromptResponder = (prompt: string) => Promise<string | undefined>;
-
-type AppStorePromptKey = 'Apple Account' | 'password' | '2FA code' | 'keychain passphrase';
-
-export function buildAppStoreCommandEnvironment(homeDirectory: string, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
-  return {
-    PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
-    HOME: homeDirectory,
-    XDG_CONFIG_HOME: path.join(homeDirectory, 'config'),
-    XDG_STATE_HOME: path.join(homeDirectory, 'state'),
-    XDG_DATA_HOME: path.join(homeDirectory, 'data'),
-    LANG: 'C.UTF-8',
-    ...(platform === 'linux' ? { DBUS_SESSION_BUS_ADDRESS: 'unix:path=/nonexistent' } : {}),
-  };
-}
-
-export function identifyAppStorePrompt(promptOutput: string): AppStorePromptKey | undefined {
-  const candidates: Array<{ key: AppStorePromptKey; pattern: RegExp }> = [
-    { key: 'Apple Account', pattern: /(?:enter (?:your )?)?(?:apple id(?:\s*\([^\r\n]*\))?|apple account)\s*:?\s*$/i },
-    { key: 'password', pattern: /(?:enter (?:your )?)?password\s*:?\s*$/i },
-    { key: '2FA code', pattern: /(?:enter (?:your )?)?(?:2fa|two.factor|verification) code\s*:?\s*$/i },
-    { key: 'keychain passphrase', pattern: /(?:keychain passphrase|passphrase to unlock [^\r\n]+\(this is separate from your apple id password\):?)\s*$/i },
-  ];
-  return candidates.find((candidate) => candidate.pattern.test(promptOutput.trimEnd()))?.key;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-function childWritable(child: ChildProcess): Writable {
-  if (!child.stdin) throw new Error('App Store helper input channel is unavailable');
-  return child.stdin;
-}
-
-function runTerminalCommand(
-  terminalPath: string,
-  commandPath: string,
-  args: string[],
-  homeDirectory: string,
-  signal: AbortSignal | undefined,
-  childStarted: (child: ChildProcess) => void,
-  respond: PromptResponder,
-): Promise<{ output: string; code: number | null }> {
-  const command = [commandPath, ...args].map(shellQuote).join(' ');
-  const terminalArgs = ['--quiet', '--return', '--echo=never', '--command', command, '/dev/null'];
-  const limited = commandWithResourceLimits(terminalPath, terminalArgs, config.appStoreOfflineWorkerMemoryMb, config.jobMaxWaitSeconds);
-  const child = spawn(limited.command, limited.args, {
-    cwd: homeDirectory,
-    env: buildAppStoreCommandEnvironment(homeDirectory),
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: process.platform !== 'win32',
-  });
-  childStarted(child);
-  const input = childWritable(child);
-  let outputTail = '';
-  let handling = Promise.resolve();
-  const responded = new Set<string>();
-  let closed = false;
-  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
-
-  const onOutput = (chunk: Buffer | string) => {
-    outputTail = `${outputTail}${chunk.toString()}`.slice(-8192);
-    handling = handling.then(async () => {
-      const promptOutput = outputTail.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replaceAll('\r', '');
-      const prompt = identifyAppStorePrompt(promptOutput);
-      if (!prompt || responded.has(prompt)) return;
-      responded.add(prompt);
-      const response = await respond(prompt);
-      if (response === undefined) {
-        terminateChildProcess(child, 'SIGTERM');
-        return;
-      }
-      if (closed) return;
-      input.write(`${response}\n`);
-    });
-  };
-
-  const abort = () => {
-    if (closed) return;
-    terminateChildProcess(child, 'SIGTERM');
-    forceKillTimer = setTimeout(() => {
-      if (!closed) terminateChildProcess(child, 'SIGKILL');
-    }, 5_000);
-    forceKillTimer.unref?.();
-  };
-  signal?.addEventListener('abort', abort, { once: true });
-  if (signal?.aborted) abort();
-  child.stdout?.on('data', onOutput);
-  child.stderr?.on('data', onOutput);
-
-  return new Promise((resolve, reject) => {
-    child.once('error', (error) => {
-      closed = true;
-      if (forceKillTimer) clearTimeout(forceKillTimer);
-      signal?.removeEventListener('abort', abort);
-      reject(error);
-    });
-    child.once('close', (code) => {
-      closed = true;
-      if (forceKillTimer) clearTimeout(forceKillTimer);
-      signal?.removeEventListener('abort', abort);
-      void handling.then(() => resolve({ output: outputTail, code }), reject);
-    });
-  });
-}
-
 function statusBlockers(input: {
   enabled: boolean;
   downloaderAvailable: boolean;
   decryptorAvailable: boolean;
-  terminalAvailable: boolean;
   fairPlayAuthorized: boolean;
   vault: AppleAccountVaultStatus;
 }): string[] {
@@ -195,7 +86,6 @@ function statusBlockers(input: {
   if (!input.fairPlayAuthorized) blockers.push('FairPlay decryptor use has not been approved');
   if (!input.downloaderAvailable) blockers.push('App Store downloader is missing');
   if (!input.decryptorAvailable) blockers.push('FairPlay decryptor is missing');
-  if (!input.terminalAvailable) blockers.push('secure prompt runner is missing');
   if (!input.vault.encryptionReady) blockers.push('external credential encryption key is not configured');
   if (input.vault.authenticationError === 'encryption_key_mismatch') blockers.push('stored account data cannot be decrypted with the configured key');
   if (!input.vault.accountConfigured) blockers.push('Apple Account credentials are not configured');
@@ -231,15 +121,13 @@ export function createOfflineAppStoreProcessor(dependencies: OfflineAppStoreDepe
     const vault = dependencies.getVaultStatus();
     const downloaderAvailable = isExecutable(dependencies.downloaderPath);
     const decryptorAvailable = isExecutable(dependencies.decryptorPath);
-    const terminalAvailable = isExecutable(dependencies.terminalPath);
-    const blockers = statusBlockers({ enabled: dependencies.enabled, fairPlayAuthorized: dependencies.fairPlayAuthorized, downloaderAvailable, decryptorAvailable, terminalAvailable, vault });
+    const blockers = statusBlockers({ enabled: dependencies.enabled, fairPlayAuthorized: dependencies.fairPlayAuthorized, downloaderAvailable, decryptorAvailable, vault });
     if (job?.testflight) blockers.push('TestFlight stays on the device workflow');
     return {
       enabled: dependencies.enabled,
       ready: blockers.length === 0 && !job?.testflight,
       downloaderAvailable,
       decryptorAvailable,
-      terminalAvailable,
       fairPlayAuthorized: dependencies.fairPlayAuthorized,
       vault,
       blockers,
@@ -344,8 +232,13 @@ function parseSessionSnapshot(snapshot: Buffer): SessionFileEntry[] {
 async function restoreSessionWorkspace(root: string): Promise<void> {
   const snapshot = readAppleAccountSessionSnapshot();
   if (!snapshot) return;
+  let hadLegacyProviderFiles = false;
   try {
     for (const entry of parseSessionSnapshot(snapshot)) {
+      if (entry.path === '.ipatool' || entry.path.startsWith('.ipatool/')) {
+        hadLegacyProviderFiles = true;
+        continue;
+      }
       const destination = path.resolve(root, ...entry.path.split('/'));
       if (destination !== root && !destination.startsWith(`${root}${path.sep}`)) throw new Error('stored App Store provider session path is invalid');
       const contents = Buffer.from(entry.data, 'base64');
@@ -356,6 +249,10 @@ async function restoreSessionWorkspace(root: string): Promise<void> {
     }
   } finally {
     snapshot.fill(0);
+  }
+  if (hadLegacyProviderFiles) {
+    clearAppleAccountSessionSnapshot();
+    markAppleAccountAuthenticationError('provider_migration_required');
   }
 }
 
@@ -426,53 +323,43 @@ async function withSessionWorkspace<T>(operation: (homeDirectory: string) => Pro
 }
 
 async function runDefaultDownload(job: Job, secrets: AppleAccountSecrets, outputPath: string, signal?: AbortSignal): Promise<void> {
-  const args = ['--format', 'json', 'download', '--bundle-identifier', job.bundleId, '--output', outputPath];
-  if (job.externalVersionId) args.push('--external-version-id', job.externalVersionId);
-  let requestedCredentials = false;
-  const result = await withSessionWorkspace((homeDirectory) => runTerminalCommand(
-      config.appStoreOfflineTerminalBin,
-      config.appStoreOfflineDownloaderBin,
-      args,
-      homeDirectory,
-      signal,
-      (child) => { job.childProcess = child; },
-      async (prompt) => {
-        if (/2fa code|verification code/i.test(prompt)) return undefined;
-        if (/keychain passphrase/i.test(prompt)) {
-          requestedCredentials = true;
-          return secrets.keychainPassphrase;
-        }
-        if (/password/i.test(prompt)) {
-          requestedCredentials = true;
-          return secrets.password;
-        }
-        if (/apple id|apple account/i.test(prompt)) {
-          requestedCredentials = true;
-          return secrets.appleId;
-        }
-        return undefined;
-      },
-    ), signal).finally(() => { job.childProcess = undefined; });
-  if (result.code !== 0) {
+  const result = await withSessionWorkspace((homeDirectory) => runAppStoreDownloaderRequest({
+    commandPath: config.appStoreOfflineDownloaderBin,
+    homeDirectory,
+    cacheDirectory: path.join(config.stateDir, 'appstore-offline-cache'),
+    memoryMb: config.appStoreOfflineWorkerMemoryMb,
+    cpuSeconds: config.jobMaxWaitSeconds,
+    request: {
+      operation: 'download',
+      apple_id: secrets.appleId,
+      password: secrets.password,
+      bundle_id: job.bundleId,
+      external_version_id: job.externalVersionId,
+      output_path: outputPath,
+      max_bytes: config.artifactMaxBytes,
+    },
+    signal,
+    childStarted: (child) => { job.childProcess = child; },
+  }), signal).finally(() => { job.childProcess = undefined; });
+  if (!result.response.ok) {
     log.warn('server-side App Store download failed', {
       jobId: job.id,
       bundleId: job.bundleId,
-      exitCode: result.code,
-      diagnostic: sanitizeAppStoreDownloadDiagnostic(result.output, secrets),
+      code: result.response.code,
+      diagnostic: sanitizeAppStoreDownloadDiagnostic(result.diagnostic, secrets),
     });
-    const twoFactorRequired = /2fa code|verification code|two-factor/i.test(result.output);
-    if (twoFactorRequired) {
+    if (result.response.code === 'two_factor_required') {
       clearAppleAccountSessionSnapshot();
       markAppleAccountAuthenticationError('two_factor_required');
       throw new OfflineAppStoreAuthenticationError('two_factor_required');
     }
-    if (/incorrect password|authentication failed|session expired|not authenticated/i.test(result.output)) {
+    if (result.response.code === 'authentication_required' || result.response.code === 'account_mismatch' || result.response.code === 'session_invalid') {
       clearAppleAccountSessionSnapshot();
       markAppleAccountAuthenticationError('authentication_failed');
     }
     throw new Error('App Store download failed');
   }
-  if (requestedCredentials) markAppleAccountAuthenticated();
+  markAppleAccountAuthenticated();
 }
 
 async function runDefaultDecrypt(job: Job, secrets: AppleAccountSecrets, inputPath: string, outputPath: string, signal?: AbortSignal): Promise<void> {
@@ -527,30 +414,35 @@ export async function authenticateAppleAccount(authCode?: string, signal?: Abort
   if (authCode !== undefined && !/^\d{6}$/.test(authCode)) throw new Error('enter the six-digit Apple verification code');
   const secrets = readAppleAccountSecrets();
   if (!secrets) throw new OfflineAppStoreUnavailableError('Apple Account credentials are not configured');
-  const args = ['--format', 'json', 'auth', 'login'];
-  let usedAuthCode = false;
-  const result = await withSessionWorkspace((homeDirectory) => runTerminalCommand(
-      config.appStoreOfflineTerminalBin,
-      config.appStoreOfflineDownloaderBin,
-      args,
+  const result = await withSessionWorkspace(async (homeDirectory) => {
+    const login = await runAppStoreDownloaderRequest({
+      commandPath: config.appStoreOfflineDownloaderBin,
       homeDirectory,
-      signal,
-      () => {},
-      async (prompt) => {
-        if (/2fa code|verification code/i.test(prompt)) {
-          if (!authCode || usedAuthCode) return undefined;
-          usedAuthCode = true;
-          return authCode;
-        }
-        if (/keychain passphrase/i.test(prompt)) return secrets.keychainPassphrase;
-        if (/password/i.test(prompt)) return secrets.password;
-        if (/apple id|apple account/i.test(prompt)) return secrets.appleId;
-        return undefined;
+      cacheDirectory: path.join(config.stateDir, 'appstore-offline-cache'),
+      memoryMb: config.appStoreOfflineWorkerMemoryMb,
+      cpuSeconds: config.appStoreOfflineAuthenticationTimeoutSeconds,
+      request: {
+        operation: 'authenticate',
+        apple_id: secrets.appleId,
+        password: secrets.password,
+        verification_code: authCode,
       },
-    ), signal);
-  if (result.code !== 0) {
-    const twoFactorRequired = /2fa code|verification code|two-factor/i.test(result.output) && !usedAuthCode;
-    const code = twoFactorRequired ? 'two_factor_required' : 'authentication_failed';
+      signal,
+    });
+    if (!login.response.ok) return login;
+    const status = await runAppStoreDownloaderRequest({
+      commandPath: config.appStoreOfflineDownloaderBin,
+      homeDirectory,
+      cacheDirectory: path.join(config.stateDir, 'appstore-offline-cache'),
+      memoryMb: config.appStoreOfflineWorkerMemoryMb,
+      cpuSeconds: config.appStoreOfflineAuthenticationTimeoutSeconds,
+      request: { operation: 'status' },
+      signal,
+    });
+    return status.response.authenticated ? status : { ...status, response: { ok: false, code: 'authentication_failed' } };
+  }, signal);
+  if (!result.response.ok) {
+    const code = result.response.code === 'two_factor_required' ? 'two_factor_required' : 'authentication_failed';
     clearAppleAccountSessionSnapshot();
     markAppleAccountAuthenticationError(code);
     throw new OfflineAppStoreAuthenticationError(code);
@@ -581,7 +473,6 @@ export const offlineAppStoreProcessor = createOfflineAppStoreProcessor({
   fairPlayAuthorized: config.appStoreOfflineFairPlayAuthorized,
   downloaderPath: config.appStoreOfflineDownloaderBin,
   decryptorPath: config.appStoreOfflineDecryptorBin,
-  terminalPath: config.appStoreOfflineTerminalBin,
   stagingDirectory: defaultStagingDirectory,
   getSecrets: readAppleAccountSecrets,
   getVaultStatus: getAppleAccountVaultStatus,

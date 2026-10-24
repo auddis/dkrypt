@@ -20,7 +20,6 @@ test('App Store download diagnostics preserve provider errors and redact account
   const diagnostic = sanitizeAppStoreDownloadDiagnostic(output, {
     appleId: 'owner@example.test',
     password: 'apple-password',
-    keychainPassphrase: 'keychain-passphrase',
     fairPlayCredential: credential.toString('base64'),
   });
 

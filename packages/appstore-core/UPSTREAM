@@ -1,0 +1,5 @@
+Source: https://github.com/Kosthi/ipatool-rs
+Revision: 06a0ae46e0b7600fcbd8a904a87b38eb9c74562f
+License: MIT, see LICENSE
+Local package: dkrypt-appstore-core
+Changes: Removed CLI-only credential storage and purchase, search, and version operations. Retained the authentication, lookup, download metadata, FairPlay package patching, SAP, and machine-support code used by dkrypt.

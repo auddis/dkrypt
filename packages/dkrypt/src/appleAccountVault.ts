@@ -6,7 +6,6 @@ import { openStateCollectionDatabase } from '#store/sqlite.js';
 export interface AppleAccountSecrets {
   appleId: string;
   password: string;
-  keychainPassphrase: string;
   fairPlayCredential?: string;
 }
 
@@ -75,10 +74,14 @@ export function createAppleAccountVault(repository: AppleAccountRepository, keyV
         decipher.final(),
       ]);
       const parsed = JSON.parse(plaintext.toString('utf8')) as AppleAccountSecrets;
-      if (typeof parsed.appleId !== 'string' || typeof parsed.password !== 'string' || typeof parsed.keychainPassphrase !== 'string') {
+      if (typeof parsed.appleId !== 'string' || typeof parsed.password !== 'string') {
         throw new Error('decrypted App Store account record is malformed');
       }
-      return parsed;
+      return {
+        appleId: parsed.appleId,
+        password: parsed.password,
+        fairPlayCredential: typeof parsed.fairPlayCredential === 'string' ? parsed.fairPlayCredential : undefined,
+      };
     } catch {
       throw new Error('unable to decrypt stored App Store account data');
     }
@@ -176,7 +179,6 @@ export function createAppleAccountVault(repository: AppleAccountRepository, keyV
       writeSecrets({
         appleId,
         password,
-        keychainPassphrase: sameAccount ? current.secrets.keychainPassphrase : randomBytes(32).toString('base64url'),
         fairPlayCredential: sameAccount ? current.secrets.fairPlayCredential : undefined,
       }, {
         accountHint: accountHint(appleId),

@@ -5,6 +5,7 @@ packages/dkrypt/public/
 packages/dkrypt/web/node_modules/
 packages/dkrypt/web/dist/
 packages/device-bridge/target/
+**/target/
 data/
 .DS_Store
 .moon/cache/

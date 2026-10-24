@@ -34,19 +34,15 @@ RUN set -eu; \
   tar --extract --file /tmp/netmuxd.tar.gz --directory /usr/local/bin; \
   chmod 0755 /usr/local/bin/netmuxd
 
-FROM golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS appstore-downloader
-ARG IPTATOOL_VERSION=2.6.0
-WORKDIR /src/ipatool
-RUN set -eu; \
-  go mod download "github.com/majd/ipatool/v2@v${IPTATOOL_VERSION}"; \
-  source="$(go env GOMODCACHE)/github.com/majd/ipatool/v2@v${IPTATOOL_VERSION}"; \
-  cp -R "${source}"/. /src/ipatool/; \
-  chmod -R u+w /src/ipatool; \
-  go mod edit -require=github.com/klauspost/compress@v1.18.7 -require=golang.org/x/net@v0.60.0; \
-  go mod tidy; \
-  go generate ./...; \
-  go test ./... -skip '^TestSignerIntegration$'; \
-  go build -trimpath -ldflags "-X github.com/majd/ipatool/v2/cmd.version=v${IPTATOOL_VERSION}" -o /usr/local/bin/ipatool .
+FROM rust:1.99.0-bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6 AS appstore-downloader
+WORKDIR /src
+COPY packages/appstore-core/Cargo.toml packages/appstore-core/LICENSE packages/appstore-core/UPSTREAM ./packages/appstore-core/
+COPY packages/appstore-core/src ./packages/appstore-core/src
+COPY packages/appstore-downloader/Cargo.toml packages/appstore-downloader/Cargo.lock ./packages/appstore-downloader/
+COPY packages/appstore-downloader/src ./packages/appstore-downloader/src
+COPY packages/appstore-downloader/tests ./packages/appstore-downloader/tests
+WORKDIR /src/packages/appstore-downloader
+RUN cargo test --locked && cargo build --release --locked
 
 FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8 AS fairplay-decrypt
 ARG FAIRPLAY_DECRYPT_REV=1bad106ee1698c6d9c483f67d898183ffa4c6eb3
@@ -86,7 +82,7 @@ RUN groupadd --system --gid 10001 dkrypt && useradd --system --uid 10001 --gid 1
 COPY --from=ipadecrypt /go/bin/ipadecrypt /usr/local/bin/ipadecrypt
 COPY --from=device-bridge /bridge/target/release/dkrypt-device-bridge /usr/local/bin/dkrypt-device-bridge
 COPY --from=netmuxd /usr/local/bin/netmuxd /usr/local/bin/netmuxd
-COPY --from=appstore-downloader /usr/local/bin/ipatool /usr/local/bin/ipatool
+COPY --from=appstore-downloader /src/packages/appstore-downloader/target/release/dkrypt-appstore-downloader /usr/local/bin/dkrypt-appstore-downloader
 COPY --from=fairplay-decrypt /opt/fairplay-decrypt /opt/fairplay-decrypt
 COPY packages/dkrypt/package.json packages/dkrypt/bun.lock packages/dkrypt/tsconfig.json ./
 RUN bun install --production --frozen-lockfile
