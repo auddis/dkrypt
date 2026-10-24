@@ -22,6 +22,7 @@ function createRepository() {
 test('Apple Account verification runs in the background and supports a one-time code without persisting it', async () => {
   const { database, repository } = createRepository();
   const submittedCodes: Array<string | undefined> = [];
+  let statusChangeCount = 0;
   const operation = createAppleAccountAuthenticationOperation({
     authenticate: async (code) => {
       submittedCodes.push(code);
@@ -29,6 +30,7 @@ test('Apple Account verification runs in the background and supports a one-time 
     },
     repository,
     timeoutMs: 1000,
+    onStatusChanged: () => { statusChangeCount += 1; },
   });
 
   try {
@@ -41,6 +43,7 @@ test('Apple Account verification runs in the background and supports a one-time 
 
     expect(operation.status()).toMatchObject({ state: 'succeeded' });
     expect(submittedCodes).toEqual([undefined, '123456']);
+    expect(statusChangeCount).toBe(4);
     const stored = database.query('SELECT payload FROM appstore_offline_authentication_operations').get() as { payload: string };
     expect(stored.payload).not.toContain('123456');
   } finally {

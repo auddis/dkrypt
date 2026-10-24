@@ -24,6 +24,7 @@ import { sanitizeAppStoreDownloadDiagnostic } from '#offlineAppStoreDiagnostic.j
 import { runAppStoreDownloaderRequest } from '#offlineAppStoreDownloader.js';
 
 const log = scopedLogger('appstore-offline');
+let offlineAppStoreDispatchNotifier = () => {};
 
 export interface OfflineAppStoreReadiness {
   enabled: boolean;
@@ -486,11 +487,16 @@ const appleAccountAuthenticationOperation = createAppleAccountAuthenticationOper
     busyTimeoutMs: config.stateDbBusyTimeoutMs,
   }, ['appstore_offline_authentication_operations'])),
   timeoutMs: config.appStoreOfflineAuthenticationTimeoutSeconds * 1000,
+  onStatusChanged: () => offlineAppStoreDispatchNotifier(),
 });
 
 export const getAppleAccountAuthenticationStatus = appleAccountAuthenticationOperation.status;
 export const startAppleAccountAuthentication = appleAccountAuthenticationOperation.start;
 export const resetAppleAccountAuthentication = appleAccountAuthenticationOperation.reset;
+
+export function setOfflineAppStoreDispatchNotifier(notifier: () => void): void {
+  offlineAppStoreDispatchNotifier = notifier;
+}
 
 export function getOfflineAppStoreReadiness(job?: Pick<Job, 'testflight'>): OfflineAppStoreReadiness {
   return defaultProcessor.readiness(job);

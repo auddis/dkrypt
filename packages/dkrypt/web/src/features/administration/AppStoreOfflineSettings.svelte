@@ -121,7 +121,7 @@
       );
       verificationCode = '';
       notice = status.authentication?.state === 'verification_required'
-        ? 'Check the trusted iPad for Apple’s six-digit code, then enter it here.'
+        ? 'Apple rejected sign-in. Confirm the saved password and check the iPad; enter a code only if Apple shows one.'
         : 'Apple Account verification started. It may take a few minutes; this page will update automatically.';
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Apple Account authentication failed.';
@@ -188,7 +188,7 @@
     {/if}
     {#if status.authentication && status.authentication.state !== 'idle'}
       <div class="mt-3 rounded-lg border border-border/70 bg-muted/20 p-3 text-sm" role={['failed', 'interrupted'].includes(status.authentication.state) ? 'alert' : 'status'}>
-        <div class="font-medium">{status.authentication.state === 'running' ? 'Verifying Apple Account' : status.authentication.state === 'verification_required' ? 'Apple verification code required' : status.authentication.state === 'succeeded' ? 'Apple Account verified' : status.authentication.state === 'interrupted' ? 'Apple verification interrupted' : 'Apple Account verification failed'}</div>
+        <div class="font-medium">{status.authentication.state === 'running' ? 'Verifying Apple Account' : status.authentication.state === 'verification_required' ? 'Apple sign-in needs attention' : status.authentication.state === 'succeeded' ? 'Apple Account verified' : status.authentication.state === 'interrupted' ? 'Apple verification interrupted' : 'Apple Account verification failed'}</div>
         {#if status.authentication.state === 'running' && status.authentication.startedAt}<p class="mt-1 text-xs text-muted">Started {new Date(status.authentication.startedAt).toLocaleTimeString()}. Apple sign-in can take a few minutes; this status updates automatically.</p>{/if}
         {#if status.authentication.error}<p class="mt-1 text-xs text-muted">{status.authentication.error}</p>{/if}
       </div>
@@ -208,9 +208,9 @@
       <Button type="submit" size="sm" loading={savingAccount} disabled={!appleId || !password}>Save account</Button>
       {#if status?.vault.accountConfigured}
         <div class="space-y-2 rounded-lg border border-border/70 p-3">
-          <p class="text-xs text-muted">Re-authentication may ask for a code sent to the trusted iPad. Approval is not automatic; dkrypt cannot reliably match Apple’s prompt to a specific request.</p>
-          {#if status.authentication?.state === 'verification_required'}<div class="space-y-1.5"><Label for="offline-apple-code">Six-digit verification code</Label><Input id="offline-apple-code" inputmode="numeric" autocomplete="one-time-code" bind:value={verificationCode} pattern="[0-9]{6}" maxlength={6} /></div>{/if}
-          <Button size="sm" variant="secondary" loading={authenticating || status.authentication?.state === 'running'} disabled={status.authentication?.state === 'running' || status.authentication?.state === 'verification_required' && verificationCode.length !== 6} onclick={() => void authenticate()}>{status.authentication?.state === 'verification_required' ? 'Verify code' : 'Verify Apple Account'}</Button>
+          <p class="text-xs text-muted">Apple may reject sign-in because the password is incorrect or because it needs a verification code. Check the iPad and enter a code only if Apple shows a prompt.</p>
+          {#if status.authentication?.state === 'verification_required'}<div class="space-y-1.5"><Label for="offline-apple-code">Six-digit verification code, if requested</Label><Input id="offline-apple-code" inputmode="numeric" autocomplete="one-time-code" bind:value={verificationCode} pattern="[0-9]{6}" maxlength={6} /></div>{/if}
+          <Button size="sm" variant="secondary" loading={authenticating || status.authentication?.state === 'running'} disabled={status.authentication?.state === 'running' || status.authentication?.state === 'verification_required' && verificationCode.length !== 6} onclick={() => void authenticate()}>{status.authentication?.state === 'verification_required' ? 'Submit code' : 'Verify Apple Account'}</Button>
         </div>
       {/if}
     </form>

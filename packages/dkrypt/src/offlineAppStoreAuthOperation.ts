@@ -17,11 +17,12 @@ export interface AppleAccountAuthenticationDependencies {
   repository: OfflineAppStoreAuthenticationRepository;
   timeoutMs: number;
   now?: () => number;
+  onStatusChanged?: () => void;
 }
 
 const AUTHENTICATION_TIMEOUT_MESSAGE = 'Apple Account verification timed out. Check Apple Account status before trying again.';
-const APPLE_TWO_FACTOR_REQUIRED = 'Apple requires a six-digit verification code. Check the trusted device.';
-const APPLE_VERIFICATION_CODE_REJECTED = 'Apple did not accept that verification code. Request a fresh code and try again.';
+const APPLE_TWO_FACTOR_REQUIRED = 'Apple rejected sign-in. The password may be incorrect, or Apple may require a verification code. Confirm the saved password and check the trusted iPad; submit a code only if Apple shows one.';
+const APPLE_VERIFICATION_CODE_REJECTED = 'Apple rejected sign-in with that code. Confirm the saved password and request a fresh code only if Apple is showing a verification prompt.';
 const APPLE_AUTHENTICATION_FAILED = 'Apple Account authentication failed. Confirm the saved credentials and try again.';
 const APPLE_AUTHENTICATION_INTERRUPTED = 'The server restarted during Apple Account verification. Start again.';
 const APPLE_AUTHENTICATION_FAILURE_MESSAGES: Record<string, string> = {
@@ -67,6 +68,7 @@ export function createAppleAccountAuthenticationOperation(dependencies: AppleAcc
   function persist(status: AppleAccountAuthenticationStatus): void {
     current = status;
     dependencies.repository.write(status);
+    dependencies.onStatusChanged?.();
   }
 
   function start(verificationCode?: string): AppleAccountAuthenticationStatus {

@@ -30,7 +30,7 @@ import { runWithJobDeadline } from '#jobs/deadline.js';
 import { SCHEDULER_JOB_TIMEOUT_MS } from '#jobs/timeouts.js';
 import { delayWithSignal } from '#util/abort.js';
 import { getJobDeviceBlocker, minimumOsVersionForBuild } from '#jobs/deviceDispatch.js';
-import { offlineAppStoreProcessor } from '#offlineAppStore.js';
+import { offlineAppStoreProcessor, setOfflineAppStoreDispatchNotifier } from '#offlineAppStore.js';
 
 const jobs = new Map<string, Job>();
 
@@ -658,6 +658,16 @@ export function getJobQueueSummaries(sourceJobs: readonly Job[], now = Date.now(
 
 function getCurrentQueueReason(job: Job): string | undefined {
   if (job.status !== 'queued') return undefined;
+  const concurrencyBlocker = getJobConcurrencyBlocker(job);
+  if (concurrencyBlocker) return concurrencyBlocker;
+  if (requiresServerSideAppStoreAttempt(job)) {
+    const readiness = offlineAppStoreProcessor.readiness(job);
+    if (!readiness.ready) {
+      const blockers = readiness.blockers?.join(' · ');
+      return blockers ? `Waiting for server-side App Store processing · ${blockers}` : 'Waiting for server-side App Store processing';
+    }
+    return busyOfflineWorkers.size >= config.appStoreOfflineMaxWorkers ? 'Waiting for a server-side App Store worker' : undefined;
+  }
   const enabledDevices = getEffectiveDevices().filter((device) => device.enabled && !device.draining);
   if (enabledDevices.length === 0) {
     if (canStartOfflineAttempt(job)) return busyOfflineWorkers.size >= config.appStoreOfflineMaxWorkers ? 'Waiting for a server-side App Store worker' : undefined;
@@ -675,9 +685,6 @@ function getCurrentQueueReason(job: Job): string | undefined {
     const reasons = [...new Set(blockers.filter((reason): reason is string => Boolean(reason)))];
     return reasons.length > 0 ? `Waiting for a compatible device · ${reasons.join(' · ')}` : 'Waiting for a compatible device';
   }
-
-  const concurrencyBlocker = getJobConcurrencyBlocker(job);
-  if (concurrencyBlocker) return concurrencyBlocker;
 
   const available = eligible.filter((device) => !busyDeviceIds.has(device.id));
   if (available.length === 0) {
@@ -876,22 +883,28 @@ function jobDeviceBlocker(job: Job, device: DeviceRecord): string | undefined {
 }
 
 export function isJobDispatchable(job: Job, device: DeviceRecord): boolean {
-  return !jobDeviceBlocker(job, device);
+  return !requiresServerSideAppStoreAttempt(job) && !jobDeviceBlocker(job, device);
 }
 
 export function getJobEligibleDeviceCount(job: Job): number {
+  if (requiresServerSideAppStoreAttempt(job)) return canStartOfflineAttempt(job) ? config.appStoreOfflineMaxWorkers : 0;
   const deviceCount = getEffectiveDevices().filter((device) => device.enabled && !device.draining && isJobDispatchable(job, device)).length;
   return deviceCount + (canStartOfflineAttempt(job) ? config.appStoreOfflineMaxWorkers : 0);
 }
 
 function getJobDispatchableDeviceCount(job: Job): number {
   if (getJobConcurrencyBlocker(job)) return 0;
+  if (requiresServerSideAppStoreAttempt(job)) return offlineWorkerSlots(job);
   const deviceCount = getEffectiveDevices().filter((device) => device.enabled && !device.draining && !busyDeviceIds.has(device.id) && isJobDispatchable(job, device)).length;
   return deviceCount + offlineWorkerSlots(job);
 }
 
+function requiresServerSideAppStoreAttempt(job: Job): boolean {
+  return !job.testflight && !job.offlineAttemptedAt && offlineAppStoreProcessor.readiness(job).enabled;
+}
+
 function canStartOfflineAttempt(job: Job): boolean {
-  return !job.testflight && !job.offlineAttemptedAt && offlineAppStoreProcessor.readiness(job).ready;
+  return requiresServerSideAppStoreAttempt(job) && offlineAppStoreProcessor.readiness(job).ready;
 }
 
 function offlineWorkerSlots(job: Job): number {
@@ -902,6 +915,8 @@ function offlineWorkerSlots(job: Job): number {
 export function notifyDeviceDispatchStateChanged(): void {
   pumpWorkers();
 }
+
+setOfflineAppStoreDispatchNotifier(notifyDeviceDispatchStateChanged);
 
 function deviceScore(device: DeviceRecord, primary: DeviceRecord): number {
   const cachedHealth = getCachedDeviceHealth(device.id);
