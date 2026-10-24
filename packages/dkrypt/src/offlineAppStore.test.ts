@@ -1,11 +1,11 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createAppleAccountVault } from '#appleAccountVault.js';
 import { createAppleAccountRepository } from '#store/appleAccountRepository.js';
 import { openStateCollectionDatabase } from '#store/sqlite.js';
-import { createOfflineAppStoreProcessor, OfflineAppStoreUnavailableError, type OfflineAppStoreDependencies } from '#offlineAppStore.js';
+import { createOfflineAppStoreProcessor, OfflineAppStoreUnavailableError, withTemporaryCredentialFile, type OfflineAppStoreDependencies } from '#offlineAppStore.js';
 import type { AppleAccountSecrets } from '#appleAccountVault.js';
 import type { Job } from '#jobs/types.js';
 
@@ -161,4 +161,29 @@ test('offline decryption receives the account credential only from the encrypted
   } finally {
     vault.close();
   }
+});
+
+test('FairPlay credential handoff uses a private regular file and removes it after success or failure', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'dkrypt-fairplay-memory-'));
+  directories.push(root);
+  const credential = Buffer.alloc(16, 23);
+  let credentialPath = '';
+
+  await withTemporaryCredentialFile(credential, async (filePath) => {
+    credentialPath = filePath;
+    const fileInfo = await stat(filePath);
+    const directoryInfo = await stat(path.dirname(filePath));
+    expect(fileInfo.isFile()).toBe(true);
+    expect(fileInfo.mode & 0o777).toBe(0o600);
+    expect(directoryInfo.mode & 0o777).toBe(0o700);
+    expect(Buffer.from(await Bun.file(filePath).arrayBuffer())).toEqual(credential);
+    return true;
+  }, root);
+
+  expect(await Bun.file(credentialPath).exists()).toBe(false);
+  await expect(withTemporaryCredentialFile(credential, async (filePath) => {
+    credentialPath = filePath;
+    throw new Error('decrypt failed');
+  }, root)).rejects.toThrow('decrypt failed');
+  expect(await Bun.file(credentialPath).exists()).toBe(false);
 });

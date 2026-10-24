@@ -1,10 +1,9 @@
 import { spawn } from 'node:child_process';
 import { accessSync, constants, existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, open, readdir, readFile, rm, stat, writeFile, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import type { Writable } from 'node:stream';
 import { config } from '#config.js';
 import { createAppleAccountAuthenticationOperation } from '#offlineAppStoreAuthOperation.js';
 import { clearAppleAccountSessionSnapshot, markAppleAccountAuthenticated, markAppleAccountAuthenticationError, readAppleAccountSecrets, readAppleAccountSessionSnapshot, saveAppleAccountSessionSnapshot, getAppleAccountVaultStatus } from '#appleAccountVault.js';
@@ -390,49 +389,74 @@ async function runDefaultDownload(job: Job, secrets: AppleAccountSecrets, output
 
 async function runDefaultDecrypt(job: Job, secrets: AppleAccountSecrets, inputPath: string, outputPath: string, signal?: AbortSignal): Promise<void> {
   const credential = Buffer.from(secrets.fairPlayCredential ?? '', 'base64');
-  if (credential.length !== 16) throw new Error('stored FairPlay credential is invalid');
-  const decryptArgs = [inputPath, outputPath, '--credential', '/proc/self/fd/3'];
-  const limited = commandWithResourceLimits(config.appStoreOfflineDecryptorBin, decryptArgs, config.appStoreOfflineWorkerMemoryMb, config.jobMaxWaitSeconds);
-  const child = spawn(limited.command, limited.args, {
-    env: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' },
-    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
-    detached: process.platform !== 'win32',
-  });
-  job.childProcess = child;
-  const credentialPipe = child.stdio[3] as Writable | null;
-  if (!credentialPipe) {
+  if (credential.length !== 16) {
     credential.fill(0);
-    terminateChildProcess(child, 'SIGTERM');
-    job.childProcess = undefined;
-    throw new Error('FairPlay credential channel is unavailable');
+    throw new Error('stored FairPlay credential is invalid');
   }
-  const credentialForPipe = Buffer.from(credential);
-  credential.fill(0);
-  credentialPipe.end(credentialForPipe, () => credentialForPipe.fill(0));
-  const abort = () => terminateChildProcess(child, 'SIGTERM');
-  signal?.addEventListener('abort', abort, { once: true });
-  if (signal?.aborted) abort();
-  child.stdout?.resume();
-  child.stderr?.resume();
   try {
-    await new Promise<void>((resolve, reject) => {
-      child.once('error', reject);
-      child.once('close', (code) => {
-        signal?.removeEventListener('abort', abort);
-        if (signal?.aborted) {
-          reject(signal.reason instanceof Error ? signal.reason : new Error('offline decryption was cancelled'));
-          return;
-        }
-        if (code !== 0) {
-          reject(new Error('FairPlay decryption failed'));
-          return;
-        }
-        resolve();
+    await withTemporaryCredentialFile(credential, async (credentialPath) => {
+      const decryptArgs = [inputPath, outputPath, '--credential', credentialPath];
+      const limited = commandWithResourceLimits(config.appStoreOfflineDecryptorBin, decryptArgs, config.appStoreOfflineWorkerMemoryMb, config.jobMaxWaitSeconds);
+      const child = spawn(limited.command, limited.args, {
+        env: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' },
+        stdio: ['ignore', 'ignore', 'ignore'],
+        detached: process.platform !== 'win32',
       });
+      job.childProcess = child;
+      const abort = () => terminateChildProcess(child, 'SIGTERM');
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          child.once('error', reject);
+          child.once('close', (code) => {
+            signal?.removeEventListener('abort', abort);
+            if (signal?.aborted) {
+              reject(signal.reason instanceof Error ? signal.reason : new Error('offline decryption was cancelled'));
+              return;
+            }
+            if (code !== 0) {
+              reject(new Error('FairPlay decryption failed'));
+              return;
+            }
+            resolve();
+          });
+        });
+      } finally {
+        signal?.removeEventListener('abort', abort);
+        if (job.childProcess === child) job.childProcess = undefined;
+      }
     });
   } finally {
-    signal?.removeEventListener('abort', abort);
-    if (job.childProcess === child) job.childProcess = undefined;
+    credential.fill(0);
+  }
+}
+
+export async function withTemporaryCredentialFile<T>(credential: Buffer, action: (credentialPath: string) => Promise<T>, memoryDirectory = '/dev/shm'): Promise<T> {
+  const directory = await mkdtemp(path.join(memoryDirectory, 'dkrypt-fairplay-'));
+  const credentialPath = path.join(directory, 'credential.bin');
+  let file: FileHandle | undefined;
+  try {
+    await chmod(directory, 0o700);
+    file = await open(credentialPath, 'wx', 0o600);
+    await file.writeFile(credential);
+    await file.sync();
+    await file.close();
+    file = undefined;
+    return await action(credentialPath);
+  } finally {
+    await file?.close().catch(() => {});
+    try {
+      const existing = await open(credentialPath, 'r+');
+      try {
+        const info = await existing.stat();
+        await existing.write(Buffer.alloc(info.size), 0, info.size, 0);
+        await existing.sync();
+      } finally {
+        await existing.close();
+      }
+    } catch {}
+    await rm(directory, { recursive: true, force: true });
   }
 }
 
