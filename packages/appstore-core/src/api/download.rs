@@ -50,11 +50,12 @@ const MAX_DOWNLOAD_ATTEMPTS: u32 = 3;
 pub async fn get_download_info(
     client: &AppleClient,
     app_id: i64,
+    bundle_id: &str,
     account: &Account,
     external_version_id: Option<&str>,
 ) -> Result<DownloadItem, ClientError> {
     for attempt in 0..MAX_DOWNLOAD_ATTEMPTS {
-        match try_get_download_info(client, app_id, account, external_version_id).await {
+        match try_get_download_info(client, app_id, bundle_id, account, external_version_id).await {
             Err(ClientError::Store(StoreError::TemporarilyUnavailable))
                 if attempt + 1 < MAX_DOWNLOAD_ATTEMPTS =>
             {
@@ -74,21 +75,39 @@ pub async fn get_download_info(
 async fn try_get_download_info(
     client: &AppleClient,
     app_id: i64,
+    bundle_id: &str,
     account: &Account,
     external_version_id: Option<&str>,
 ) -> Result<DownloadItem, ClientError> {
     let url = download_url(account, client.guid());
-    let body_bytes = download_info_request_body(app_id, client.guid(), external_version_id)?;
-    let mut dict = post_download_info(client, account, &url, &body_bytes).await?;
-    if is_empty_successful_download(&dict) {
-        dict = retry_update_product(client, account, &body_bytes).await?;
+    let body_bytes = download_info_request_body(
+        app_id,
+        client.guid(),
+        external_version_id,
+        DownloadVersionKey::ExternalVersionId,
+    )?;
+    let (status, mut dict) = post_download_info(client, account, &url, &body_bytes).await?;
+    if status != reqwest::StatusCode::OK && StoreError::from_plist_dict(&dict).is_none() {
+        return Err(ClientError::UnexpectedResponse(
+            "download_info_http_failed".into(),
+        ));
+    }
+    if needs_download_dispatch_retry(status, &dict) {
+        dict = retry_download_dispatch(client, account, app_id, bundle_id, external_version_id)
+            .await?;
     }
     download_item_from_response_dict(&dict)
+}
+#[derive(Clone, Copy)]
+enum DownloadVersionKey {
+    ExternalVersionId,
+    AppExtVrsId,
 }
 fn download_info_request_body(
     app_id: i64,
     guid: &str,
     external_version_id: Option<&str>,
+    version_key: DownloadVersionKey,
 ) -> Result<Vec<u8>, ClientError> {
     let mut body = plist::Dictionary::new();
     body.insert("salableAdamId".into(), plist::Value::Integer(app_id.into()));
@@ -97,7 +116,11 @@ fn download_info_request_body(
     body.insert("serialNumber".into(), plist::Value::String("0".into()));
     if let Some(vid) = external_version_id {
         body.insert(
-            "externalVersionId".into(),
+            match version_key {
+                DownloadVersionKey::ExternalVersionId => "externalVersionId",
+                DownloadVersionKey::AppExtVrsId => "appExtVrsId",
+            }
+            .into(),
             plist::Value::String(vid.to_string()),
         );
     }
@@ -111,7 +134,7 @@ async fn post_download_info(
     account: &Account,
     url: &str,
     body: &[u8],
-) -> Result<HashMap<String, plist::Value>, ClientError> {
+) -> Result<(reqwest::StatusCode, HashMap<String, plist::Value>), ClientError> {
     let response = client
         .http()
         .post(url)
@@ -129,13 +152,14 @@ async fn post_download_info(
         .map(str::to_owned);
     let response_body = response.bytes().await?;
     tracing::debug!(%status, response_bytes = response_body.len(), "App Store download metadata response received");
-    crate::client::plist_xml::parse_plist_response(&response_body).map_err(|_| {
+    let dict = crate::client::plist_xml::parse_plist_response(&response_body).map_err(|_| {
         ClientError::UnexpectedResponse(response_diagnostic(
             status.as_u16(),
             content_type.as_deref(),
             &response_body,
         ))
-    })
+    })?;
+    Ok((status, dict))
 }
 fn response_diagnostic(status: u16, content_type: Option<&str>, body: &[u8]) -> String {
     format!(
@@ -210,10 +234,12 @@ fn response_body_format(body: &[u8]) -> &'static str {
         "other"
     }
 }
-async fn retry_update_product(
+async fn retry_download_dispatch(
     client: &AppleClient,
     account: &Account,
-    body: &[u8],
+    app_id: i64,
+    bundle_id: &str,
+    requested_external_version_id: Option<&str>,
 ) -> Result<HashMap<String, plist::Value>, ClientError> {
     let config = crate::api::bag::fetch_bag(client).await.map_err(|error| {
         let code = match &error {
@@ -225,41 +251,328 @@ async fn retry_update_product(
         };
         ClientError::UnexpectedResponse(code.into())
     })?;
-    let endpoint = config
-        .update_product_endpoint
-        .ok_or_else(|| ClientError::UnexpectedResponse("update_product_endpoint_missing".into()))?;
-    let fallback_url = update_product_url(&endpoint, client.guid());
+    let endpoint = config.redownload_product_endpoint.ok_or_else(|| {
+        ClientError::UnexpectedResponse("redownload_product_endpoint_missing".into())
+    })?;
+    let external_version_id = match requested_external_version_id {
+        Some(version_id) => version_id.to_string(),
+        None => lookup_latest_external_version_id(client, account, app_id, bundle_id).await?,
+    };
+    let body = download_info_request_body(
+        app_id,
+        client.guid(),
+        Some(&external_version_id),
+        DownloadVersionKey::AppExtVrsId,
+    )?;
+    let redownload_url = download_dispatch_url(&endpoint, client.guid());
     tracing::info!(
-        "legacy App Store download returned no package; retrying Apple's updateProduct endpoint"
+        "legacy App Store download returned no package; retrying Apple's redownloadProduct endpoint"
     );
-    let response = post_download_info(client, account, fallback_url.as_str(), body)
+    let (status, response) =
+        match post_download_info(client, account, redownload_url.as_str(), &body).await {
+            Ok(response) => response,
+            Err(error) if is_empty_http_500_response(&error) => {
+                return retry_update_product(
+                    client,
+                    account,
+                    app_id,
+                    bundle_id,
+                    &external_version_id,
+                    config.update_product_endpoint.as_ref(),
+                )
+                .await;
+            }
+            Err(error) => return Err(stage_download_error(error, "redownload_product")),
+        };
+    if status != reqwest::StatusCode::OK {
+        if StoreError::from_plist_dict(&response).is_some() {
+            return Ok(response);
+        }
+        return Err(ClientError::UnexpectedResponse(
+            "redownload_product_request_failed".into(),
+        ));
+    }
+    if is_unavailable_download_response(status, &response) {
+        return retry_update_product(
+            client,
+            account,
+            app_id,
+            bundle_id,
+            &external_version_id,
+            config.update_product_endpoint.as_ref(),
+        )
+        .await;
+    }
+    if is_empty_successful_download(&response) {
+        return Err(ClientError::UnexpectedResponse(
+            "redownload_product_empty_song_list".into(),
+        ));
+    }
+    Ok(response)
+}
+async fn retry_update_product(
+    client: &AppleClient,
+    account: &Account,
+    app_id: i64,
+    bundle_id: &str,
+    external_version_id: &str,
+    endpoint: Option<&Url>,
+) -> Result<HashMap<String, plist::Value>, ClientError> {
+    let endpoint = endpoint
+        .ok_or_else(|| ClientError::UnexpectedResponse("update_product_endpoint_missing".into()))?;
+    let body = download_info_request_body(
+        app_id,
+        client.guid(),
+        Some(external_version_id),
+        DownloadVersionKey::AppExtVrsId,
+    )?;
+    let update_url = download_dispatch_url(endpoint, client.guid());
+    tracing::info!("Apple redownloadProduct did not return a package; retrying updateProduct");
+    let (status, response) = post_download_info(client, account, update_url.as_str(), &body)
         .await
-        .map_err(|error| {
-            let code = match &error {
-                ClientError::Http(error) if error.is_timeout() => {
-                    "update_product_request_timed_out"
-                }
-                ClientError::Http(error) if error.is_connect() => {
-                    "update_product_request_network_unavailable"
-                }
-                ClientError::UnexpectedResponse(reason)
-                    if let Some(diagnostic) = reason.strip_prefix("appstore_response_invalid|") =>
-                {
-                    return ClientError::UnexpectedResponse(format!(
-                        "update_product_response_invalid|{diagnostic}"
-                    ));
-                }
-                ClientError::PlistDe(_) => "update_product_response_invalid",
-                _ => "update_product_request_failed",
-            };
-            ClientError::UnexpectedResponse(code.into())
-        })?;
+        .map_err(|error| stage_download_error(error, "update_product"))?;
+    if status != reqwest::StatusCode::OK {
+        if StoreError::from_plist_dict(&response).is_some() {
+            return Ok(response);
+        }
+        return Err(ClientError::UnexpectedResponse(
+            "update_product_request_failed".into(),
+        ));
+    }
     if is_empty_successful_download(&response) {
         return Err(ClientError::UnexpectedResponse(
             "update_product_empty_song_list".into(),
         ));
     }
+    if StoreError::from_plist_dict(&response).is_none() {
+        validate_download_response_identity(&response, app_id, bundle_id, external_version_id)?;
+    }
     Ok(response)
+}
+fn validate_download_response_identity(
+    response: &HashMap<String, plist::Value>,
+    app_id: i64,
+    bundle_id: &str,
+    external_version_id: &str,
+) -> Result<(), ClientError> {
+    let items = response
+        .get("songList")
+        .and_then(plist::Value::as_array)
+        .ok_or_else(|| {
+            ClientError::UnexpectedResponse("update_product_song_list_invalid".into())
+        })?;
+    if items.len() != 1 {
+        return Err(ClientError::UnexpectedResponse(
+            "update_product_item_count_invalid".into(),
+        ));
+    }
+    let item: DownloadItem = plist::from_value(&items[0]).map_err(ClientError::PlistDe)?;
+    let requested_app_id = app_id.to_string();
+    if metadata_string(&item.metadata, &["itemId"]).as_deref() != Some(requested_app_id.as_str())
+        || item.latest_external_version_id().as_deref() != Some(external_version_id)
+    {
+        return Err(ClientError::UnexpectedResponse(
+            "update_product_app_or_version_mismatch".into(),
+        ));
+    }
+    if metadata_string(&item.metadata, &["softwareVersionBundleId"]).as_deref() != Some(bundle_id) {
+        return Err(ClientError::UnexpectedResponse(
+            "update_product_bundle_mismatch".into(),
+        ));
+    }
+    Ok(())
+}
+fn stage_download_error(error: ClientError, stage: &str) -> ClientError {
+    match &error {
+        ClientError::Http(error) if error.is_timeout() => {
+            ClientError::UnexpectedResponse(format!("{stage}_request_timed_out"))
+        }
+        ClientError::Http(error) if error.is_connect() => {
+            ClientError::UnexpectedResponse(format!("{stage}_request_network_unavailable"))
+        }
+        ClientError::UnexpectedResponse(reason)
+            if let Some(diagnostic) = reason.strip_prefix("appstore_response_invalid|") =>
+        {
+            ClientError::UnexpectedResponse(format!("{stage}_response_invalid|{diagnostic}"))
+        }
+        ClientError::PlistDe(_) => {
+            ClientError::UnexpectedResponse(format!("{stage}_response_invalid"))
+        }
+        _ => ClientError::UnexpectedResponse(format!("{stage}_request_failed")),
+    }
+}
+fn is_empty_http_500_response(error: &ClientError) -> bool {
+    let ClientError::UnexpectedResponse(reason) = error else {
+        return false;
+    };
+    reason
+        .strip_prefix("appstore_response_invalid|")
+        .is_some_and(|diagnostic| {
+            diagnostic
+                .split(';')
+                .any(|field| field == "http_status=500")
+                && diagnostic.split(';').any(|field| field == "body_length=0")
+        })
+}
+fn is_unavailable_download_response(
+    status: reqwest::StatusCode,
+    dict: &HashMap<String, plist::Value>,
+) -> bool {
+    let has_failure = dict.get("failureType").is_some();
+    let has_items = dict
+        .get("songList")
+        .and_then(plist::Value::as_array)
+        .is_some_and(|items| !items.is_empty());
+    let message = dict
+        .get("customerMessage")
+        .and_then(plist::Value::as_string)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    status == reqwest::StatusCode::OK
+        && !has_failure
+        && !has_items
+        && (message == "no longer available" || message.ends_with(" no longer available"))
+}
+fn needs_download_dispatch_retry(
+    status: reqwest::StatusCode,
+    dict: &HashMap<String, plist::Value>,
+) -> bool {
+    status == reqwest::StatusCode::OK
+        && (is_empty_successful_download(dict) || is_unavailable_download_response(status, dict))
+}
+fn download_dispatch_url(endpoint: &Url, guid: &str) -> Url {
+    let mut url = endpoint.clone();
+    url.query_pairs_mut().append_pair("guid", guid);
+    url
+}
+#[derive(Deserialize, Clone)]
+#[serde(untagged)]
+enum FlexibleVersionId {
+    String(String),
+    Number(serde_json::Number),
+}
+impl FlexibleVersionId {
+    fn into_string(self) -> String {
+        match self {
+            Self::String(value) => value,
+            Self::Number(value) => value.to_string(),
+        }
+    }
+}
+#[derive(Deserialize)]
+struct IosCatalogVersionLookup {
+    #[serde(default)]
+    data: Vec<IosCatalogApp>,
+}
+#[derive(Deserialize)]
+struct IosCatalogApp {
+    id: String,
+    #[serde(rename = "type")]
+    item_type: String,
+    attributes: IosCatalogAttributes,
+}
+#[derive(Deserialize)]
+struct IosCatalogAttributes {
+    #[serde(default, rename = "deviceFamilies")]
+    device_families: Vec<String>,
+    #[serde(rename = "platformAttributes")]
+    platform_attributes: HashMap<String, IosCatalogPlatformAttributes>,
+}
+#[derive(Deserialize)]
+struct IosCatalogPlatformAttributes {
+    #[serde(rename = "bundleId")]
+    bundle_id: String,
+    #[serde(rename = "externalVersionId")]
+    external_version_id: FlexibleVersionId,
+}
+impl IosCatalogVersionLookup {
+    fn latest_external_version_id(
+        self,
+        expected_app_id: &str,
+        expected_bundle_id: &str,
+    ) -> Result<String, ClientError> {
+        if self.data.len() != 1 {
+            return Err(ClientError::UnexpectedResponse(
+                "redownload_version_lookup_app_missing".into(),
+            ));
+        }
+        let app = self.data.into_iter().next().ok_or_else(|| {
+            ClientError::UnexpectedResponse("redownload_version_lookup_app_missing".into())
+        })?;
+        if app.id != expected_app_id || app.item_type != "apps" {
+            return Err(ClientError::UnexpectedResponse(
+                "redownload_version_lookup_app_mismatch".into(),
+            ));
+        }
+        if !app
+            .attributes
+            .device_families
+            .iter()
+            .any(|family| family.eq_ignore_ascii_case("iphone"))
+        {
+            return Err(ClientError::UnexpectedResponse(
+                "redownload_version_lookup_platform_mismatch".into(),
+            ));
+        }
+        let platform = app
+            .attributes
+            .platform_attributes
+            .get("ios")
+            .ok_or_else(|| {
+                ClientError::UnexpectedResponse("redownload_version_lookup_platform_missing".into())
+            })?;
+        if platform.bundle_id != expected_bundle_id {
+            return Err(ClientError::UnexpectedResponse(
+                "redownload_version_lookup_bundle_mismatch".into(),
+            ));
+        }
+        let version_id = platform.external_version_id.clone().into_string();
+        if version_id
+            .parse::<u64>()
+            .ok()
+            .filter(|version_id| *version_id > 0)
+            .is_none()
+        {
+            return Err(ClientError::UnexpectedResponse(
+                "redownload_version_lookup_id_missing".into(),
+            ));
+        }
+        Ok(version_id)
+    }
+}
+async fn lookup_latest_external_version_id(
+    client: &AppleClient,
+    account: &Account,
+    app_id: i64,
+    bundle_id: &str,
+) -> Result<String, ClientError> {
+    let country = crate::model::storefront::country_code_from_store_front(&account.store_front)
+        .unwrap_or("US")
+        .to_ascii_lowercase();
+    let app_id_string = app_id.to_string();
+    let response = client
+        .http()
+        .get(format!(
+            "https://apps.apple.com/api/apps/v1/catalog/{country}/apps/{app_id_string}"
+        ))
+        .query(&[("platform", "iphone")])
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(ClientError::UnexpectedResponse(
+            "redownload_version_lookup_app_missing".into(),
+        ));
+    }
+    if response.status() != reqwest::StatusCode::OK {
+        return Err(ClientError::UnexpectedResponse(
+            "redownload_version_lookup_http_failed".into(),
+        ));
+    }
+    let body = response.bytes().await?;
+    let lookup: IosCatalogVersionLookup = serde_json::from_slice(&body)
+        .map_err(|_| ClientError::UnexpectedResponse("redownload_version_lookup_invalid".into()))?;
+    lookup.latest_external_version_id(&app_id_string, bundle_id)
 }
 fn is_empty_successful_download(dict: &HashMap<String, plist::Value>) -> bool {
     if StoreError::from_plist_dict(dict).is_some() {
@@ -270,11 +583,6 @@ fn is_empty_successful_download(dict: &HashMap<String, plist::Value>) -> bool {
         Some(plist::Value::Array(items)) => items.is_empty(),
         Some(_) => false,
     }
-}
-fn update_product_url(endpoint: &Url, guid: &str) -> Url {
-    let mut url = endpoint.clone();
-    url.query_pairs_mut().append_pair("guid", guid);
-    url
 }
 fn download_item_from_response_dict(
     dict: &HashMap<String, plist::Value>,
@@ -529,7 +837,7 @@ mod tests {
     fn update_product_url_preserves_guid_as_query_parameter() {
         let endpoint =
             url::Url::parse("https://downloaddispatch.itunes.apple.com/up/updateProduct").unwrap();
-        let request_url = update_product_url(&endpoint, "AABBCCDDEEFF");
+        let request_url = download_dispatch_url(&endpoint, "AABBCCDDEEFF");
         assert_eq!(
             request_url.as_str(),
             "https://downloaddispatch.itunes.apple.com/up/updateProduct?guid=AABBCCDDEEFF"
@@ -537,7 +845,13 @@ mod tests {
     }
     #[test]
     fn download_info_request_matches_app_store_payload_types_and_fields() {
-        let body = download_info_request_body(1234, "AABBCCDDEEFF", Some("5678")).unwrap();
+        let body = download_info_request_body(
+            1234,
+            "AABBCCDDEEFF",
+            Some("5678"),
+            DownloadVersionKey::ExternalVersionId,
+        )
+        .unwrap();
         let request: plist::Dictionary = plist::from_bytes(&body).unwrap();
         assert_eq!(
             request.get("salableAdamId"),
@@ -554,6 +868,180 @@ mod tests {
         assert_eq!(
             request.get("externalVersionId"),
             Some(&plist::Value::String("5678".into()))
+        );
+    }
+    #[test]
+    fn dispatch_download_request_uses_app_ext_version_id() {
+        let body = download_info_request_body(
+            1234,
+            "AABBCCDDEEFF",
+            Some("5678"),
+            DownloadVersionKey::AppExtVrsId,
+        )
+        .unwrap();
+        let request: plist::Dictionary = plist::from_bytes(&body).unwrap();
+        assert_eq!(
+            request.get("appExtVrsId"),
+            Some(&plist::Value::String("5678".into()))
+        );
+        assert!(!request.contains_key("externalVersionId"));
+    }
+    #[test]
+    fn platform_version_lookup_accepts_numeric_and_string_ids() {
+        let numeric: FlexibleVersionId = serde_json::from_str("123456").unwrap();
+        let textual: FlexibleVersionId = serde_json::from_str("\"654321\"").unwrap();
+        assert_eq!(numeric.into_string(), "123456");
+        assert_eq!(textual.into_string(), "654321");
+    }
+    #[test]
+    fn catalog_version_lookup_requires_matching_app_platform_and_bundle() {
+        let lookup: IosCatalogVersionLookup = serde_json::from_str(
+            r#"{"data":[{"id":"1234","type":"apps","attributes":{"deviceFamilies":["iphone","ipad"],"platformAttributes":{"ios":{"bundleId":"com.example.app","externalVersionId":"5678"}}}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            lookup
+                .latest_external_version_id("1234", "com.example.app")
+                .unwrap(),
+            "5678"
+        );
+        let lookup: IosCatalogVersionLookup = serde_json::from_str(
+            r#"{"data":[{"id":"1234","type":"apps","attributes":{"deviceFamilies":["iphone"],"platformAttributes":{"ios":{"bundleId":"com.example.app","externalVersionId":5678}}}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            lookup
+                .latest_external_version_id("1234", "com.example.app")
+                .unwrap(),
+            "5678"
+        );
+        let lookup: IosCatalogVersionLookup = serde_json::from_str(
+            r#"{"data":[{"id":"1234","type":"apps","attributes":{"deviceFamilies":["iphone"],"platformAttributes":{"ios":{"bundleId":"com.other.app","externalVersionId":"5678"}}}}]}"#,
+        )
+        .unwrap();
+        assert!(
+            lookup
+                .latest_external_version_id("1234", "com.example.app")
+                .is_err()
+        );
+    }
+    #[test]
+    fn retries_update_product_only_for_an_empty_http_500_response() {
+        assert!(is_empty_http_500_response(&ClientError::UnexpectedResponse(
+            "appstore_response_invalid|http_status=500;content_type=xml;body_format=empty;body_length=0"
+                .into()
+        )));
+        assert!(!is_empty_http_500_response(&ClientError::UnexpectedResponse(
+            "appstore_response_invalid|http_status=403;content_type=xml;body_format=empty;body_length=0"
+                .into()
+        )));
+        assert!(!is_empty_http_500_response(&ClientError::UnexpectedResponse(
+            "appstore_response_invalid|http_status=500;content_type=xml;body_format=xml;body_length=24"
+                .into()
+        )));
+    }
+    #[test]
+    fn recognizes_only_message_only_no_longer_available_downloads() {
+        let unavailable = HashMap::from([(
+            "customerMessage".into(),
+            plist::Value::String("No Longer Available".into()),
+        )]);
+        let failure = HashMap::from([
+            ("failureType".into(), plist::Value::String("2034".into())),
+            (
+                "customerMessage".into(),
+                plist::Value::String("No Longer Available".into()),
+            ),
+        ]);
+        assert!(is_unavailable_download_response(
+            reqwest::StatusCode::OK,
+            &unavailable
+        ));
+        assert!(!is_unavailable_download_response(
+            reqwest::StatusCode::OK,
+            &failure
+        ));
+        assert!(needs_download_dispatch_retry(
+            reqwest::StatusCode::OK,
+            &unavailable
+        ));
+        assert!(!needs_download_dispatch_retry(
+            reqwest::StatusCode::FORBIDDEN,
+            &unavailable
+        ));
+        assert!(!needs_download_dispatch_retry(
+            reqwest::StatusCode::OK,
+            &failure
+        ));
+    }
+    #[test]
+    fn requests_download_dispatch_for_empty_volume_store_responses() {
+        let empty = HashMap::from([("songList".into(), plist::Value::Array(Vec::new()))]);
+        let missing = HashMap::new();
+        let available = HashMap::from([(
+            "songList".into(),
+            plist::Value::Array(vec![sample_download_item()]),
+        )]);
+        assert!(needs_download_dispatch_retry(
+            reqwest::StatusCode::OK,
+            &empty
+        ));
+        assert!(needs_download_dispatch_retry(
+            reqwest::StatusCode::OK,
+            &missing
+        ));
+        assert!(!needs_download_dispatch_retry(
+            reqwest::StatusCode::OK,
+            &available
+        ));
+    }
+    #[test]
+    fn verifies_update_product_result_matches_requested_app_bundle_and_version() {
+        let mut metadata = plist::Dictionary::new();
+        metadata.insert("itemId".into(), plist::Value::Integer(1234.into()));
+        metadata.insert(
+            "softwareVersionExternalIdentifier".into(),
+            plist::Value::String("5678".into()),
+        );
+        metadata.insert(
+            "softwareVersionBundleId".into(),
+            plist::Value::String("com.example.app".into()),
+        );
+        let mut item = plist::Dictionary::new();
+        item.insert(
+            "URL".into(),
+            plist::Value::String("https://example.invalid/app.ipa".into()),
+        );
+        item.insert("sinfs".into(), plist::Value::Array(Vec::new()));
+        item.insert("metadata".into(), plist::Value::Dictionary(metadata));
+        let response = HashMap::from([(
+            "songList".into(),
+            plist::Value::Array(vec![plist::Value::Dictionary(item)]),
+        )]);
+        assert!(
+            validate_download_response_identity(&response, 1234, "com.example.app", "5678").is_ok()
+        );
+        assert!(
+            validate_download_response_identity(&response, 4321, "com.example.app", "5678")
+                .is_err()
+        );
+        assert!(
+            validate_download_response_identity(&response, 1234, "com.other.app", "5678").is_err()
+        );
+        assert!(
+            validate_download_response_identity(&response, 1234, "com.example.app", "8765")
+                .is_err()
+        );
+    }
+    #[test]
+    fn rejects_update_product_responses_with_multiple_items() {
+        let response = HashMap::from([(
+            "songList".into(),
+            plist::Value::Array(vec![sample_download_item(), sample_download_item()]),
+        )]);
+        assert!(
+            validate_download_response_identity(&response, 1234, "com.example.app", "5678")
+                .is_err()
         );
     }
     #[test]

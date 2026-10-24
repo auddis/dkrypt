@@ -378,6 +378,7 @@ async fn download(
     let item = match api::download::get_download_info(
         &client,
         app.id,
+        &app.bundle_id,
         &account,
         external_version_id,
     )
@@ -391,9 +392,15 @@ async fn download(
                     DownloaderFailure::from_download_error("reauthentication", &error)
                 })?;
             client.set_account(account.clone());
-            api::download::get_download_info(&client, app.id, &account, external_version_id)
-                .await
-                .map_err(|error| DownloaderFailure::from_download_error("download_info", &error))?
+            api::download::get_download_info(
+                &client,
+                app.id,
+                &app.bundle_id,
+                &account,
+                external_version_id,
+            )
+            .await
+            .map_err(|error| DownloaderFailure::from_download_error("download_info", &error))?
         }
         Err(error) => {
             return Err(DownloaderFailure::from_download_error(
@@ -489,6 +496,31 @@ fn map_download_error(error: &ClientError) -> &'static str {
             "missing songList" => "download_info_song_list_missing",
             "invalid songList" => "download_info_song_list_invalid",
             "empty songList" => "download_info_song_list_empty",
+            "download_info_http_failed" => "download_info_http_failed",
+            "redownload_product_endpoint_missing" => {
+                "download_info_redownload_product_endpoint_missing"
+            }
+            "redownload_product_request_timed_out" => {
+                "download_info_redownload_product_request_timed_out"
+            }
+            "redownload_product_request_network_unavailable" => {
+                "download_info_redownload_product_request_network_unavailable"
+            }
+            "redownload_product_request_failed" => {
+                "download_info_redownload_product_request_failed"
+            }
+            "redownload_product_response_invalid" => {
+                "download_info_redownload_product_response_invalid"
+            }
+            reason if reason.starts_with("redownload_product_response_invalid|") => {
+                "download_info_redownload_product_response_invalid"
+            }
+            "redownload_product_empty_song_list" => {
+                "download_info_redownload_product_empty_song_list"
+            }
+            reason if reason.starts_with("redownload_version_lookup_") => {
+                "download_info_redownload_version_lookup_failed"
+            }
             "update_product_bag_timed_out" => "download_info_update_product_bag_timed_out",
             "update_product_bag_network_unavailable" => {
                 "download_info_update_product_bag_network_unavailable"
@@ -505,6 +537,10 @@ fn map_download_error(error: &ClientError) -> &'static str {
                 "download_info_update_product_response_invalid"
             }
             "update_product_empty_song_list" => "download_info_update_product_empty_song_list",
+            "update_product_song_list_invalid"
+            | "update_product_item_count_invalid"
+            | "update_product_app_or_version_mismatch"
+            | "update_product_bundle_mismatch" => "download_info_update_product_response_invalid",
             _ => "download_info_response_invalid",
         },
         ClientError::SapSignatureRequired { .. } => "action_signature_rejected",
@@ -514,9 +550,12 @@ fn map_download_error(error: &ClientError) -> &'static str {
 
 fn map_download_diagnostic(error: &ClientError) -> Option<String> {
     match error {
-        ClientError::UnexpectedResponse(reason) => reason
-            .strip_prefix("update_product_response_invalid|")
-            .map(str::to_owned),
+        ClientError::UnexpectedResponse(reason) => [
+            "redownload_product_response_invalid|",
+            "update_product_response_invalid|",
+        ]
+        .into_iter()
+        .find_map(|prefix| reason.strip_prefix(prefix).map(str::to_owned)),
         _ => None,
     }
 }
@@ -885,6 +924,30 @@ mod tests {
         );
         assert_eq!(
             map_download_error(&ClientError::UnexpectedResponse(
+                "redownload_product_endpoint_missing".into()
+            )),
+            "download_info_redownload_product_endpoint_missing"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse(
+                "redownload_product_request_timed_out".into()
+            )),
+            "download_info_redownload_product_request_timed_out"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse(
+                "redownload_version_lookup_id_missing".into()
+            )),
+            "download_info_redownload_version_lookup_failed"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse(
+                "redownload_product_response_invalid|http_status=403".into()
+            )),
+            "download_info_redownload_product_response_invalid"
+        );
+        assert_eq!(
+            map_download_error(&ClientError::UnexpectedResponse(
                 "update_product_bag_unavailable".into()
             )),
             "download_info_update_product_bag_unavailable"
@@ -935,6 +998,21 @@ mod tests {
         assert_eq!(
             failure.code,
             "download_info_update_product_response_invalid"
+        );
+        assert_eq!(failure.diagnostic.as_deref(), Some(diagnostic));
+        assert_eq!(map_download_diagnostic(&error).as_deref(), Some(diagnostic));
+    }
+
+    #[test]
+    fn preserves_only_safe_redownload_response_metadata() {
+        let diagnostic = "http_status=403;content_type=xml;body_format=empty;body_length=0";
+        let error = ClientError::UnexpectedResponse(format!(
+            "redownload_product_response_invalid|{diagnostic}"
+        ));
+        let failure = DownloaderFailure::from_download_error("download_info", &error);
+        assert_eq!(
+            failure.code,
+            "download_info_redownload_product_response_invalid"
         );
         assert_eq!(failure.diagnostic.as_deref(), Some(diagnostic));
         assert_eq!(map_download_diagnostic(&error).as_deref(), Some(diagnostic));
