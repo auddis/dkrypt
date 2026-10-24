@@ -69,7 +69,7 @@ function deviceConnection(device: DeviceRecord): DeviceConnection {
   };
 }
 
-function sshWrapper(): string {
+export function sshWrapper(): string {
   return [
     '#!/bin/bash',
     'set -euo pipefail',
@@ -127,7 +127,10 @@ function safeCredentialRetrievalDiagnostic(error: unknown, sensitiveValues: stri
 
 async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
   const temporaryRoot = await mkdtemp(path.join(existsSync('/dev/shm') ? '/dev/shm' : tmpdir(), 'dkrypt-fairplay-credential-'));
+  let wrapperRoot: string | undefined;
   try {
+    wrapperRoot = await mkdtemp(path.join(tmpdir(), 'dkrypt-fairplay-ssh-'));
+    const executableRoot = wrapperRoot;
     return await withIpadecrypt(deviceConnection(device), async (runtimeDirectory) => {
       const runtime = JSON.parse(await readFile(path.join(runtimeDirectory, 'config.json'), 'utf8')) as {
         device?: { host?: unknown; port?: unknown; auth?: { keyPath?: unknown } };
@@ -138,7 +141,7 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
       if (host !== '127.0.0.1' || typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535 || typeof keyPath !== 'string' || !path.isAbsolute(keyPath)) {
         throw new Error('The managed device tunnel configuration is invalid');
       }
-      const binDirectory = path.join(temporaryRoot, 'bin');
+      const binDirectory = path.join(executableRoot, 'bin');
       const sshHomeDirectory = path.join(temporaryRoot, '.ssh');
       const outputDirectory = path.join(temporaryRoot, 'result');
       await mkdir(binDirectory, { mode: 0o700 });
@@ -208,7 +211,10 @@ async function runCredentialHelper(device: DeviceRecord): Promise<Buffer> {
       }
     });
   } finally {
-    await rm(temporaryRoot, { recursive: true, force: true });
+    await Promise.all([
+      rm(temporaryRoot, { recursive: true, force: true }),
+      ...(wrapperRoot ? [rm(wrapperRoot, { recursive: true, force: true })] : []),
+    ]);
   }
 }
 

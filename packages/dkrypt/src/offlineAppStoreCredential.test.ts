@@ -1,18 +1,46 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createAppleAccountVault } from '#appleAccountVault.js';
 import { createAppleAccountRepository } from '#store/appleAccountRepository.js';
 import { createOfflineCredentialRetrievalRepository } from '#store/offlineCredentialRetrievalRepository.js';
 import { openStateCollectionDatabase } from '#store/sqlite.js';
-import { createFairPlayCredentialRetriever } from '#offlineAppStoreCredential.js';
+import { createFairPlayCredentialRetriever, sshWrapper } from '#offlineAppStoreCredential.js';
 import type { DeviceRecord } from '#store/state.js';
 
 const directories: string[] = [];
 
 afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+
+test('credential SSH wrapper converts upstream root access to the paired mobile account', () => {
+  const wrapperRoot = mkdtempSync(path.join(tmpdir(), 'dkrypt-fairplay-ssh-wrapper-'));
+  directories.push(wrapperRoot);
+  const wrapperPath = path.join(wrapperRoot, 'ssh');
+  const fakeSshPath = path.join(wrapperRoot, 'fake-ssh');
+  writeFileSync(fakeSshPath, '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o700 });
+  writeFileSync(wrapperPath, sshWrapper().replace('/usr/bin/ssh', fakeSshPath), { mode: 0o700 });
+
+  const result = spawnSync(wrapperPath, [
+    '-o', 'BatchMode=yes',
+    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', 'ConnectTimeout=8',
+    '-p', '2222',
+    'root@127.0.0.1',
+    'if command -v jbroot >/dev/null 2>&1; then jbroot /var/tmp; fi',
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, DKRYPT_DEVICE_SSH_KEY: '/tmp/device-key' },
+  });
+
+  expect(result.status).toBe(0);
+  expect(result.stdout).toContain('mobile@127.0.0.1');
+  expect(result.stdout).toContain('UserKnownHostsFile=/dev/null');
+  expect(result.stdout).toContain('sudo -n env PATH=/var/jb/usr/bin:/var/jb/bin:/usr/bin:/bin:/sbin sh -c');
+  expect(result.stdout).not.toContain('root@127.0.0.1');
 });
 
 test('credential retrieval targets the requested paired USB iPad, drains it, and stores bytes through the encrypted vault', async () => {
