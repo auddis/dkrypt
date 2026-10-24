@@ -2563,7 +2563,7 @@ test('FairPlay retrieval shows a steady in-progress state without an endless but
   });
 
   await page.goto('/?tab=settings&stab=doctor');
-  const retrieveButton = page.getByRole('button', { name: 'Retrieve and store credential' });
+  const retrieveButton = page.getByRole('button', { name: 'Retrieve initial key' });
   await expect(retrieveButton).toBeEnabled();
   await retrieveButton.click();
 
