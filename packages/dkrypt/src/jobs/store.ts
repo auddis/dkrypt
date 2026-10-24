@@ -211,9 +211,10 @@ function loadDatabaseJobs(): boolean {
     jobs.set(job.id, { ...job, projectId: job.projectId ?? DEFAULT_PROJECT_ID, waiters: [] });
   }
   for (const job of queued) {
-    jobs.set(job.id, { ...job, waiters: [] });
-    insertByPriority(job.id, job.priority);
-    scheduleQueuedDeadline(job);
+    const restoredJob = { ...job, waiters: [] };
+    jobs.set(restoredJob.id, restoredJob);
+    insertByPriority(restoredJob.id, restoredJob.priority);
+    scheduleQueuedDeadline(restoredJob);
   }
   for (const job of interrupted) recordJobHistory(toHistoryEntry(job));
   replacePersistedJobs(jobs.values());
