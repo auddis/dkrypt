@@ -90,6 +90,50 @@ test('Apple Account verification records providers that throw before returning a
   }
 });
 
+test('Apple Account verification can retry saved credentials without a code after an ambiguous rejection', async () => {
+  const { database, repository } = createRepository();
+  let attempts = 0;
+  const operation = createAppleAccountAuthenticationOperation({
+    authenticate: async () => {
+      attempts += 1;
+      throw Object.assign(new Error('ambiguous Apple rejection'), { code: 'two_factor_required' });
+    },
+    repository,
+    timeoutMs: 1000,
+  });
+
+  try {
+    operation.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(operation.status().state).toBe('verification_required');
+    expect(operation.start()).toEqual(operation.status());
+    expect(operation.start(undefined, true).state).toBe('running');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(attempts).toBe(2);
+    expect(operation.status().state).toBe('verification_required');
+  } finally {
+    database.close();
+  }
+});
+
+test('Apple Account verification replaces a persisted definite-code message with the safe ambiguous explanation', () => {
+  const { database, repository } = createRepository();
+  repository.write({ state: 'verification_required', operationId: 'operation-legacy', startedAt: 1, completedAt: 2, error: 'Apple requires a six-digit verification code. Check the trusted device.' });
+  const operation = createAppleAccountAuthenticationOperation({
+    authenticate: async () => {},
+    repository,
+    timeoutMs: 1000,
+  });
+
+  try {
+    expect(operation.status().error).toContain('password may be incorrect');
+    expect((database.query('SELECT payload FROM appstore_offline_authentication_operations').get() as { payload: string }).payload)
+      .toContain('password may be incorrect');
+  } finally {
+    database.close();
+  }
+});
+
 test('Apple Account verification preserves a safe provider failure category', async () => {
   const { database, repository } = createRepository();
   const operation = createAppleAccountAuthenticationOperation({

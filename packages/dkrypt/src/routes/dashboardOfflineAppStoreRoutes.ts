@@ -15,7 +15,7 @@ interface DashboardOfflineAppStoreServices {
   saveAccount: typeof saveAppleAccountCredentials;
   saveCredential: typeof saveAppleAccountFairPlayCredential;
   getAuthenticationStatus: () => AppleAccountAuthenticationStatus;
-  startAuthentication: (verificationCode?: string) => AppleAccountAuthenticationStatus;
+  startAuthentication: (verificationCode?: string, retrySavedCredentials?: boolean) => AppleAccountAuthenticationStatus;
   resetAuthentication: () => void;
   getCredentialRetrievalStatus: typeof getFairPlayCredentialRetrievalStatus;
   retrieveCredential: typeof startFairPlayCredentialRetrieval;
@@ -80,12 +80,12 @@ export function createDashboardOfflineAppStoreRoutes(
     });
 
     server.post('/v1/dashboard/appstore-offline/authenticate', {
-      schema: { hide: true, body: Type.Object({ verificationCode: Type.Optional(Type.String({ pattern: '^\\d{6}$' })) }, { additionalProperties: false }) },
+      schema: { hide: true, body: Type.Object({ verificationCode: Type.Optional(Type.String({ pattern: '^\\d{6}$' })), retrySavedCredentials: Type.Optional(Type.Boolean()) }, { additionalProperties: false }) },
       preHandler: reauthenticatedAdministrator,
     }, (request, reply) => {
       try {
         const previous = services.getAuthenticationStatus();
-        const authentication = services.startAuthentication(request.body.verificationCode);
+        const authentication = services.startAuthentication(request.body.verificationCode, request.body.retrySavedCredentials);
         if (authentication.operationId && authentication.operationId !== previous.operationId) {
           recordAudit(getFastifySession(request)!.sub, 'settings.update', 'appstore-offline-account', 'Apple Account verification started');
         }

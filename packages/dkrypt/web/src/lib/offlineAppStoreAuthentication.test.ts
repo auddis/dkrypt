@@ -39,3 +39,19 @@ test('Apple Account verification sends the optional one-time code through the au
   expect(JSON.parse(String(captured?.options?.body))).toEqual({ verificationCode: '123456' });
   expect(captured?.options?.signal?.aborted).toBe(false);
 });
+
+test('Apple Account verification can retry saved credentials without submitting a code', async () => {
+  let captured: { path: string; options?: RequestInit } | undefined;
+  await authenticateOfflineAppStoreAccountRequest(
+    async <T>(path: string, options?: RequestInit) => {
+      captured = { path, options };
+      return { verified: true } as T;
+    },
+    undefined,
+    100,
+    true,
+  );
+
+  expect(captured?.path).toBe('/v1/dashboard/appstore-offline/authenticate');
+  expect(JSON.parse(String(captured?.options?.body))).toEqual({ retrySavedCredentials: true });
+});

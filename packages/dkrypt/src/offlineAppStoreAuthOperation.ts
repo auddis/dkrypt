@@ -22,6 +22,7 @@ export interface AppleAccountAuthenticationDependencies {
 
 const AUTHENTICATION_TIMEOUT_MESSAGE = 'Apple Account verification timed out. Check Apple Account status before trying again.';
 const APPLE_TWO_FACTOR_REQUIRED = 'Apple rejected sign-in. The password may be incorrect, or Apple may require a verification code. Confirm the saved password and check the trusted iPad; submit a code only if Apple shows one.';
+const LEGACY_APPLE_TWO_FACTOR_REQUIRED = 'Apple requires a six-digit verification code. Check the trusted device.';
 const APPLE_VERIFICATION_CODE_REJECTED = 'Apple rejected sign-in with that code. Confirm the saved password and request a fresh code only if Apple is showing a verification prompt.';
 const APPLE_AUTHENTICATION_FAILED = 'Apple Account authentication failed. Confirm the saved credentials and try again.';
 const APPLE_AUTHENTICATION_INTERRUPTED = 'The server restarted during Apple Account verification. Start again.';
@@ -64,6 +65,10 @@ export function createAppleAccountAuthenticationOperation(dependencies: AppleAcc
     current = { ...current, state: 'interrupted', completedAt: now(), error: APPLE_AUTHENTICATION_INTERRUPTED };
     dependencies.repository.write(current);
   }
+  if (current.state === 'verification_required' && current.error === LEGACY_APPLE_TWO_FACTOR_REQUIRED) {
+    current = { ...current, error: APPLE_TWO_FACTOR_REQUIRED };
+    dependencies.repository.write(current);
+  }
 
   function persist(status: AppleAccountAuthenticationStatus): void {
     current = status;
@@ -71,10 +76,12 @@ export function createAppleAccountAuthenticationOperation(dependencies: AppleAcc
     dependencies.onStatusChanged?.();
   }
 
-  function start(verificationCode?: string): AppleAccountAuthenticationStatus {
+  function start(verificationCode?: string, retrySavedCredentials = false): AppleAccountAuthenticationStatus {
     if (verificationCode !== undefined && !/^\d{6}$/.test(verificationCode)) throw new Error('enter the six-digit Apple verification code');
+    if (retrySavedCredentials && verificationCode !== undefined) throw new Error('retry saved credentials without a verification code');
+    if (retrySavedCredentials && current.state !== 'verification_required') throw new Error('there is no rejected Apple Account sign-in to retry');
     if (current.state === 'running') return { ...current };
-    if (current.state === 'verification_required' && verificationCode === undefined) return { ...current };
+    if (current.state === 'verification_required' && verificationCode === undefined && !retrySavedCredentials) return { ...current };
 
     const started: AppleAccountAuthenticationStatus = { state: 'running', operationId: randomUUID(), startedAt: now() };
     persist(started);

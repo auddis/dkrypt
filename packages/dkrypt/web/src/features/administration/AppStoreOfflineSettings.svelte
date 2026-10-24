@@ -110,13 +110,13 @@
     }
   }
 
-  async function authenticate(): Promise<void> {
+  async function authenticate(retrySavedCredentials = false): Promise<void> {
     authenticating = true;
     error = '';
     notice = '';
     try {
       status = await retryAfterReauthentication(
-        () => authenticateOfflineAppStoreAccount(verificationCode || undefined),
+        () => authenticateOfflineAppStoreAccount(verificationCode || undefined, retrySavedCredentials),
         confirmRecentAuthentication,
       );
       verificationCode = '';
@@ -209,8 +209,16 @@
       {#if status?.vault.accountConfigured}
         <div class="space-y-2 rounded-lg border border-border/70 p-3">
           <p class="text-xs text-muted">Apple may reject sign-in because the password is incorrect or because it needs a verification code. Check the iPad and enter a code only if Apple shows a prompt.</p>
-          {#if status.authentication?.state === 'verification_required'}<div class="space-y-1.5"><Label for="offline-apple-code">Six-digit verification code, if requested</Label><Input id="offline-apple-code" inputmode="numeric" autocomplete="one-time-code" bind:value={verificationCode} pattern="[0-9]{6}" maxlength={6} /></div>{/if}
-          <Button size="sm" variant="secondary" loading={authenticating || status.authentication?.state === 'running'} disabled={status.authentication?.state === 'running' || status.authentication?.state === 'verification_required' && verificationCode.length !== 6} onclick={() => void authenticate()}>{status.authentication?.state === 'verification_required' ? 'Submit code' : 'Verify Apple Account'}</Button>
+          {#if status.authentication?.state === 'verification_required'}
+            <p class="text-xs text-muted">Retry the saved password first. Apple’s response can mean either a rejected password or a verification challenge; only submit a code if a fresh prompt appears on the trusted iPad.</p>
+            <div class="space-y-1.5"><Label for="offline-apple-code">Six-digit verification code</Label><Input id="offline-apple-code" inputmode="numeric" autocomplete="one-time-code" bind:value={verificationCode} pattern="[0-9]{6}" maxlength={6} /></div>
+            <div class="flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" loading={authenticating} disabled={authenticating} onclick={() => void authenticate(true)}>Retry saved password</Button>
+              <Button size="sm" variant="secondary" loading={authenticating} disabled={authenticating || verificationCode.length !== 6} onclick={() => void authenticate()}>Submit code</Button>
+            </div>
+          {:else}
+            <Button size="sm" variant="secondary" loading={authenticating || status.authentication?.state === 'running'} disabled={status.authentication?.state === 'running'} onclick={() => void authenticate()}>Verify Apple Account</Button>
+          {/if}
         </div>
       {/if}
     </form>

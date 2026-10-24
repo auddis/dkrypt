@@ -9,11 +9,12 @@ export function authenticateOfflineAppStoreAccountRequest<T>(
   apiJson: ApiJson,
   verificationCode?: string,
   timeoutMs = OFFLINE_APP_STORE_AUTHENTICATION_TIMEOUT_MS,
+  retrySavedCredentials = false,
 ): Promise<T> {
   return withRequestTimeout(
     (signal) => apiJson<T>('/v1/dashboard/appstore-offline/authenticate', {
       method: 'POST',
-      body: JSON.stringify(verificationCode ? { verificationCode } : {}),
+      body: JSON.stringify(verificationCode ? { verificationCode } : retrySavedCredentials ? { retrySavedCredentials: true } : {}),
       signal,
     }),
     timeoutMs,

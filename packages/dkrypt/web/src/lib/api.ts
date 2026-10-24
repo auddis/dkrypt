@@ -1746,8 +1746,8 @@ export function saveOfflineAppStoreAccount(appleId: string, password: string): P
   return saveOfflineAppStoreAccountRequest(apiJson, appleId, password);
 }
 
-export function authenticateOfflineAppStoreAccount(verificationCode?: string): Promise<OfflineAppStoreStatus> {
-  return authenticateOfflineAppStoreAccountRequest(apiJson, verificationCode);
+export function authenticateOfflineAppStoreAccount(verificationCode?: string, retrySavedCredentials = false): Promise<OfflineAppStoreStatus> {
+  return authenticateOfflineAppStoreAccountRequest(apiJson, verificationCode, undefined, retrySavedCredentials);
 }
 
 export function saveOfflineAppStoreCredential(credential: string): Promise<OfflineAppStoreStatus> {

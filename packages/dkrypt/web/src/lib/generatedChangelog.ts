@@ -1,6 +1,11 @@
 export const GENERATED_CHANGELOG = [
   {
     "date": "2026-10-24",
+    "title": "fix(appstore): keep first attempts server-side",
+    "description": "Released in 273154b."
+  },
+  {
+    "date": "2026-10-24",
     "title": "fix(appstore): surface safe sign-in failure causes",
     "description": "Released in e6dd7fc."
   },
@@ -33,10 +38,5 @@ export const GENERATED_CHANGELOG = [
     "date": "2026-10-24",
     "title": "fix(security): redact offline App Store diagnostics",
     "description": "Released in 2d054fe."
-  },
-  {
-    "date": "2026-10-24",
-    "title": "fix(appstore): isolate ipatool keyring per worker",
-    "description": "Released in 67a0baf."
   }
 ] as const;

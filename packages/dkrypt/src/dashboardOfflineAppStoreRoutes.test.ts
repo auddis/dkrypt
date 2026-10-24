@@ -81,11 +81,11 @@ test('offline App Store management is manager-only and does not expose account s
 });
 
 test('offline App Store authentication accepts only a six-digit one-time code', async () => {
-  const submitted: Array<string | undefined> = [];
+  const submitted: Array<{ verificationCode?: string; retrySavedCredentials?: boolean }> = [];
   const server = Fastify().withTypeProvider<TypeBoxTypeProvider>();
   await server.register(createDashboardOfflineAppStoreRoutes({
     readiness,
-    startAuthentication: (code) => { submitted.push(code); return { state: 'running', operationId: 'operation-1', startedAt: 123 }; },
+    startAuthentication: (verificationCode, retrySavedCredentials) => { submitted.push({ verificationCode, retrySavedCredentials }); return { state: 'running', operationId: 'operation-1', startedAt: 123 }; },
     getAuthenticationStatus: () => ({ state: 'idle' }),
   }));
   const headers = { cookie: sessionCookie(PermissionFlag.administrator, true) };
@@ -93,9 +93,11 @@ test('offline App Store authentication accepts only a six-digit one-time code', 
   try {
     const invalid = await server.inject({ method: 'POST', url: '/v1/dashboard/appstore-offline/authenticate', headers, payload: { verificationCode: '12345' } });
     const valid = await server.inject({ method: 'POST', url: '/v1/dashboard/appstore-offline/authenticate', headers, payload: { verificationCode: '123456' } });
+    const retry = await server.inject({ method: 'POST', url: '/v1/dashboard/appstore-offline/authenticate', headers, payload: { retrySavedCredentials: true } });
     expect(invalid.statusCode).toBe(400);
     expect(valid.statusCode).toBe(202);
-    expect(submitted).toEqual(['123456']);
+    expect(retry.statusCode).toBe(202);
+    expect(submitted).toEqual([{ verificationCode: '123456', retrySavedCredentials: undefined }, { verificationCode: undefined, retrySavedCredentials: true }]);
     expect(valid.body).not.toContain('123456');
     expect(valid.json().authentication).toEqual({ state: 'running', operationId: 'operation-1', startedAt: 123 });
   } finally {
